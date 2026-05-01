@@ -5,7 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — Phase 3
+## [Unreleased] — Phases 4-8
+
+### Added
+- **Path router** for targeted re-parsing — only the affected parser runs on file changes
+- **Watcher debounce** (500ms) batches rapid file saves into single parse per type
+- **LRU search cache** (100 entries, 30s TTL) — identical queries return in <1ms
+- **Lazy engine loading** — Fuse.js and MiniSearch only created when first queried
+- **Schema migration system** with version tracking for automatic DB upgrades
+- **`entry_tags` junction table** for exact tag matching (fixes substring bug)
+- **Stable entry IDs** based on type+name+source (file renames preserve favorites/usage)
+- **CLI config file** (`~/.commandvault/config.json`) now read by all commands
+- **`vault open <name>`** — open entry source file in $EDITOR
+- **`vault run <name>`** — print slash command to stdout
+- **`vault backup`** / **`vault restore`** — database backup with auto-prune
+- **`--json` flag** for machine-readable output on list, search, info, stats
+- **VS Code keyboard shortcut** `Cmd+Shift+V` for search
+- **VS Code status bar** showing entry count
+- **VS Code "Copy Content"** context menu action
+- **VS Code TreeView sort** (alphabetical, usage, recent) and filter
+- **VS Code onboarding walkthrough** (4 steps)
+- **README.md** with full documentation
+- **LICENSE** (MIT), **CONTRIBUTING.md**, **.editorconfig**, **.nvmrc**
+- 30 new tests (91 total: 80 core + 11 CLI)
+
+### Fixed
+- Tag search `LIKE '%qa%'` matched "squad" — now uses exact `EXISTS` query
+- Snapshot hash based on `lastModified` missed content-only changes — now hashes content
+- SQLite content truncation at 2000 chars — removed, full content stored
+- VS Code export used custom JSON format — now uses core's `VaultExportBundle`
+
+### Changed
+- MiniSearch uses incremental `discard`/`add` instead of full rebuild on each index
+- Fuse.js caches filtered instances by filter signature
+- Entry IDs migrated from filePath-based to type+name+source-based (migration v2)
+
+## [0.3.0] — 2026-05-01 — Phase 3
 
 ### Added
 - CI pipeline with GitHub Actions (Node 20/22 matrix, VSIX packaging)
@@ -13,7 +48,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prettier config for consistent formatting
 - Vitest workspace for root-level test orchestration
 - VS Code `.vscodeignore` for lean extension packaging
-- This changelog
 
 ### Changed
 - Plugin parser reliability improvements
