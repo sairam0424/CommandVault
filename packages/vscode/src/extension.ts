@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { createVault, Vault } from '@commandvault/core';
 import type { VaultConfig, SearchTier } from '@commandvault/core';
-import { EntriesProvider } from './providers/entries-provider';
+import { EntriesProvider, type SortMode } from './providers/entries-provider';
 import { FavoritesProvider } from './providers/favorites-provider';
 import { RecentProvider } from './providers/recent-provider';
 import { registerCommands } from './commands/index';
@@ -41,14 +41,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(entriesTreeView, favoritesTreeView, recentTreeView);
 
+  const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
+  statusBar.command = 'commandvault.search';
+  statusBar.tooltip = 'CommandVault — Click to search';
+  statusBar.show();
+  context.subscriptions.push(statusBar);
+
   const refreshAll = (): void => {
     entriesProvider.refresh();
     favoritesProvider.refresh();
     recentProvider.refresh();
   };
 
-  vault.on('scan:complete', () => {
+  vault.on('scan:complete', (stats) => {
     refreshAll();
+    statusBar.text = `$(database) ${stats.totalEntries} cmds`;
   });
 
   vault.on('entry:added', () => {
@@ -76,6 +83,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   context.subscriptions.push(...commandDisposables);
+
+  const sortCommand = vscode.commands.registerCommand('commandvault.sortEntries', async () => {
+    const pick = await vscode.window.showQuickPick(
+      [
+        { label: '$(list-ordered) Alphabetical', value: 'name' as SortMode },
+        { label: '$(flame) Most Used', value: 'usage' as SortMode },
+        { label: '$(history) Recently Modified', value: 'recent' as SortMode },
+      ],
+      { placeHolder: `Sort by (current: ${entriesProvider.getSortMode()})` },
+    );
+    if (pick) entriesProvider.setSortMode(pick.value);
+  });
+
+  const filterCommand = vscode.commands.registerCommand('commandvault.filterEntries', async () => {
+    const text = await vscode.window.showInputBox({
+      placeHolder: 'Filter entries by name or description (empty to clear)',
+      prompt: 'Enter filter text',
+    });
+    if (text !== undefined) entriesProvider.setFilter(text);
+  });
+
+  context.subscriptions.push(sortCommand, filterCommand);
 
   try {
     const stats = await vault.initialize();

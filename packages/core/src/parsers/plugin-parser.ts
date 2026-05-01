@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join, resolve, normalize } from 'node:path';
 import type { VaultEntry, ParserResult, ParseError } from '../types/index.js';
-import { generateId, inferSource, extractTags } from './utils.js';
+import { generateStableId, inferSource, extractTags } from './utils.js';
 
 interface PluginManifest {
   readonly name: string;
@@ -155,7 +155,7 @@ export async function parsePlugins(pluginsDir: string): Promise<ParserResult> {
         typeof manifest.author === 'string' ? manifest.author : manifest.author?.name;
 
       const entry: VaultEntry = {
-        id: generateId(resolvedPath),
+        id: generateStableId('plugin', name, source),
         name,
         type: 'plugin',
         source,

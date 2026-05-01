@@ -57,11 +57,22 @@ export function createInfoCommand(): Command {
         const results = vault.quickSearch(name, 1);
 
         if (results.length === 0) {
-          console.log(chalk.yellow(`\nNo entry found matching "${name}".\n`));
+          if (globalOpts.json) {
+            console.log(JSON.stringify({ entry: null }, null, 2));
+          } else {
+            console.log(chalk.yellow(`\nNo entry found matching "${name}".\n`));
+          }
           return;
         }
 
         const entry: VaultEntry = results[0].entry;
+
+        if (globalOpts.json) {
+          console.log(JSON.stringify({ entry, slashCommand: vault.getSlashCommand(entry) }, null, 2));
+          vault.recordUsage(entry.id);
+          return;
+        }
+
         const colorFn = typeColor(entry.type);
         const slashCommand = vault.getSlashCommand(entry);
 

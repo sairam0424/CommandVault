@@ -1,7 +1,7 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 import type { VaultEntry, ParserResult, ParseError } from '../types/index.js';
-import { generateId, parseFrontmatter, getLastModified, extractTags } from './utils.js';
+import { generateStableId, parseFrontmatter, getLastModified, extractTags } from './utils.js';
 
 export async function parseRules(rulesDir: string): Promise<ParserResult> {
   const entries: VaultEntry[] = [];
@@ -30,7 +30,7 @@ export async function parseRules(rulesDir: string): Promise<ParserResult> {
       const lastModified = await getLastModified(filePath);
 
       const entry: VaultEntry = {
-        id: generateId(filePath),
+        id: generateStableId('rule', name),
         name,
         type: 'rule',
         source: 'custom',
