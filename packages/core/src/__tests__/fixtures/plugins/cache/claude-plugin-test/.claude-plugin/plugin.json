@@ -1,0 +1,10 @@
+{
+  "name": "claude-plugin-test",
+  "description": "Plugin with manifest in .claude-plugin directory",
+  "version": "2.0.0",
+  "author": "Claude Test",
+  "keywords": ["testing", "claude-plugin"],
+  "skills": ["cp-skill-a"],
+  "homepage": "https://github.com/test/claude-plugin-test",
+  "license": "Apache-2.0"
+}

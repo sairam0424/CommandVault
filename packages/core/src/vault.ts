@@ -117,6 +117,26 @@ export class Vault {
     return this.searchEngine.getStats();
   }
 
+  addTag(id: string, tag: string): void {
+    this.searchEngine.addTag(id, tag);
+  }
+
+  removeTag(id: string, tag: string): void {
+    this.searchEngine.removeTag(id, tag);
+  }
+
+  getTagsForEntry(id: string): string[] {
+    return this.searchEngine.getTagsForEntry(id);
+  }
+
+  saveSnapshot(): void {
+    this.searchEngine.saveSnapshot(this.entries);
+  }
+
+  getDiff(): { added: VaultEntry[]; removed: string[]; modified: VaultEntry[] } {
+    return this.searchEngine.getDiff(this.entries);
+  }
+
   getErrors(): readonly ParseError[] {
     return this.scanErrors;
   }

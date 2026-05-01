@@ -10,6 +10,34 @@
         "lastUpdated": "2025-07-01T14:30:00.000Z",
         "gitCommitSha": "abc123def456"
       }
+    ],
+    "claude-plugin-test@claude-plugins-official": [
+      {
+        "scope": "user",
+        "installPath": "PLACEHOLDER_CLAUDE_PLUGIN_PATH",
+        "version": "2.0.0",
+        "installedAt": "2025-08-01T10:00:00.000Z",
+        "lastUpdated": "2025-08-15T12:00:00.000Z",
+        "gitCommitSha": "def456abc789"
+      }
+    ],
+    "pkg-json-test@community": [
+      {
+        "scope": "user",
+        "installPath": "PLACEHOLDER_PKG_JSON_PATH",
+        "version": "3.1.0",
+        "installedAt": "2025-09-01T10:00:00.000Z",
+        "lastUpdated": "2025-09-10T08:00:00.000Z"
+      }
+    ],
+    "no-manifest-test@lsp-tools": [
+      {
+        "scope": "user",
+        "installPath": "PLACEHOLDER_NO_MANIFEST_PATH",
+        "version": "0.5.0",
+        "installedAt": "2025-09-15T10:00:00.000Z",
+        "lastUpdated": "2025-09-20T16:00:00.000Z"
+      }
     ]
   }
 }
