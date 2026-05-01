@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
-import { join, dirname, basename } from 'node:path';
+import { join } from 'node:path';
 import type { VaultEntry, ParserResult, ParseError } from '../types/index.js';
-import { generateId, getLastModified, inferSource, extractTags } from './utils.js';
+import { generateId, inferSource, extractTags } from './utils.js';
 
 interface PluginManifest {
   readonly name: string;
@@ -26,6 +26,81 @@ interface InstalledPlugins {
   }>>;
 }
 
+interface ResolvedManifest {
+  readonly manifest: PluginManifest;
+  readonly resolvedPath: string;
+}
+
+/**
+ * Attempts to read and parse a JSON file at `filePath`.
+ * Returns the parsed object on success, or `null` on any failure.
+ */
+async function tryReadJson<T>(filePath: string): Promise<T | null> {
+  try {
+    const raw = await readFile(filePath, 'utf-8');
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolves a plugin manifest by trying paths in priority order:
+ *   1. `.claude-plugin/plugin.json`  (primary — 34 of 47 plugins)
+ *   2. `plugin.json`                 (legacy fallback)
+ *   3. `package.json`                (npm package fallback)
+ *   4. Synthesise minimal manifest from registry key
+ */
+async function resolveManifest(
+  installPath: string,
+  registryKey: string,
+  installVersion: string,
+): Promise<ResolvedManifest> {
+  // 1. Primary: .claude-plugin/plugin.json
+  const primaryPath = join(installPath, '.claude-plugin', 'plugin.json');
+  const primary = await tryReadJson<PluginManifest>(primaryPath);
+  if (primary !== null) {
+    return { manifest: primary, resolvedPath: primaryPath };
+  }
+
+  // 2. Legacy fallback: plugin.json at root
+  const legacyPath = join(installPath, 'plugin.json');
+  const legacy = await tryReadJson<PluginManifest>(legacyPath);
+  if (legacy !== null) {
+    return { manifest: legacy, resolvedPath: legacyPath };
+  }
+
+  // 3. npm package fallback: package.json (extract compatible fields)
+  const pkgPath = join(installPath, 'package.json');
+  const pkg = await tryReadJson<Record<string, unknown>>(pkgPath);
+  if (pkg !== null) {
+    const manifest: PluginManifest = {
+      name: typeof pkg.name === 'string' ? pkg.name : registryKey.split('@')[0],
+      description: typeof pkg.description === 'string' ? pkg.description : undefined,
+      version: typeof pkg.version === 'string' ? pkg.version : installVersion,
+      author: typeof pkg.author === 'string'
+        ? pkg.author
+        : typeof pkg.author === 'object' && pkg.author !== null
+          ? (pkg.author as { name: string; url?: string; email?: string })
+          : undefined,
+      keywords: Array.isArray(pkg.keywords) ? pkg.keywords as string[] : undefined,
+      homepage: typeof pkg.homepage === 'string' ? pkg.homepage : undefined,
+      license: typeof pkg.license === 'string' ? pkg.license : undefined,
+    };
+    return { manifest, resolvedPath: pkgPath };
+  }
+
+  // 4. Synthesise minimal manifest from registry key
+  const syntheticName = registryKey.split('@')[0] || registryKey;
+  const syntheticPath = join(installPath, 'plugin.json');
+  const manifest: PluginManifest = {
+    name: syntheticName,
+    description: '',
+    version: installVersion,
+  };
+  return { manifest, resolvedPath: syntheticPath };
+}
+
 export async function parsePlugins(pluginsDir: string): Promise<ParserResult> {
   const entries: VaultEntry[] = [];
   const errors: ParseError[] = [];
@@ -43,10 +118,13 @@ export async function parsePlugins(pluginsDir: string): Promise<ParserResult> {
     const install = installations[0];
     if (!install) return;
 
-    const manifestPath = join(install.installPath, 'plugin.json');
     try {
-      const raw = await readFile(manifestPath, 'utf-8');
-      const manifest: PluginManifest = JSON.parse(raw);
+      const { manifest, resolvedPath } = await resolveManifest(
+        install.installPath,
+        key,
+        install.version,
+      );
+
       const name = manifest.name ?? key.split('@')[0];
       const description = manifest.description ?? '';
       const source = inferSource(name, install.installPath);
@@ -60,12 +138,12 @@ export async function parsePlugins(pluginsDir: string): Promise<ParserResult> {
         : manifest.author?.name;
 
       const entry: VaultEntry = {
-        id: generateId(manifestPath),
+        id: generateId(resolvedPath),
         name,
         type: 'plugin',
         source,
         description,
-        filePath: manifestPath,
+        filePath: resolvedPath,
         tags,
         metadata: {
           version: manifest.version ?? install.version,
@@ -86,7 +164,7 @@ export async function parsePlugins(pluginsDir: string): Promise<ParserResult> {
       entries.push(entry);
     } catch (err) {
       errors.push({
-        filePath: manifestPath,
+        filePath: install.installPath,
         message: `Failed to parse plugin: ${(err as Error).message}`,
         cause: err,
       });

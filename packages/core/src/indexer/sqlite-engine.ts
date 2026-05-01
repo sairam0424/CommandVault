@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import Database from 'better-sqlite3';
 import type { VaultEntry, SearchResult, SearchOptions, VaultStats, EntryType } from '../types/index.js';
 
@@ -39,6 +40,21 @@ const SCHEMA = `
     INSERT INTO entries_fts(rowid, name, description, tags, content)
     VALUES (new.rowid, new.name, new.description, new.tags, new.content);
   END;
+
+  CREATE TABLE IF NOT EXISTS user_tags (
+    entry_id TEXT NOT NULL,
+    tag TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY(entry_id, tag)
+  );
+
+  CREATE TABLE IF NOT EXISTS scan_snapshots (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    scanned_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `;
 
 interface EntryRow {
@@ -187,7 +203,88 @@ export class SqliteEngine {
 
   getEntry(id: string): VaultEntry | undefined {
     const row = this.db.prepare('SELECT * FROM entries WHERE id = ?').get(id) as EntryRow | undefined;
-    return row ? this.rowToEntry(row) : undefined;
+    if (!row) return undefined;
+
+    const entry = this.rowToEntry(row);
+    const userTags = this.getTagsForEntry(id);
+
+    if (userTags.length === 0) return entry;
+
+    const mergedTags = [...new Set([...entry.tags, ...userTags])];
+    return { ...entry, tags: mergedTags };
+  }
+
+  addTag(entryId: string, tag: string): void {
+    this.db.prepare(
+      'INSERT OR IGNORE INTO user_tags (entry_id, tag) VALUES (?, ?)'
+    ).run(entryId, tag);
+  }
+
+  removeTag(entryId: string, tag: string): void {
+    this.db.prepare(
+      'DELETE FROM user_tags WHERE entry_id = ? AND tag = ?'
+    ).run(entryId, tag);
+  }
+
+  getTagsForEntry(entryId: string): string[] {
+    const rows = this.db.prepare(
+      'SELECT tag FROM user_tags WHERE entry_id = ?'
+    ).all(entryId) as Array<{ tag: string }>;
+    return rows.map((r) => r.tag);
+  }
+
+  saveSnapshot(entries: readonly VaultEntry[]): void {
+    const transaction = this.db.transaction(() => {
+      this.db.prepare('DELETE FROM scan_snapshots').run();
+      const insertStmt = this.db.prepare(
+        'INSERT INTO scan_snapshots (id, name, type, content_hash) VALUES (?, ?, ?, ?)'
+      );
+      for (const entry of entries) {
+        const hash = createHash('sha256')
+          .update(entry.name + entry.type + entry.lastModified.toISOString())
+          .digest('hex');
+        insertStmt.run(entry.id, entry.name, entry.type, hash);
+      }
+    });
+    transaction();
+  }
+
+  getDiff(currentEntries: readonly VaultEntry[]): { added: VaultEntry[]; removed: string[]; modified: VaultEntry[] } {
+    const snapshotRows = this.db.prepare('SELECT * FROM scan_snapshots').all() as Array<{
+      id: string;
+      name: string;
+      type: string;
+      content_hash: string;
+    }>;
+
+    const snapshotMap = new Map(snapshotRows.map((r) => [r.id, r]));
+    const currentMap = new Map(currentEntries.map((e) => [e.id, e]));
+
+    const added: VaultEntry[] = [];
+    const removed: string[] = [];
+    const modified: VaultEntry[] = [];
+
+    for (const entry of currentEntries) {
+      const snapshot = snapshotMap.get(entry.id);
+      if (!snapshot) {
+        added.push(entry);
+      } else {
+        const currentHash = createHash('sha256')
+          .update(entry.name + entry.type + entry.lastModified.toISOString())
+          .digest('hex');
+        if (currentHash !== snapshot.content_hash) {
+          modified.push(entry);
+        }
+      }
+    }
+
+    for (const [id, row] of snapshotMap) {
+      if (!currentMap.has(id)) {
+        removed.push(row.name);
+      }
+    }
+
+    return { added, removed, modified };
   }
 
   close(): void {

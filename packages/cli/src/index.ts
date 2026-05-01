@@ -11,6 +11,10 @@ import { createInitCommand } from './commands/init.js';
 import { createDoctorCommand } from './commands/doctor.js';
 import { createImportCommand } from './commands/import-cmd.js';
 import { createSyncCommand } from './commands/sync.js';
+import { createTagCommand } from './commands/tag.js';
+import { createDiffCommand } from './commands/diff.js';
+import { createWatchCommand } from './commands/watch.js';
+import { createInteractiveCommand } from './commands/interactive.js';
 
 const program = new Command();
 
@@ -31,6 +35,17 @@ program.addCommand(createInitCommand());
 program.addCommand(createDoctorCommand());
 program.addCommand(createImportCommand());
 program.addCommand(createSyncCommand());
+program.addCommand(createTagCommand());
+program.addCommand(createDiffCommand());
+program.addCommand(createWatchCommand());
+program.addCommand(createInteractiveCommand());
+
+// Default action: launch interactive mode when no subcommand is given
+program.action(async (_opts, command) => {
+  await command.commands
+    .find((c: Command) => c.name() === 'interactive')!
+    .parseAsync([], { from: 'user' });
+});
 
 program.parseAsync(process.argv).catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : String(error));

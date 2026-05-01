@@ -65,6 +65,26 @@ export class SearchEngine {
     return this.sqliteEngine.getEntry(id);
   }
 
+  addTag(entryId: string, tag: string): void {
+    this.sqliteEngine.addTag(entryId, tag);
+  }
+
+  removeTag(entryId: string, tag: string): void {
+    this.sqliteEngine.removeTag(entryId, tag);
+  }
+
+  getTagsForEntry(entryId: string): string[] {
+    return this.sqliteEngine.getTagsForEntry(entryId);
+  }
+
+  saveSnapshot(entries: readonly VaultEntry[]): void {
+    this.sqliteEngine.saveSnapshot(entries);
+  }
+
+  getDiff(currentEntries: readonly VaultEntry[]): { added: VaultEntry[]; removed: string[]; modified: VaultEntry[] } {
+    return this.sqliteEngine.getDiff(currentEntries);
+  }
+
   close(): void {
     this.sqliteEngine.close();
   }

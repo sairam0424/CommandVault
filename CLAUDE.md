@@ -22,6 +22,8 @@ pnpm install              # Install all deps
 pnpm build                # Build all (via turbo)
 pnpm --filter @commandvault/core build    # Build core only
 pnpm --filter @commandvault/cli build     # Build CLI only
+pnpm --filter @commandvault/cli link --global  # Global vault command
+vault                     # Interactive fuzzy search (default)
 ```
 
 ## Core Concepts

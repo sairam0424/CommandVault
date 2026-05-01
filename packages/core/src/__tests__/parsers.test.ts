@@ -13,16 +13,22 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const FIXTURES = join(__dirname, 'fixtures');
 
 /**
- * Patch the installed_plugins.json so its installPath points at the real
- * fixture directory on disk (the checked-in file uses a placeholder).
+ * Patch the installed_plugins.json so its installPath values point at the real
+ * fixture directories on disk (the checked-in file uses placeholders).
  */
 let originalPluginRegistry: string;
 
 beforeAll(async () => {
   const registryPath = join(FIXTURES, 'plugins', 'installed_plugins.json');
   originalPluginRegistry = await readFile(registryPath, 'utf-8');
-  const cachePath = join(FIXTURES, 'plugins', 'cache', 'test-plugin');
-  const patched = originalPluginRegistry.replace('PLACEHOLDER_CACHE_PATH', cachePath);
+
+  const cachePath = join(FIXTURES, 'plugins', 'cache');
+  const patched = originalPluginRegistry
+    .replace('PLACEHOLDER_CACHE_PATH', join(cachePath, 'test-plugin'))
+    .replace('PLACEHOLDER_CLAUDE_PLUGIN_PATH', join(cachePath, 'claude-plugin-test'))
+    .replace('PLACEHOLDER_PKG_JSON_PATH', join(cachePath, 'pkg-json-test'))
+    .replace('PLACEHOLDER_NO_MANIFEST_PATH', join(cachePath, 'no-manifest-test'));
+
   await writeFile(registryPath, patched, 'utf-8');
 });
 
@@ -104,7 +110,7 @@ describe('parseAgents', () => {
       'A test agent for unit testing purposes',
     );
     expect(agent.metadata.color).toBe('#FF5733');
-    expect(agent.metadata.emoji).toBe('🧪');
+    expect(agent.metadata.emoji).toBe('\u{1F9EA}');
     expect(agent.metadata.vibe).toBe('analytical');
     expect(agent.metadata.fileName).toBe('test-agent.md');
     expect(agent.content).toContain('# Test Agent');
@@ -164,36 +170,94 @@ describe('parsePlugins', () => {
   it('parses a plugin from registry + manifest', async () => {
     const result = await parsePlugins(join(FIXTURES, 'plugins'));
 
-    expect(result.errors).toHaveLength(0);
-    expect(result.entries).toHaveLength(1);
-
-    const plugin = result.entries[0];
-    expect(plugin.name).toBe('test-plugin');
-    expect(plugin.type).toBe('plugin');
-    expect(plugin.description).toBe(
+    const plugin = result.entries.find(e => e.name === 'test-plugin');
+    expect(plugin).toBeDefined();
+    expect(plugin!.type).toBe('plugin');
+    expect(plugin!.description).toBe(
       'A test plugin for unit testing the plugin parser',
     );
-    expect(plugin.metadata.version).toBe('1.0.0');
-    expect(plugin.metadata.author).toBe('Test Author');
-    expect(plugin.metadata.homepage).toBe(
+    expect(plugin!.metadata.version).toBe('1.0.0');
+    expect(plugin!.metadata.author).toBe('Test Author');
+    expect(plugin!.metadata.homepage).toBe(
       'https://github.com/test/test-plugin',
     );
-    expect(plugin.metadata.license).toBe('MIT');
-    expect(plugin.metadata.scope).toBe('user');
-    expect(plugin.metadata.registryKey).toBe('@test/test-plugin@1.0.0');
-    expect(plugin.metadata.skills).toEqual(['test-skill-a', 'test-skill-b']);
-    expect(plugin.metadata.gitCommitSha).toBe('abc123def456');
-    expect(plugin.tags).toContain('testing');
-    expect(plugin.tags).toContain('qa');
-    expect(plugin.lastModified).toBeInstanceOf(Date);
-    expect(plugin.lastModified.toISOString()).toBe('2025-07-01T14:30:00.000Z');
+    expect(plugin!.metadata.license).toBe('MIT');
+    expect(plugin!.metadata.scope).toBe('user');
+    expect(plugin!.metadata.registryKey).toBe('@test/test-plugin@1.0.0');
+    expect(plugin!.metadata.skills).toEqual(['test-skill-a', 'test-skill-b']);
+    expect(plugin!.metadata.gitCommitSha).toBe('abc123def456');
+    expect(plugin!.tags).toContain('testing');
+    expect(plugin!.tags).toContain('qa');
+    expect(plugin!.lastModified).toBeInstanceOf(Date);
+    expect(plugin!.lastModified.toISOString()).toBe('2025-07-01T14:30:00.000Z');
   });
 
   it('stores the full manifest JSON as content', async () => {
     const result = await parsePlugins(join(FIXTURES, 'plugins'));
-    const content = JSON.parse(result.entries[0].content);
+    const plugin = result.entries.find(e => e.name === 'test-plugin');
+    expect(plugin).toBeDefined();
+    const content = JSON.parse(plugin!.content);
     expect(content.name).toBe('test-plugin');
     expect(content.license).toBe('MIT');
+  });
+
+  it('resolves manifest from .claude-plugin/plugin.json path', async () => {
+    const result = await parsePlugins(join(FIXTURES, 'plugins'));
+
+    const plugin = result.entries.find(e => e.name === 'claude-plugin-test');
+    expect(plugin).toBeDefined();
+    expect(plugin!.type).toBe('plugin');
+    expect(plugin!.description).toBe('Plugin with manifest in .claude-plugin directory');
+    expect(plugin!.metadata.version).toBe('2.0.0');
+    expect(plugin!.metadata.author).toBe('Claude Test');
+    expect(plugin!.metadata.license).toBe('Apache-2.0');
+    expect(plugin!.metadata.registryKey).toBe('claude-plugin-test@claude-plugins-official');
+    expect(plugin!.metadata.skills).toEqual(['cp-skill-a']);
+    expect(plugin!.filePath).toContain('.claude-plugin');
+    expect(plugin!.filePath).toContain('plugin.json');
+    expect(plugin!.tags).toContain('testing');
+    expect(plugin!.tags).toContain('claude-plugin');
+    expect(plugin!.lastModified.toISOString()).toBe('2025-08-15T12:00:00.000Z');
+
+    const content = JSON.parse(plugin!.content);
+    expect(content.name).toBe('claude-plugin-test');
+  });
+
+  it('falls back to package.json', async () => {
+    const result = await parsePlugins(join(FIXTURES, 'plugins'));
+
+    const plugin = result.entries.find(e => e.name === 'pkg-json-test');
+    expect(plugin).toBeDefined();
+    expect(plugin!.type).toBe('plugin');
+    expect(plugin!.description).toBe('Plugin resolved from package.json fallback');
+    expect(plugin!.metadata.version).toBe('3.1.0');
+    expect(plugin!.metadata.author).toBe('Package Author');
+    expect(plugin!.metadata.homepage).toBe('https://github.com/test/pkg-json-test');
+    expect(plugin!.metadata.license).toBe('ISC');
+    expect(plugin!.metadata.registryKey).toBe('pkg-json-test@community');
+    expect(plugin!.filePath).toContain('package.json');
+    expect(plugin!.tags).toContain('npm');
+    expect(plugin!.tags).toContain('fallback');
+    expect(plugin!.lastModified.toISOString()).toBe('2025-09-10T08:00:00.000Z');
+  });
+
+  it('creates entry from registry key when no manifest exists', async () => {
+    const result = await parsePlugins(join(FIXTURES, 'plugins'));
+
+    const plugin = result.entries.find(e => e.name === 'no-manifest-test');
+    expect(plugin).toBeDefined();
+    expect(plugin!.type).toBe('plugin');
+    expect(plugin!.description).toBe('');
+    expect(plugin!.metadata.version).toBe('0.5.0');
+    expect(plugin!.metadata.registryKey).toBe('no-manifest-test@lsp-tools');
+    expect(plugin!.lastModified.toISOString()).toBe('2025-09-20T16:00:00.000Z');
+  });
+
+  it('returns all 4 plugins with zero errors', async () => {
+    const result = await parsePlugins(join(FIXTURES, 'plugins'));
+
+    expect(result.entries).toHaveLength(4);
+    expect(result.errors).toHaveLength(0);
   });
 
   it('returns empty entries when registry file is missing', async () => {
