@@ -1,0 +1,9 @@
+{
+  "name": "pkg-json-test",
+  "description": "Plugin resolved from package.json fallback",
+  "version": "3.1.0",
+  "author": "Package Author",
+  "keywords": ["npm", "fallback"],
+  "homepage": "https://github.com/test/pkg-json-test",
+  "license": "ISC"
+}
