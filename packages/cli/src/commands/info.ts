@@ -42,7 +42,7 @@ function formatMetadata(metadata: Readonly<Record<string, unknown>>): readonly s
 
 export function createInfoCommand(): Command {
   const cmd = new Command('info')
-    .alias('i')
+    .alias('nfo')
     .description('Show detailed info about an entry')
     .argument('<name>', 'Entry name (fuzzy matched)')
     .action(async (name: string, _opts, command) => {
