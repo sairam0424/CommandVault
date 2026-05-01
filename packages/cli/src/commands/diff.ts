@@ -13,12 +13,19 @@ export function createDiffCommand(): Command {
         const entries = vault.getAllEntries();
         const diff = vault.getDiff();
 
-        const hasSnapshot = diff.added.length !== entries.length || diff.removed.length > 0 || diff.modified.length > 0;
+        const hasSnapshot =
+          diff.added.length !== entries.length ||
+          diff.removed.length > 0 ||
+          diff.modified.length > 0;
 
         if (!hasSnapshot) {
           vault.saveSnapshot();
           console.log(chalk.cyan('\nBaseline snapshot saved.\n'));
-          console.log(chalk.dim(`  ${entries.length} entries recorded. Run "vault diff" again to see changes.\n`));
+          console.log(
+            chalk.dim(
+              `  ${entries.length} entries recorded. Run "vault diff" again to see changes.\n`,
+            ),
+          );
           return;
         }
 
@@ -50,9 +57,9 @@ export function createDiffCommand(): Command {
         console.log(
           chalk.dim(
             `  ${chalk.green(`${diff.added.length} added`)}, ` +
-            `${chalk.red(`${diff.removed.length} removed`)}, ` +
-            `${chalk.yellow(`${diff.modified.length} modified`)}`
-          )
+              `${chalk.red(`${diff.removed.length} removed`)}, ` +
+              `${chalk.yellow(`${diff.modified.length} modified`)}`,
+          ),
         );
         console.log('');
 

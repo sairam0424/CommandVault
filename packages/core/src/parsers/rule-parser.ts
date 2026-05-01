@@ -21,9 +21,10 @@ export async function parseRules(rulesDir: string): Promise<ParserResult> {
       const { data, content } = parseFrontmatter(raw);
       const name = data.name ?? basename(file, '.md').replace(/-/g, ' ');
       const firstLine = content.split('\n').find((l) => l.startsWith('# '));
-      const description = typeof data.description === 'string'
-        ? data.description.trim()
-        : firstLine?.replace(/^#\s+/, '') ?? `Rule: ${name}`;
+      const description =
+        typeof data.description === 'string'
+          ? data.description.trim()
+          : (firstLine?.replace(/^#\s+/, '') ?? `Rule: ${name}`);
       const tags = extractTags(name, description, data);
       tags.push('rule');
       const lastModified = await getLastModified(filePath);

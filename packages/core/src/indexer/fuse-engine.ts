@@ -48,10 +48,7 @@ export class FuseEngine {
     }));
   }
 
-  private applyFilters(
-    entries: readonly VaultEntry[],
-    options: SearchOptions
-  ): VaultEntry[] {
+  private applyFilters(entries: readonly VaultEntry[], options: SearchOptions): VaultEntry[] {
     let filtered = [...entries];
 
     if (options.type) {
@@ -61,9 +58,7 @@ export class FuseEngine {
       filtered = filtered.filter((e) => e.source === options.source);
     }
     if (options.tags && options.tags.length > 0) {
-      filtered = filtered.filter((e) =>
-        options.tags!.every((t) => e.tags.includes(t))
-      );
+      filtered = filtered.filter((e) => options.tags!.every((t) => e.tags.includes(t)));
     }
     if (options.favoritesOnly) {
       filtered = filtered.filter((e) => e.favorite);

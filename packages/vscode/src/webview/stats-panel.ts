@@ -10,7 +10,7 @@ let activePanel: vscode.WebviewPanel | undefined;
 
 export function createStatsPanel(
   context: vscode.ExtensionContext,
-  vault: Vault
+  vault: Vault,
 ): vscode.WebviewPanel {
   if (activePanel) {
     activePanel.reveal(vscode.ViewColumn.One);
@@ -25,16 +25,12 @@ export function createStatsPanel(
     {
       enableScripts: true,
       retainContextWhenHidden: true,
-      localResourceRoots: [
-        vscode.Uri.file(path.join(context.extensionPath, 'dist', 'webview')),
-      ],
-    }
+      localResourceRoots: [vscode.Uri.file(path.join(context.extensionPath, 'dist', 'webview'))],
+    },
   );
 
   const distPath = path.join(context.extensionPath, 'dist', 'webview');
-  const scriptUri = panel.webview.asWebviewUri(
-    vscode.Uri.file(path.join(distPath, 'main.js'))
-  );
+  const scriptUri = panel.webview.asWebviewUri(vscode.Uri.file(path.join(distPath, 'main.js')));
 
   const nonce = crypto.randomBytes(16).toString('hex');
 
@@ -47,7 +43,7 @@ export function createStatsPanel(
       }
     },
     undefined,
-    context.subscriptions
+    context.subscriptions,
   );
 
   panel.onDidDispose(
@@ -55,7 +51,7 @@ export function createStatsPanel(
       activePanel = undefined;
     },
     null,
-    context.subscriptions
+    context.subscriptions,
   );
 
   activePanel = panel;
@@ -84,11 +80,7 @@ function sendStats(panel: vscode.WebviewPanel, vault: Vault): void {
   panel.webview.postMessage({ type: 'topUsed', data: topUsed });
 }
 
-function buildHtml(
-  webview: vscode.Webview,
-  scriptUri: vscode.Uri,
-  nonce: string
-): string {
+function buildHtml(webview: vscode.Webview, scriptUri: vscode.Uri, nonce: string): string {
   const cspSource = webview.cspSource;
   return `<!DOCTYPE html>
 <html lang="en">

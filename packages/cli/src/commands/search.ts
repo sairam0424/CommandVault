@@ -2,7 +2,13 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import Table from 'cli-table3';
 import type { SearchResult, EntryType, EntrySource } from '@commandvault/core';
-import { createVaultInstance, typeEmoji, typeColor, truncate, type CliGlobalOptions } from '../helpers.js';
+import {
+  createVaultInstance,
+  typeEmoji,
+  typeColor,
+  truncate,
+  type CliGlobalOptions,
+} from '../helpers.js';
 
 function highlightMatch(text: string, query: string): string {
   if (!query || !text) {
@@ -84,7 +90,11 @@ export function createSearchCommand(): Command {
         }
 
         console.log(`\n${table.toString()}`);
-        console.log(chalk.dim(`\n${results.length} result${results.length === 1 ? '' : 's'} for "${query}"\n`));
+        console.log(
+          chalk.dim(
+            `\n${results.length} result${results.length === 1 ? '' : 's'} for "${query}"\n`,
+          ),
+        );
       } finally {
         await vault.dispose();
       }

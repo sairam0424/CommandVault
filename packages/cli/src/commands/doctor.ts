@@ -58,9 +58,7 @@ function checkNodeVersion(): CheckResult {
   return {
     label: 'Node.js version',
     passed,
-    detail: passed
-      ? `v${version} (>= 20 required)`
-      : `v${version} — Node.js 20+ is required`,
+    detail: passed ? `v${version} (>= 20 required)` : `v${version} — Node.js 20+ is required`,
   };
 }
 
@@ -184,9 +182,7 @@ async function checkCommandVaultDir(): Promise<CheckResult> {
   return {
     label: '~/.commandvault/ directory',
     passed: exists,
-    detail: exists
-      ? 'Directory exists'
-      : 'Not found — run `vault init` first',
+    detail: exists ? 'Directory exists' : 'Not found — run `vault init` first',
   };
 }
 
@@ -197,9 +193,7 @@ async function checkVaultDb(): Promise<CheckResult> {
   return {
     label: '~/.commandvault/vault.db',
     passed: exists,
-    detail: exists
-      ? 'SQLite database exists'
-      : 'Not found — run `vault list` to create it',
+    detail: exists ? 'SQLite database exists' : 'Not found — run `vault list` to create it',
   };
 }
 
@@ -230,15 +224,9 @@ export function createDoctorCommand(): Command {
       ];
 
       for (const check of staticChecks) {
-        const icon = check.passed
-          ? chalk.green('✓')
-          : chalk.red('✗');
-        const label = check.passed
-          ? chalk.white(check.label)
-          : chalk.red(check.label);
-        const detail = check.passed
-          ? chalk.dim(check.detail)
-          : chalk.yellow(check.detail);
+        const icon = check.passed ? chalk.green('✓') : chalk.red('✗');
+        const label = check.passed ? chalk.white(check.label) : chalk.red(check.label);
+        const detail = check.passed ? chalk.dim(check.detail) : chalk.yellow(check.detail);
 
         console.log(`  ${icon}  ${label}  ${detail}`);
       }
@@ -275,9 +263,7 @@ export function createDoctorCommand(): Command {
         };
       }
 
-      const scanIcon = scanResult.passed
-        ? chalk.green('✓')
-        : chalk.red('✗');
+      const scanIcon = scanResult.passed ? chalk.green('✓') : chalk.red('✗');
       const scanLabel = scanResult.passed
         ? chalk.white(scanResult.label)
         : chalk.red(scanResult.label);

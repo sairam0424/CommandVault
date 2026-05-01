@@ -1,7 +1,13 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import type { EntryType, VaultStats } from '@commandvault/core';
-import { createVaultInstance, typeEmoji, typeColor, formatDate, type CliGlobalOptions } from '../helpers.js';
+import {
+  createVaultInstance,
+  typeEmoji,
+  typeColor,
+  formatDate,
+  type CliGlobalOptions,
+} from '../helpers.js';
 
 const TYPE_ORDER: readonly EntryType[] = ['skill', 'agent', 'command', 'plugin', 'rule', 'hook'];
 
@@ -33,8 +39,12 @@ export function createStatsCommand(): Command {
         console.log(chalk.bold.white('  CommandVault Dashboard'));
         console.log(chalk.dim('  ' + '='.repeat(40)));
         console.log('');
-        console.log(`  ${chalk.dim('Total entries:')}  ${chalk.bold.white(String(stats.totalEntries))}`);
-        console.log(`  ${chalk.dim('Favorites:')}     ${chalk.yellow(String(stats.favoriteCount))}`);
+        console.log(
+          `  ${chalk.dim('Total entries:')}  ${chalk.bold.white(String(stats.totalEntries))}`,
+        );
+        console.log(
+          `  ${chalk.dim('Favorites:')}     ${chalk.yellow(String(stats.favoriteCount))}`,
+        );
         console.log(`  ${chalk.dim('Last scan:')}     ${formatDate(stats.lastScanAt)}`);
 
         // Breakdown by type
@@ -61,13 +71,14 @@ export function createStatsCommand(): Command {
           .filter(([, count]) => count > 0)
           .sort(([, a], [, b]) => b - a);
 
-        const maxSourceCount = sourceEntries.length > 0
-          ? Math.max(...sourceEntries.map(([, c]) => c), 1)
-          : 1;
+        const maxSourceCount =
+          sourceEntries.length > 0 ? Math.max(...sourceEntries.map(([, c]) => c), 1) : 1;
 
         for (const [source, count] of sourceEntries) {
           const bar = renderBar(count, maxSourceCount);
-          console.log(`  ${chalk.white(source.padEnd(14))} ${chalk.blue(bar)} ${chalk.bold(String(count))}`);
+          console.log(
+            `  ${chalk.white(source.padEnd(14))} ${chalk.blue(bar)} ${chalk.bold(String(count))}`,
+          );
         }
 
         if (sourceEntries.length === 0) {

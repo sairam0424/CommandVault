@@ -63,9 +63,7 @@ export class MiniSearchEngine {
       fuzzy: 0.2,
     });
 
-    const maxScore = rawResults.length > 0
-      ? Math.max(...rawResults.map((r) => r.score))
-      : 1;
+    const maxScore = rawResults.length > 0 ? Math.max(...rawResults.map((r) => r.score)) : 1;
 
     const results: SearchResult[] = [];
     for (const raw of rawResults) {
@@ -84,15 +82,13 @@ export class MiniSearchEngine {
   }
 
   suggest(query: string, limit = 10): string[] {
-    return this.engine.autoSuggest(query, { boost: BOOST })
+    return this.engine
+      .autoSuggest(query, { boost: BOOST })
       .slice(0, limit)
       .map((s) => s.suggestion);
   }
 
-  private applyFilters(
-    entries: VaultEntry[],
-    options: SearchOptions
-  ): VaultEntry[] {
+  private applyFilters(entries: VaultEntry[], options: SearchOptions): VaultEntry[] {
     return entries.filter((e) => this.matchesFilters(e, options));
   }
 

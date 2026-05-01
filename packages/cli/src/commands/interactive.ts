@@ -3,7 +3,14 @@ import chalk from 'chalk';
 import { execFileSync } from 'node:child_process';
 import { search, select } from '@inquirer/prompts';
 import type { VaultEntry } from '@commandvault/core';
-import { createVaultInstance, typeEmoji, typeColor, truncate, formatDate, type CliGlobalOptions } from '../helpers.js';
+import {
+  createVaultInstance,
+  typeEmoji,
+  typeColor,
+  truncate,
+  formatDate,
+  type CliGlobalOptions,
+} from '../helpers.js';
 
 type ActionChoice = 'copy' | 'open' | 'again' | 'exit';
 
@@ -21,11 +28,17 @@ function displayEntryDetail(entry: VaultEntry, slashCommand: string): void {
   console.log(`${chalk.dim('Source:')}      ${entry.source}`);
   console.log(`${chalk.dim('Command:')}     ${chalk.bold(slashCommand)}`);
   console.log(`${chalk.dim('Description:')} ${entry.description || chalk.dim('(no description)')}`);
-  console.log(`${chalk.dim('Tags:')}        ${entry.tags.length > 0 ? entry.tags.map((t) => chalk.cyan(`#${t}`)).join(' ') : chalk.dim('(none)')}`);
+  console.log(
+    `${chalk.dim('Tags:')}        ${entry.tags.length > 0 ? entry.tags.map((t) => chalk.cyan(`#${t}`)).join(' ') : chalk.dim('(none)')}`,
+  );
   console.log(`${chalk.dim('File:')}        ${chalk.underline(entry.filePath)}`);
   console.log(`${chalk.dim('Modified:')}    ${formatDate(entry.lastModified)}`);
-  console.log(`${chalk.dim('Usage:')}       ${entry.usageCount} time${entry.usageCount === 1 ? '' : 's'}`);
-  console.log(`${chalk.dim('Favorite:')}    ${entry.favorite ? chalk.yellow('* Yes') : chalk.dim('  No')}`);
+  console.log(
+    `${chalk.dim('Usage:')}       ${entry.usageCount} time${entry.usageCount === 1 ? '' : 's'}`,
+  );
+  console.log(
+    `${chalk.dim('Favorite:')}    ${entry.favorite ? chalk.yellow('* Yes') : chalk.dim('  No')}`,
+  );
   console.log(chalk.dim('─'.repeat(50)));
 }
 
@@ -94,7 +107,9 @@ export function createInteractiveCommand(): Command {
                 try {
                   execFileSync(editor, [selectedEntry.filePath], { stdio: 'inherit' });
                 } catch {
-                  console.log(chalk.red(`Failed to open editor (${editor}). Set $EDITOR to override.`));
+                  console.log(
+                    chalk.red(`Failed to open editor (${editor}). Set $EDITOR to override.`),
+                  );
                 }
                 break;
               }

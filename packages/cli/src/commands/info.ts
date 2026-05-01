@@ -1,13 +1,16 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import type { VaultEntry } from '@commandvault/core';
-import { createVaultInstance, typeEmoji, typeColor, formatDate, type CliGlobalOptions } from '../helpers.js';
+import {
+  createVaultInstance,
+  typeEmoji,
+  typeColor,
+  formatDate,
+  type CliGlobalOptions,
+} from '../helpers.js';
 
 function drawBox(title: string, lines: readonly string[]): string {
-  const maxLen = Math.max(
-    title.length + 4,
-    ...lines.map((l) => stripAnsi(l).length + 4)
-  );
+  const maxLen = Math.max(title.length + 4, ...lines.map((l) => stripAnsi(l).length + 4));
   const width = Math.min(Math.max(maxLen, 40), 80);
 
   const top = `┌${''.padEnd(width, '─')}┐`;
