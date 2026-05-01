@@ -1,9 +1,33 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
 *.tsbuildinfo
 .turbo/
 .vite/
+
+# VS Code extension packaging
 *.vsix
-.DS_Store
+
+# SQLite databases (generated at runtime)
 *.db
 *.db-journal
+*.db-wal
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.idea/
+
+# Environment
+.env
+.env.*
+
+# Coverage
+coverage/
