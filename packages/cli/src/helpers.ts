@@ -1,27 +1,30 @@
 import chalk from 'chalk';
 import ora from 'ora';
 import { createVault, type VaultEntry, type EntryType, type SearchTier } from '@commandvault/core';
+import { loadConfig } from './config.js';
 
 export interface CliGlobalOptions {
   readonly claudePath?: string;
   readonly tier?: SearchTier;
+  readonly json?: boolean;
 }
 
 export async function createVaultInstance(options: CliGlobalOptions) {
-  const spinner = ora('Initializing vault...').start();
+  const config = await loadConfig();
+  const spinner = options.json ? null : ora('Initializing vault...').start();
 
   try {
     const vault = createVault({
-      claudeConfigPath: options.claudePath,
-      defaultSearchTier: options.tier,
+      claudeConfigPath: options.claudePath ?? config.claudeConfigPath,
+      defaultSearchTier: options.tier ?? config.searchTier,
       enableWatcher: false,
     });
 
     const stats = await vault.initialize();
-    spinner.succeed(`Vault loaded: ${stats.totalEntries} entries indexed`);
+    spinner?.succeed(`Vault loaded: ${stats.totalEntries} entries indexed`);
     return vault;
   } catch (error) {
-    spinner.fail('Failed to initialize vault');
+    spinner?.fail('Failed to initialize vault');
     throw error;
   }
 }
