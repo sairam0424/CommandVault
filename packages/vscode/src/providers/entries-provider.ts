@@ -48,6 +48,8 @@ interface EntryLeafNode {
 
 type TreeNode = TypeGroupNode | SourceGroupNode | EntryLeafNode;
 
+export type SortMode = 'name' | 'usage' | 'recent';
+
 export class EntriesProvider implements vscode.TreeDataProvider<TreeNode> {
   private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<
     TreeNode | undefined | null
@@ -55,7 +57,24 @@ export class EntriesProvider implements vscode.TreeDataProvider<TreeNode> {
 
   readonly onDidChangeTreeData = this.onDidChangeTreeDataEmitter.event;
 
+  private sortBy: SortMode = 'name';
+  private filterText = '';
+
   constructor(private readonly vault: Vault) {}
+
+  setSortMode(mode: SortMode): void {
+    this.sortBy = mode;
+    this.refresh();
+  }
+
+  setFilter(text: string): void {
+    this.filterText = text.toLowerCase();
+    this.refresh();
+  }
+
+  getSortMode(): SortMode {
+    return this.sortBy;
+  }
 
   refresh(): void {
     this.onDidChangeTreeDataEmitter.fire(undefined);
@@ -89,7 +108,16 @@ export class EntriesProvider implements vscode.TreeDataProvider<TreeNode> {
   }
 
   private getRootNodes(): TypeGroupNode[] {
-    const entries = this.vault.getAllEntries();
+    let entries = [...this.vault.getAllEntries()];
+
+    if (this.filterText) {
+      entries = entries.filter(
+        (e) =>
+          e.name.toLowerCase().includes(this.filterText) ||
+          e.description.toLowerCase().includes(this.filterText),
+      );
+    }
+
     const countByType = new Map<EntryType, number>();
 
     for (const entry of entries) {
@@ -124,14 +152,30 @@ export class EntriesProvider implements vscode.TreeDataProvider<TreeNode> {
   }
 
   private getEntryNodes(type: EntryType, source: EntrySource): EntryLeafNode[] {
-    const entries = this.vault.getEntriesByType(type);
-    return entries
-      .filter((entry) => entry.source === source)
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map((entry) => ({
-        kind: 'entry' as const,
-        entry,
-      }));
+    let entries = [...this.vault.getEntriesByType(type)].filter(
+      (entry) => entry.source === source,
+    );
+
+    if (this.filterText) {
+      entries = entries.filter(
+        (e) =>
+          e.name.toLowerCase().includes(this.filterText) ||
+          e.description.toLowerCase().includes(this.filterText),
+      );
+    }
+
+    switch (this.sortBy) {
+      case 'usage':
+        entries.sort((a, b) => b.usageCount - a.usageCount || a.name.localeCompare(b.name));
+        break;
+      case 'recent':
+        entries.sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime());
+        break;
+      default:
+        entries.sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    return entries.map((entry) => ({ kind: 'entry' as const, entry }));
   }
 
   private createTypeItem(node: TypeGroupNode): vscode.TreeItem {

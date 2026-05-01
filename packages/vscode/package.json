@@ -85,6 +85,16 @@
         "command": "commandvault.copyContent",
         "title": "CommandVault: Copy Content",
         "icon": "$(copy)"
+      },
+      {
+        "command": "commandvault.sortEntries",
+        "title": "CommandVault: Sort Entries",
+        "icon": "$(sort-precedence)"
+      },
+      {
+        "command": "commandvault.filterEntries",
+        "title": "CommandVault: Filter Entries",
+        "icon": "$(filter)"
       }
     ],
     "menus": {
@@ -96,6 +106,16 @@
         },
         {
           "command": "commandvault.refresh",
+          "when": "view == commandvault.entries",
+          "group": "navigation"
+        },
+        {
+          "command": "commandvault.sortEntries",
+          "when": "view == commandvault.entries",
+          "group": "navigation"
+        },
+        {
+          "command": "commandvault.filterEntries",
           "when": "view == commandvault.entries",
           "group": "navigation"
         }
