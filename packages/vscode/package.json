@@ -1,0 +1,165 @@
+{
+  "name": "commandvault-vscode",
+  "displayName": "CommandVault",
+  "description": "Browse, search, and manage AI slash commands, skills, agents, plugins, rules, and hooks from your sidebar",
+  "version": "0.1.0",
+  "publisher": "commandvault",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": ["Other"],
+  "keywords": ["ai", "commands", "claude", "copilot", "skills", "agents", "vault"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./dist/extension.js",
+  "icon": "media/icon.png",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "commandvault",
+          "title": "CommandVault",
+          "icon": "media/vault-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "commandvault": [
+        {
+          "id": "commandvault.entries",
+          "name": "Commands"
+        },
+        {
+          "id": "commandvault.favorites",
+          "name": "Favorites"
+        },
+        {
+          "id": "commandvault.recent",
+          "name": "Recently Used"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "commandvault.search",
+        "title": "CommandVault: Search Commands",
+        "icon": "$(search)"
+      },
+      {
+        "command": "commandvault.refresh",
+        "title": "CommandVault: Refresh Vault",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "commandvault.openDetail",
+        "title": "CommandVault: View Command Detail"
+      },
+      {
+        "command": "commandvault.toggleFavorite",
+        "title": "CommandVault: Toggle Favorite",
+        "icon": "$(star)"
+      },
+      {
+        "command": "commandvault.copyCommand",
+        "title": "CommandVault: Copy Slash Command",
+        "icon": "$(clippy)"
+      },
+      {
+        "command": "commandvault.insertToTerminal",
+        "title": "CommandVault: Insert into Terminal",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "commandvault.openFile",
+        "title": "CommandVault: Open Source File",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "commandvault.stats",
+        "title": "CommandVault: Show Stats Dashboard"
+      },
+      {
+        "command": "commandvault.export",
+        "title": "CommandVault: Export Collection"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "commandvault.search",
+          "when": "view == commandvault.entries",
+          "group": "navigation"
+        },
+        {
+          "command": "commandvault.refresh",
+          "when": "view == commandvault.entries",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "commandvault.toggleFavorite",
+          "when": "viewItem == entry",
+          "group": "inline"
+        },
+        {
+          "command": "commandvault.copyCommand",
+          "when": "viewItem == entry",
+          "group": "inline"
+        },
+        {
+          "command": "commandvault.openFile",
+          "when": "viewItem == entry"
+        },
+        {
+          "command": "commandvault.insertToTerminal",
+          "when": "viewItem == entry"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "CommandVault",
+      "properties": {
+        "commandvault.claudeConfigPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to .claude config directory (auto-detected if empty)"
+        },
+        "commandvault.enableFileWatcher": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-refresh when command files change"
+        },
+        "commandvault.searchTier": {
+          "type": "string",
+          "enum": ["fuse", "minisearch", "sqlite"],
+          "default": "minisearch",
+          "description": "Search engine tier (fuse=fuzzy, minisearch=indexed, sqlite=persistent)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "npm run build:webview && npm run build:extension",
+    "build:extension": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --external:better-sqlite3 --format=cjs --platform=node",
+    "build:webview": "cd src/webview && npx vite build",
+    "dev": "npm run build:extension -- --watch",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "package": "npx @vscode/vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "@commandvault/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.95.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.4.0",
+    "esbuild": "^0.25.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.8.0",
+    "vite": "^6.3.0"
+  }
+}

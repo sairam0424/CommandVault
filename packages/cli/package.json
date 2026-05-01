@@ -1,0 +1,28 @@
+{
+  "name": "@commandvault/cli",
+  "version": "0.1.0",
+  "description": "Terminal companion for CommandVault — list, search, and inspect AI commands",
+  "type": "module",
+  "bin": {
+    "vault": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist .tsbuildinfo",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@commandvault/core": "workspace:*",
+    "chalk": "^5.4.0",
+    "cli-table3": "^0.6.5",
+    "commander": "^13.1.0",
+    "ora": "^8.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0"
+  }
+}
