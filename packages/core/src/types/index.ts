@@ -7,7 +7,12 @@ export type EntrySource =
   | 'superpowers'
   | 'official'
   | 'community'
-  | 'custom';
+  | 'custom'
+  | 'cursor'
+  | 'copilot'
+  | 'windsurf'
+  | 'aider'
+  | 'continue';
 
 export type SearchTier = 'fuse' | 'minisearch' | 'sqlite';
 
@@ -40,6 +45,13 @@ export interface SearchResult {
   readonly matchedFields: readonly string[];
 }
 
+export interface RankingWeights {
+  readonly textRelevance: number;
+  readonly recency: number;
+  readonly usageFrequency: number;
+  readonly favoriteBoost: number;
+}
+
 export interface SearchOptions {
   readonly query: string;
   readonly type?: EntryType;
@@ -48,6 +60,7 @@ export interface SearchOptions {
   readonly favoritesOnly?: boolean;
   readonly limit?: number;
   readonly tier?: SearchTier;
+  readonly weights?: Partial<RankingWeights>;
 }
 
 export interface VaultConfig {

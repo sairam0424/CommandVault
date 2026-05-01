@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "plugins": {
+    "@test/test-plugin@1.0.0": [
+      {
+        "scope": "user",
+        "installPath": "PLACEHOLDER_CACHE_PATH",
+        "version": "1.0.0",
+        "installedAt": "2025-06-15T10:00:00.000Z",
+        "lastUpdated": "2025-07-01T14:30:00.000Z",
+        "gitCommitSha": "abc123def456"
+      }
+    ]
+  }
+}

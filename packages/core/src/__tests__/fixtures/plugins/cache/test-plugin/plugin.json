@@ -1,0 +1,13 @@
+{
+  "name": "test-plugin",
+  "description": "A test plugin for unit testing the plugin parser",
+  "version": "1.0.0",
+  "author": {
+    "name": "Test Author",
+    "url": "https://example.com"
+  },
+  "keywords": ["testing", "qa"],
+  "skills": ["test-skill-a", "test-skill-b"],
+  "homepage": "https://github.com/test/test-plugin",
+  "license": "MIT"
+}

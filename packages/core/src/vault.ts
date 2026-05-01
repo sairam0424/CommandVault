@@ -6,7 +6,7 @@ import type {
   SearchResult, SearchOptions, SearchTier,
   VaultEventMap, VaultEventHandler, ParserResult, ParseError,
 } from './types/index.js';
-import { parseSkills, parseAgents, parseCommands, parsePlugins, parseRules, parseHooks } from './parsers/index.js';
+import { parseSkills, parseAgents, parseCommands, parsePlugins, parseRules, parseHooks, detectAgentConfigs } from './parsers/index.js';
 import { SearchEngine } from './indexer/search-engine.js';
 import { VaultWatcher, type WatcherCallback } from './watcher/index.js';
 
@@ -55,6 +55,7 @@ export class Vault {
       parsePlugins(join(claudePath, 'plugins')),
       parseRules(join(claudePath, 'rules')),
       parseHooks(join(claudePath, 'settings.json')),
+      detectAgentConfigs(process.cwd()),
     ]);
 
     const allEntries: VaultEntry[] = [];
