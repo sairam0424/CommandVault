@@ -2,6 +2,7 @@ import type { VaultEntry, SearchResult, SearchOptions, SearchTier, VaultStats } 
 import { FuseEngine } from './fuse-engine.js';
 import { MiniSearchEngine } from './minisearch-engine.js';
 import { SqliteEngine } from './sqlite-engine.js';
+import { normalizeScore } from './normalizer.js';
 
 export class SearchEngine {
   private readonly fuseEngine: FuseEngine;
@@ -25,14 +26,23 @@ export class SearchEngine {
   search(options: SearchOptions): SearchResult[] {
     const tier = options.tier ?? this.defaultTier;
 
+    let rawResults: SearchResult[];
     switch (tier) {
       case 'fuse':
-        return this.fuseEngine.search(options);
+        rawResults = this.fuseEngine.search(options);
+        break;
       case 'minisearch':
-        return this.miniSearchEngine.search(options);
+        rawResults = this.miniSearchEngine.search(options);
+        break;
       case 'sqlite':
-        return this.sqliteEngine.search(options);
+        rawResults = this.sqliteEngine.search(options);
+        break;
     }
+
+    if (options.query.trim()) {
+      return normalizeScore(rawResults, options.weights);
+    }
+    return rawResults;
   }
 
   suggest(query: string, limit?: number): string[] {
