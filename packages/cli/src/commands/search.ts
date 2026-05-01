@@ -60,6 +60,11 @@ export function createSearchCommand(): Command {
           tier: globalOpts.tier,
         });
 
+        if (globalOpts.json) {
+          console.log(JSON.stringify({ query, results }, null, 2));
+          return;
+        }
+
         if (results.length === 0) {
           console.log(chalk.yellow(`\nNo results found for "${query}".\n`));
           return;

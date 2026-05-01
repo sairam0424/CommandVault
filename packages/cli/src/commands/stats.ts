@@ -35,6 +35,11 @@ export function createStatsCommand(): Command {
       try {
         const stats: VaultStats = vault.getStats();
 
+        if (globalOpts.json) {
+          console.log(JSON.stringify(stats, null, 2));
+          return;
+        }
+
         console.log('');
         console.log(chalk.bold.white('  CommandVault Dashboard'));
         console.log(chalk.dim('  ' + '='.repeat(40)));

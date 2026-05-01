@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { Vault, VaultEntry, EntryType, SearchResult } from '@commandvault/core';
+import { exportEntries } from '@commandvault/core';
 import type { EntriesProvider } from '../providers/entries-provider';
 import type { FavoritesProvider } from '../providers/favorites-provider';
 import type { RecentProvider } from '../providers/recent-provider';
@@ -199,26 +200,8 @@ export function registerCommands(
       return;
     }
 
-    const exportData = {
-      exportedAt: new Date().toISOString(),
-      stats: vault.getStats(),
-      entries: allEntries.map((entry) => ({
-        id: entry.id,
-        name: entry.name,
-        type: entry.type,
-        source: entry.source,
-        description: entry.description,
-        filePath: entry.filePath,
-        tags: [...entry.tags],
-        metadata: { ...entry.metadata },
-        slashCommand: vault.getSlashCommand(entry),
-        favorite: entry.favorite,
-        usageCount: entry.usageCount,
-        lastModified: entry.lastModified.toISOString(),
-      })),
-    };
-
-    const content = JSON.stringify(exportData, null, 2);
+    const bundle = exportEntries(allEntries, 'commandvault-vscode');
+    const content = JSON.stringify(bundle, null, 2);
     const encoder = new TextEncoder();
     await vscode.workspace.fs.writeFile(saveUri, encoder.encode(content));
     vscode.window.showInformationMessage(
@@ -226,12 +209,29 @@ export function registerCommands(
     );
   });
 
+  const copyContentCommand = vscode.commands.registerCommand(
+    'commandvault.copyContent',
+    async (entryOrNode: VaultEntry | { readonly entry: VaultEntry }) => {
+      const entry = 'entry' in entryOrNode ? entryOrNode.entry : entryOrNode;
+      if (!entry) {
+        vscode.window.showWarningMessage('CommandVault: No entry selected');
+        return;
+      }
+
+      await vscode.env.clipboard.writeText(entry.content);
+      vscode.window.showInformationMessage(
+        `CommandVault: Copied content of "${entry.name}" to clipboard`,
+      );
+    },
+  );
+
   return [
     searchCommand,
     refreshCommand,
     openDetailCommand,
     toggleFavoriteCommand,
     copyCommandCmd,
+    copyContentCommand,
     insertToTerminalCommand,
     openFileCommand,
     statsCommand,

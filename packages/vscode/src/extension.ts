@@ -41,14 +41,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(entriesTreeView, favoritesTreeView, recentTreeView);
 
+  const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
+  statusBar.command = 'commandvault.search';
+  statusBar.tooltip = 'CommandVault — Click to search';
+  statusBar.show();
+  context.subscriptions.push(statusBar);
+
   const refreshAll = (): void => {
     entriesProvider.refresh();
     favoritesProvider.refresh();
     recentProvider.refresh();
   };
 
-  vault.on('scan:complete', () => {
+  vault.on('scan:complete', (stats) => {
     refreshAll();
+    statusBar.text = `$(database) ${stats.totalEntries} cmds`;
   });
 
   vault.on('entry:added', () => {
