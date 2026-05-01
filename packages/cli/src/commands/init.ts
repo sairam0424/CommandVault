@@ -66,13 +66,17 @@ export function createInitCommand(): Command {
         const entries = Object.entries(existingConfig);
         for (const [key, value] of entries) {
           const formatted = Array.isArray(value)
-            ? (value.length > 0 ? value.join(', ') : chalk.dim('(empty)'))
+            ? value.length > 0
+              ? value.join(', ')
+              : chalk.dim('(empty)')
             : String(value);
           console.log(`  ${chalk.dim(key + ':')}  ${formatted}`);
         }
 
         console.log('');
-        console.log(chalk.yellow(`  To reset to defaults, run: ${chalk.bold('vault init --reset')}`));
+        console.log(
+          chalk.yellow(`  To reset to defaults, run: ${chalk.bold('vault init --reset')}`),
+        );
         console.log('');
         return;
       }
@@ -97,7 +101,9 @@ export function createInitCommand(): Command {
       const entries = Object.entries(DEFAULT_CONFIG);
       for (const [key, value] of entries) {
         const formatted = Array.isArray(value)
-          ? (value.length > 0 ? value.join(', ') : chalk.dim('(empty)'))
+          ? value.length > 0
+            ? value.join(', ')
+            : chalk.dim('(empty)')
           : String(value);
         console.log(`  ${chalk.dim(key + ':')}  ${formatted}`);
       }

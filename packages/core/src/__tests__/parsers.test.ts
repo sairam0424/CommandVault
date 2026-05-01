@@ -50,9 +50,7 @@ describe('parseSkills', () => {
     const skill = result.entries[0];
     expect(skill.name).toBe('browse');
     expect(skill.type).toBe('skill');
-    expect(skill.description).toBe(
-      'Fast headless browser for QA testing and site dogfooding',
-    );
+    expect(skill.description).toBe('Fast headless browser for QA testing and site dogfooding');
     expect(skill.tags).toContain('browser');
     expect(skill.tags).toContain('testing');
     expect(skill.tags).toContain('qa');
@@ -106,9 +104,7 @@ describe('parseAgents', () => {
     const agent = result.entries[0];
     expect(agent.name).toBe('Test Agent');
     expect(agent.type).toBe('agent');
-    expect(agent.description).toBe(
-      'A test agent for unit testing purposes',
-    );
+    expect(agent.description).toBe('A test agent for unit testing purposes');
     expect(agent.metadata.color).toBe('#FF5733');
     expect(agent.metadata.emoji).toBe('\u{1F9EA}');
     expect(agent.metadata.vibe).toBe('analytical');
@@ -144,9 +140,7 @@ describe('parseCommands', () => {
     const cmd = result.entries[0];
     expect(cmd.name).toBe('testns:test-cmd');
     expect(cmd.type).toBe('command');
-    expect(cmd.description).toBe(
-      'Run the test command for QA validation',
-    );
+    expect(cmd.description).toBe('Run the test command for QA validation');
     expect(cmd.metadata.namespace).toBe('testns');
     expect(cmd.metadata.fileName).toBe('test-cmd.md');
     expect(cmd.content).toContain('npm run test');
@@ -170,17 +164,13 @@ describe('parsePlugins', () => {
   it('parses a plugin from registry + manifest', async () => {
     const result = await parsePlugins(join(FIXTURES, 'plugins'));
 
-    const plugin = result.entries.find(e => e.name === 'test-plugin');
+    const plugin = result.entries.find((e) => e.name === 'test-plugin');
     expect(plugin).toBeDefined();
     expect(plugin!.type).toBe('plugin');
-    expect(plugin!.description).toBe(
-      'A test plugin for unit testing the plugin parser',
-    );
+    expect(plugin!.description).toBe('A test plugin for unit testing the plugin parser');
     expect(plugin!.metadata.version).toBe('1.0.0');
     expect(plugin!.metadata.author).toBe('Test Author');
-    expect(plugin!.metadata.homepage).toBe(
-      'https://github.com/test/test-plugin',
-    );
+    expect(plugin!.metadata.homepage).toBe('https://github.com/test/test-plugin');
     expect(plugin!.metadata.license).toBe('MIT');
     expect(plugin!.metadata.scope).toBe('user');
     expect(plugin!.metadata.registryKey).toBe('@test/test-plugin@1.0.0');
@@ -194,7 +184,7 @@ describe('parsePlugins', () => {
 
   it('stores the full manifest JSON as content', async () => {
     const result = await parsePlugins(join(FIXTURES, 'plugins'));
-    const plugin = result.entries.find(e => e.name === 'test-plugin');
+    const plugin = result.entries.find((e) => e.name === 'test-plugin');
     expect(plugin).toBeDefined();
     const content = JSON.parse(plugin!.content);
     expect(content.name).toBe('test-plugin');
@@ -204,7 +194,7 @@ describe('parsePlugins', () => {
   it('resolves manifest from .claude-plugin/plugin.json path', async () => {
     const result = await parsePlugins(join(FIXTURES, 'plugins'));
 
-    const plugin = result.entries.find(e => e.name === 'claude-plugin-test');
+    const plugin = result.entries.find((e) => e.name === 'claude-plugin-test');
     expect(plugin).toBeDefined();
     expect(plugin!.type).toBe('plugin');
     expect(plugin!.description).toBe('Plugin with manifest in .claude-plugin directory');
@@ -226,7 +216,7 @@ describe('parsePlugins', () => {
   it('falls back to package.json', async () => {
     const result = await parsePlugins(join(FIXTURES, 'plugins'));
 
-    const plugin = result.entries.find(e => e.name === 'pkg-json-test');
+    const plugin = result.entries.find((e) => e.name === 'pkg-json-test');
     expect(plugin).toBeDefined();
     expect(plugin!.type).toBe('plugin');
     expect(plugin!.description).toBe('Plugin resolved from package.json fallback');
@@ -244,7 +234,7 @@ describe('parsePlugins', () => {
   it('creates entry from registry key when no manifest exists', async () => {
     const result = await parsePlugins(join(FIXTURES, 'plugins'));
 
-    const plugin = result.entries.find(e => e.name === 'no-manifest-test');
+    const plugin = result.entries.find((e) => e.name === 'no-manifest-test');
     expect(plugin).toBeDefined();
     expect(plugin!.type).toBe('plugin');
     expect(plugin!.description).toBe('');
@@ -283,9 +273,7 @@ describe('parseRules', () => {
     expect(rule.name).toBe('test rule');
     expect(rule.type).toBe('rule');
     expect(rule.source).toBe('custom');
-    expect(rule.description).toBe(
-      'Enforce secure coding practices across the project',
-    );
+    expect(rule.description).toBe('Enforce secure coding practices across the project');
     expect(rule.tags).toContain('rule');
     expect(rule.tags).toContain('security');
     expect(rule.tags).toContain('validation');
@@ -339,13 +327,7 @@ describe('parseHooks', () => {
   it('returns empty entries when settings has no hooks key', async () => {
     // The hook parser reads a JSON and checks for the hooks key.
     // We can simulate this by pointing at the plugin manifest (valid JSON, no hooks).
-    const noHooksPath = join(
-      FIXTURES,
-      'plugins',
-      'cache',
-      'test-plugin',
-      'plugin.json',
-    );
+    const noHooksPath = join(FIXTURES, 'plugins', 'cache', 'test-plugin', 'plugin.json');
     const result = await parseHooks(noHooksPath);
 
     expect(result.entries).toHaveLength(0);

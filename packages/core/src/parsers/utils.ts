@@ -37,7 +37,7 @@ export function inferSource(name: string, filePath: string): EntrySource {
 export function extractTags(
   name: string,
   description: string,
-  frontmatter: ParsedFrontmatter
+  frontmatter: ParsedFrontmatter,
 ): string[] {
   const tags = new Set<string>();
 
@@ -57,8 +57,13 @@ export function extractTags(
   }
 
   const categoryPrefixes = [
-    'engineering-', 'design-', 'marketing-', 'sales-',
-    'gaming-', 'china-', 'social-',
+    'engineering-',
+    'design-',
+    'marketing-',
+    'sales-',
+    'gaming-',
+    'china-',
+    'social-',
   ];
   for (const prefix of categoryPrefixes) {
     if (name.toLowerCase().startsWith(prefix)) {
@@ -69,9 +74,22 @@ export function extractTags(
 
   const descLower = description.toLowerCase();
   const domainKeywords = [
-    'security', 'testing', 'review', 'debug', 'deploy', 'design',
-    'planning', 'architecture', 'qa', 'api', 'database', 'frontend',
-    'backend', 'devops', 'documentation', 'performance',
+    'security',
+    'testing',
+    'review',
+    'debug',
+    'deploy',
+    'design',
+    'planning',
+    'architecture',
+    'qa',
+    'api',
+    'database',
+    'frontend',
+    'backend',
+    'devops',
+    'documentation',
+    'performance',
   ];
   for (const keyword of domainKeywords) {
     if (descLower.includes(keyword)) tags.add(keyword);

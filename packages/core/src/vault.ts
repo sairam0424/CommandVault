@@ -2,11 +2,26 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import type {
-  VaultEntry, VaultConfig, VaultStats,
-  SearchResult, SearchOptions, SearchTier,
-  VaultEventMap, VaultEventHandler, ParserResult, ParseError,
+  VaultEntry,
+  VaultConfig,
+  VaultStats,
+  SearchResult,
+  SearchOptions,
+  SearchTier,
+  VaultEventMap,
+  VaultEventHandler,
+  ParserResult,
+  ParseError,
 } from './types/index.js';
-import { parseSkills, parseAgents, parseCommands, parsePlugins, parseRules, parseHooks, detectAgentConfigs } from './parsers/index.js';
+import {
+  parseSkills,
+  parseAgents,
+  parseCommands,
+  parsePlugins,
+  parseRules,
+  parseHooks,
+  detectAgentConfigs,
+} from './parsers/index.js';
 import { SearchEngine } from './indexer/search-engine.js';
 import { VaultWatcher, type WatcherCallback } from './watcher/index.js';
 

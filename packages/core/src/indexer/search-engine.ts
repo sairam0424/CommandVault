@@ -1,4 +1,10 @@
-import type { VaultEntry, SearchResult, SearchOptions, SearchTier, VaultStats } from '../types/index.js';
+import type {
+  VaultEntry,
+  SearchResult,
+  SearchOptions,
+  SearchTier,
+  VaultStats,
+} from '../types/index.js';
 import { FuseEngine } from './fuse-engine.js';
 import { MiniSearchEngine } from './minisearch-engine.js';
 import { SqliteEngine } from './sqlite-engine.js';
@@ -40,7 +46,7 @@ export class SearchEngine {
     }
 
     if (options.query.trim()) {
-      return normalizeScore(rawResults, options.weights);
+      return normalizeScore(rawResults, options.weights, options.query);
     }
     return rawResults;
   }
@@ -81,7 +87,11 @@ export class SearchEngine {
     this.sqliteEngine.saveSnapshot(entries);
   }
 
-  getDiff(currentEntries: readonly VaultEntry[]): { added: VaultEntry[]; removed: string[]; modified: VaultEntry[] } {
+  getDiff(currentEntries: readonly VaultEntry[]): {
+    added: VaultEntry[];
+    removed: string[];
+    modified: VaultEntry[];
+  } {
     return this.sqliteEngine.getDiff(currentEntries);
   }
 

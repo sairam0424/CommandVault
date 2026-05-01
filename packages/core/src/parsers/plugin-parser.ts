@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve, normalize } from 'node:path';
 import type { VaultEntry, ParserResult, ParseError } from '../types/index.js';
 import { generateId, inferSource, extractTags } from './utils.js';
 
@@ -16,14 +16,17 @@ interface PluginManifest {
 
 interface InstalledPlugins {
   readonly version: number;
-  readonly plugins: Record<string, Array<{
-    scope: string;
-    installPath: string;
-    version: string;
-    installedAt: string;
-    lastUpdated: string;
-    gitCommitSha?: string;
-  }>>;
+  readonly plugins: Record<
+    string,
+    Array<{
+      scope: string;
+      installPath: string;
+      version: string;
+      installedAt: string;
+      lastUpdated: string;
+      gitCommitSha?: string;
+    }>
+  >;
 }
 
 interface ResolvedManifest {
@@ -78,12 +81,13 @@ async function resolveManifest(
       name: typeof pkg.name === 'string' ? pkg.name : registryKey.split('@')[0],
       description: typeof pkg.description === 'string' ? pkg.description : undefined,
       version: typeof pkg.version === 'string' ? pkg.version : installVersion,
-      author: typeof pkg.author === 'string'
-        ? pkg.author
-        : typeof pkg.author === 'object' && pkg.author !== null
-          ? (pkg.author as { name: string; url?: string; email?: string })
-          : undefined,
-      keywords: Array.isArray(pkg.keywords) ? pkg.keywords as string[] : undefined,
+      author:
+        typeof pkg.author === 'string'
+          ? pkg.author
+          : typeof pkg.author === 'object' && pkg.author !== null
+            ? (pkg.author as { name: string; url?: string; email?: string })
+            : undefined,
+      keywords: Array.isArray(pkg.keywords) ? (pkg.keywords as string[]) : undefined,
       homepage: typeof pkg.homepage === 'string' ? pkg.homepage : undefined,
       license: typeof pkg.license === 'string' ? pkg.license : undefined,
     };
@@ -111,12 +115,26 @@ export async function parsePlugins(pluginsDir: string): Promise<ParserResult> {
     const raw = await readFile(registryPath, 'utf-8');
     registry = JSON.parse(raw);
   } catch {
-    return { entries: [], errors: [{ filePath: registryPath, message: 'Plugin registry not found' }] };
+    return {
+      entries: [],
+      errors: [{ filePath: registryPath, message: 'Plugin registry not found' }],
+    };
   }
 
   const parsePromises = Object.entries(registry.plugins).map(async ([key, installations]) => {
     const install = installations[0];
     if (!install) return;
+
+    // Path containment: block installPaths that escape the plugins directory
+    const normalizedInstall = normalize(resolve(install.installPath));
+    const normalizedPlugins = normalize(resolve(pluginsDir));
+    if (!normalizedInstall.startsWith(normalizedPlugins)) {
+      errors.push({
+        filePath: install.installPath,
+        message: `Blocked: installPath "${install.installPath}" is outside plugins directory`,
+      });
+      return;
+    }
 
     try {
       const { manifest, resolvedPath } = await resolveManifest(
@@ -133,9 +151,8 @@ export async function parsePlugins(pluginsDir: string): Promise<ParserResult> {
       });
       const lastModified = new Date(install.lastUpdated);
 
-      const authorName = typeof manifest.author === 'string'
-        ? manifest.author
-        : manifest.author?.name;
+      const authorName =
+        typeof manifest.author === 'string' ? manifest.author : manifest.author?.name;
 
       const entry: VaultEntry = {
         id: generateId(resolvedPath),

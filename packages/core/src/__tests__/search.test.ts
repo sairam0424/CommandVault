@@ -385,9 +385,7 @@ describe('normalizeScore', () => {
       lastModified: new Date(),
     });
 
-    const results: SearchResult[] = [
-      { entry, score: 0.8, matchedFields: ['name'] },
-    ];
+    const results: SearchResult[] = [{ entry, score: 0.8, matchedFields: ['name'] }];
 
     const allTextWeight: Partial<RankingWeights> = {
       textRelevance: 1.0,
@@ -419,9 +417,7 @@ describe('normalizeScore', () => {
       lastModified: new Date(),
     });
 
-    const results: SearchResult[] = [
-      { entry, score: 2.0, matchedFields: [] },
-    ];
+    const results: SearchResult[] = [{ entry, score: 2.0, matchedFields: [] }];
 
     const normalized = normalizeScore(results);
     expect(normalized[0].score).toBeLessThanOrEqual(1);

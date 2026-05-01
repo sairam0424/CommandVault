@@ -97,13 +97,11 @@ export class EntriesProvider implements vscode.TreeDataProvider<TreeNode> {
       countByType.set(entry.type, current + 1);
     }
 
-    return ALL_TYPES
-      .filter((type) => (countByType.get(type) ?? 0) > 0)
-      .map((type) => ({
-        kind: 'type' as const,
-        type,
-        count: countByType.get(type) ?? 0,
-      }));
+    return ALL_TYPES.filter((type) => (countByType.get(type) ?? 0) > 0).map((type) => ({
+      kind: 'type' as const,
+      type,
+      count: countByType.get(type) ?? 0,
+    }));
   }
 
   private getSourceNodes(type: EntryType): SourceGroupNode[] {
@@ -156,9 +154,8 @@ export class EntriesProvider implements vscode.TreeDataProvider<TreeNode> {
     const { entry } = node;
     const item = new vscode.TreeItem(entry.name, vscode.TreeItemCollapsibleState.None);
     item.iconPath = TYPE_ICONS[entry.type];
-    item.description = entry.description.length > 60
-      ? `${entry.description.slice(0, 57)}...`
-      : entry.description;
+    item.description =
+      entry.description.length > 60 ? `${entry.description.slice(0, 57)}...` : entry.description;
     item.tooltip = this.buildTooltip(entry);
     item.contextValue = 'entry';
     item.command = {

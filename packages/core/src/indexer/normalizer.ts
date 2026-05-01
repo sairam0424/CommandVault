@@ -3,15 +3,16 @@ import type { SearchResult, RankingWeights } from '../types/index.js';
 const DEFAULT_WEIGHTS: RankingWeights = {
   textRelevance: 0.55,
   recency: 0.15,
-  usageFrequency: 0.20,
-  favoriteBoost: 0.10,
+  usageFrequency: 0.2,
+  favoriteBoost: 0.1,
 };
 
 const RECENCY_HALF_LIFE_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
 
 export function normalizeScore(
   results: readonly SearchResult[],
-  weights?: Partial<RankingWeights>
+  weights?: Partial<RankingWeights>,
+  query?: string,
 ): SearchResult[] {
   if (results.length === 0) return [];
 
@@ -30,11 +31,14 @@ export function normalizeScore(
 
     const favBonus = r.entry.favorite ? 1 : 0;
 
+    const nameBonus = query && r.entry.name.toLowerCase().includes(query.toLowerCase()) ? 0.001 : 0;
+
     const finalScore =
       w.textRelevance * textScore +
       w.recency * recencyScore +
       w.usageFrequency * usageScore +
-      w.favoriteBoost * favBonus;
+      w.favoriteBoost * favBonus +
+      nameBonus;
 
     return {
       ...r,

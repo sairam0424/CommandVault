@@ -2,7 +2,13 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import Table from 'cli-table3';
 import type { VaultEntry, EntryType } from '@commandvault/core';
-import { createVaultInstance, typeEmoji, typeColor, truncate, type CliGlobalOptions } from '../helpers.js';
+import {
+  createVaultInstance,
+  typeEmoji,
+  typeColor,
+  truncate,
+  type CliGlobalOptions,
+} from '../helpers.js';
 
 const TYPE_ORDER: readonly EntryType[] = ['skill', 'agent', 'command', 'plugin', 'rule', 'hook'];
 
@@ -18,12 +24,7 @@ const TYPE_LABELS: Readonly<Record<EntryType, string>> = {
 function buildTable(): InstanceType<typeof Table> {
   return new Table({
     style: { compact: true, 'padding-left': 1, 'padding-right': 1 },
-    head: [
-      chalk.gray('Type'),
-      chalk.gray('Name'),
-      chalk.gray('Source'),
-      chalk.gray('Description'),
-    ],
+    head: [chalk.gray('Type'), chalk.gray('Name'), chalk.gray('Source'), chalk.gray('Description')],
   });
 }
 
@@ -97,7 +98,9 @@ export function createListCommand(): Command {
             }
 
             const colorFn = typeColor(type);
-            console.log(`\n${colorFn(chalk.bold(`${typeEmoji(type)}  ${type.toUpperCase()}S (${group.length})`))}`);
+            console.log(
+              `\n${colorFn(chalk.bold(`${typeEmoji(type)}  ${type.toUpperCase()}S (${group.length})`))}`,
+            );
 
             const table = buildTable();
             for (const entry of group) {

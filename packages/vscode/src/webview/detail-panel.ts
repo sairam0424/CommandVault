@@ -7,7 +7,7 @@ const activePanels = new Map<string, vscode.WebviewPanel>();
 
 export function createDetailPanel(
   context: vscode.ExtensionContext,
-  entry: VaultEntry
+  entry: VaultEntry,
 ): vscode.WebviewPanel {
   const existingPanel = activePanels.get(entry.id);
   if (existingPanel) {
@@ -23,7 +23,7 @@ export function createDetailPanel(
     {
       enableScripts: false,
       retainContextWhenHidden: false,
-    }
+    },
   );
 
   panel.iconPath = new vscode.ThemeIcon(getIconForType(entry.type));
@@ -31,9 +31,13 @@ export function createDetailPanel(
 
   activePanels.set(entry.id, panel);
 
-  panel.onDidDispose(() => {
-    activePanels.delete(entry.id);
-  }, null, context.subscriptions);
+  panel.onDidDispose(
+    () => {
+      activePanels.delete(entry.id);
+    },
+    null,
+    context.subscriptions,
+  );
 
   return panel;
 }
@@ -84,9 +88,7 @@ function renderTags(tags: readonly string[]): string {
   if (tags.length === 0) {
     return '<span class="muted">None</span>';
   }
-  return tags
-    .map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`)
-    .join(' ');
+  return tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join(' ');
 }
 
 function renderContent(content: string): string {
@@ -104,6 +106,7 @@ function buildHtml(entry: VaultEntry): string {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     * {

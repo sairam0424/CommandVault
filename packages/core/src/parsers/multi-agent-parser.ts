@@ -11,11 +11,27 @@ interface AgentConfigSpec {
 }
 
 const CURSOR_SPEC: AgentConfigSpec = { source: 'cursor', label: 'Cursor Rules', tag: 'cursor' };
-const COPILOT_SPEC: AgentConfigSpec = { source: 'copilot', label: 'Copilot Instructions', tag: 'copilot' };
-const WINDSURF_SPEC: AgentConfigSpec = { source: 'windsurf', label: 'Windsurf Rules', tag: 'windsurf' };
+const COPILOT_SPEC: AgentConfigSpec = {
+  source: 'copilot',
+  label: 'Copilot Instructions',
+  tag: 'copilot',
+};
+const WINDSURF_SPEC: AgentConfigSpec = {
+  source: 'windsurf',
+  label: 'Windsurf Rules',
+  tag: 'windsurf',
+};
 const AIDER_SPEC: AgentConfigSpec = { source: 'aider', label: 'Aider Config', tag: 'aider' };
-const CONTINUE_SPEC: AgentConfigSpec = { source: 'continue', label: 'Continue.dev Config', tag: 'continue' };
-const CLAUDE_PROJECT_SPEC: AgentConfigSpec = { source: 'custom', label: 'Project CLAUDE.md', tag: 'claude' };
+const CONTINUE_SPEC: AgentConfigSpec = {
+  source: 'continue',
+  label: 'Continue.dev Config',
+  tag: 'continue',
+};
+const CLAUDE_PROJECT_SPEC: AgentConfigSpec = {
+  source: 'custom',
+  label: 'Project CLAUDE.md',
+  tag: 'claude',
+};
 
 async function pathExists(filePath: string): Promise<boolean> {
   try {
@@ -30,13 +46,11 @@ async function readMarkdownDir(
   dirPath: string,
   spec: AgentConfigSpec,
   entries: VaultEntry[],
-  errors: ParseError[]
+  errors: ParseError[],
 ): Promise<void> {
   let files: string[];
   try {
-    files = (await readdir(dirPath)).filter(
-      (f) => f.endsWith('.md') || f.endsWith('.mdc')
-    );
+    files = (await readdir(dirPath)).filter((f) => f.endsWith('.md') || f.endsWith('.mdc'));
   } catch {
     return;
   }
@@ -48,12 +62,14 @@ async function readMarkdownDir(
       const { data, content } = parseFrontmatter(raw);
       const name =
         data.name ??
-        `${spec.label} - ${basename(file, '.md').replace(/\.\w+$/, '').replace(/[-_]/g, ' ')}`;
+        `${spec.label} - ${basename(file, '.md')
+          .replace(/\.\w+$/, '')
+          .replace(/[-_]/g, ' ')}`;
       const firstLine = content.split('\n').find((l) => l.startsWith('# '));
       const description =
         typeof data.description === 'string'
           ? data.description.trim()
-          : firstLine?.replace(/^#\s+/, '') ?? `${spec.label} from ${file}`;
+          : (firstLine?.replace(/^#\s+/, '') ?? `${spec.label} from ${file}`);
       const tags = extractTags(name, description, data);
       tags.push(spec.tag, 'ai-agent-config');
       const lastModified = await getLastModified(filePath);
@@ -90,7 +106,7 @@ async function readSingleFile(
   name: string,
   spec: AgentConfigSpec,
   entries: VaultEntry[],
-  errors: ParseError[]
+  errors: ParseError[],
 ): Promise<void> {
   if (!(await pathExists(filePath))) {
     return;
@@ -109,21 +125,16 @@ async function readSingleFile(
       content = raw;
       try {
         const parsed = JSON.parse(raw) as Record<string, unknown>;
-        description = typeof parsed.description === 'string'
-          ? parsed.description
-          : `${name} configuration`;
+        description =
+          typeof parsed.description === 'string' ? parsed.description : `${name} configuration`;
         metadata = { ...metadata, parsedKeys: Object.keys(parsed) };
       } catch {
         description = `${name} configuration`;
       }
     } else if (isYaml) {
       content = raw;
-      const firstComment = raw
-        .split('\n')
-        .find((l) => l.startsWith('#'));
-      description = firstComment
-        ? firstComment.replace(/^#\s*/, '')
-        : `${name} configuration`;
+      const firstComment = raw.split('\n').find((l) => l.startsWith('#'));
+      description = firstComment ? firstComment.replace(/^#\s*/, '') : `${name} configuration`;
     } else {
       const { data, content: mdContent } = parseFrontmatter(raw);
       content = mdContent;
@@ -131,7 +142,7 @@ async function readSingleFile(
       description =
         typeof data.description === 'string'
           ? data.description.trim()
-          : firstLine?.replace(/^#\s+/, '') ?? `${name}`;
+          : (firstLine?.replace(/^#\s+/, '') ?? `${name}`);
       const fmTags = extractTags(name, description, data);
       metadata = { ...metadata, frontmatter: data, extractedTags: fmTags };
     }
@@ -166,7 +177,7 @@ async function readSingleFile(
 async function detectCursorConfigs(
   projectRoot: string,
   entries: VaultEntry[],
-  errors: ParseError[]
+  errors: ParseError[],
 ): Promise<void> {
   const cursorRulesDir = join(projectRoot, '.cursor', 'rules');
   const cursorRulesFile = join(projectRoot, '.cursorrules');
@@ -180,7 +191,7 @@ async function detectCursorConfigs(
 async function detectCopilotConfigs(
   projectRoot: string,
   entries: VaultEntry[],
-  errors: ParseError[]
+  errors: ParseError[],
 ): Promise<void> {
   const copilotInstructions = join(projectRoot, '.github', 'copilot-instructions.md');
   await readSingleFile(copilotInstructions, 'Copilot Instructions', COPILOT_SPEC, entries, errors);
@@ -189,13 +200,19 @@ async function detectCopilotConfigs(
 async function detectWindsurfConfigs(
   projectRoot: string,
   entries: VaultEntry[],
-  errors: ParseError[]
+  errors: ParseError[],
 ): Promise<void> {
   const windsurfRulesFile = join(projectRoot, '.windsurfrules');
   const windsurfRulesDir = join(projectRoot, '.windsurf', 'rules');
 
   await Promise.all([
-    readSingleFile(windsurfRulesFile, 'Windsurf Rules (project root)', WINDSURF_SPEC, entries, errors),
+    readSingleFile(
+      windsurfRulesFile,
+      'Windsurf Rules (project root)',
+      WINDSURF_SPEC,
+      entries,
+      errors,
+    ),
     readMarkdownDir(windsurfRulesDir, WINDSURF_SPEC, entries, errors),
   ]);
 }
@@ -203,7 +220,7 @@ async function detectWindsurfConfigs(
 async function detectAiderConfigs(
   projectRoot: string,
   entries: VaultEntry[],
-  errors: ParseError[]
+  errors: ParseError[],
 ): Promise<void> {
   const home = homedir();
   const projectConfig = join(projectRoot, '.aider.conf.yml');
@@ -215,10 +232,7 @@ async function detectAiderConfigs(
   ]);
 }
 
-async function detectContinueConfigs(
-  entries: VaultEntry[],
-  errors: ParseError[]
-): Promise<void> {
+async function detectContinueConfigs(entries: VaultEntry[], errors: ParseError[]): Promise<void> {
   const home = homedir();
   const continueConfig = join(home, '.continue', 'config.json');
   await readSingleFile(continueConfig, 'Continue.dev Config', CONTINUE_SPEC, entries, errors);
@@ -227,7 +241,7 @@ async function detectContinueConfigs(
 async function detectProjectClaudeConfigs(
   projectRoot: string,
   entries: VaultEntry[],
-  errors: ParseError[]
+  errors: ParseError[],
 ): Promise<void> {
   const rootClaudeMd = join(projectRoot, 'CLAUDE.md');
   const claudeDir = join(projectRoot, '.claude');
