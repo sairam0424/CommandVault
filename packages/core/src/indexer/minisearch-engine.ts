@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import MiniSearch from 'minisearch';
 import type { VaultEntry, SearchResult, SearchOptions } from '../types/index.js';
 
@@ -5,9 +6,28 @@ const FIELDS = ['name', 'description', 'tags', 'source', 'type', 'content'];
 const STORED_FIELDS = ['id'];
 const BOOST = { name: 3, description: 2, tags: 1.5, source: 0.5, type: 0.5, content: 0.3 };
 
+function entryToDoc(e: VaultEntry): Record<string, unknown> {
+  return {
+    id: e.id,
+    name: e.name,
+    description: e.description,
+    tags: e.tags.join(' '),
+    source: e.source,
+    type: e.type,
+    content: e.content.slice(0, 500),
+  };
+}
+
+function entryHash(e: VaultEntry): string {
+  return createHash('md5')
+    .update(e.name + e.description + e.tags.join(',') + e.content.slice(0, 500))
+    .digest('hex');
+}
+
 export class MiniSearchEngine {
   private engine: MiniSearch;
   private entriesById: Map<string, VaultEntry>;
+  private hashById: Map<string, string> = new Map();
 
   constructor() {
     this.engine = new MiniSearch({
@@ -23,28 +43,46 @@ export class MiniSearchEngine {
   }
 
   index(entries: readonly VaultEntry[]): void {
-    this.entriesById = new Map(entries.map((e) => [e.id, e]));
-    this.engine = new MiniSearch({
-      fields: FIELDS,
-      storeFields: STORED_FIELDS,
-      searchOptions: {
-        boost: BOOST,
-        prefix: true,
-        fuzzy: 0.2,
-      },
-    });
+    const newMap = new Map(entries.map((e) => [e.id, e]));
+    const isFirstIndex = this.entriesById.size === 0;
 
-    const docs = entries.map((e) => ({
-      id: e.id,
-      name: e.name,
-      description: e.description,
-      tags: e.tags.join(' '),
-      source: e.source,
-      type: e.type,
-      content: e.content.slice(0, 500),
-    }));
+    if (isFirstIndex) {
+      this.entriesById = newMap;
+      this.hashById = new Map(entries.map((e) => [e.id, entryHash(e)]));
+      this.engine = new MiniSearch({
+        fields: FIELDS,
+        storeFields: STORED_FIELDS,
+        searchOptions: { boost: BOOST, prefix: true, fuzzy: 0.2 },
+      });
+      this.engine.addAll(entries.map(entryToDoc));
+      return;
+    }
 
-    this.engine.addAll(docs);
+    const oldIds = new Set(this.entriesById.keys());
+    const newIds = new Set(newMap.keys());
+
+    for (const id of oldIds) {
+      if (!newIds.has(id)) {
+        this.engine.discard(id);
+        this.hashById.delete(id);
+      }
+    }
+
+    for (const [id, entry] of newMap) {
+      const newHash = entryHash(entry);
+      const oldHash = this.hashById.get(id);
+
+      if (!oldIds.has(id)) {
+        this.engine.add(entryToDoc(entry));
+        this.hashById.set(id, newHash);
+      } else if (oldHash !== newHash) {
+        this.engine.discard(id);
+        this.engine.add(entryToDoc(entry));
+        this.hashById.set(id, newHash);
+      }
+    }
+
+    this.entriesById = newMap;
   }
 
   search(options: SearchOptions): SearchResult[] {

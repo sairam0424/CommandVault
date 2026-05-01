@@ -24,10 +24,13 @@ import {
 } from './parsers/index.js';
 import { SearchEngine } from './indexer/search-engine.js';
 import { VaultWatcher, type WatcherCallback } from './watcher/index.js';
+import { routePathToParser, type ParserType } from './watcher/path-router.js';
 
 const DEFAULT_CLAUDE_PATH = join(homedir(), '.claude');
 const DEFAULT_DB_DIR = join(homedir(), '.commandvault');
 const DEFAULT_DB_PATH = join(DEFAULT_DB_DIR, 'vault.db');
+
+const DEBOUNCE_MS = 500;
 
 export class Vault {
   private readonly config: VaultConfig;
@@ -36,6 +39,8 @@ export class Vault {
   private entries: VaultEntry[] = [];
   private listeners: Map<string, Set<Function>> = new Map();
   private scanErrors: ParseError[] = [];
+  private pendingChanges: Map<ParserType, Set<string>> = new Map();
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(config?: Partial<VaultConfig>) {
     this.config = {
@@ -184,19 +189,102 @@ export class Vault {
   }
 
   async dispose(): Promise<void> {
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+    await this.flushPendingChanges();
     await this.watcher.stop();
     this.searchEngine.close();
     this.listeners.clear();
   }
 
+  private readonly parserFns: Readonly<
+    Record<ParserType, () => Promise<ParserResult>>
+  > = {
+    skill: () => parseSkills(join(this.config.claudeConfigPath, 'skills')),
+    agent: () => parseAgents(join(this.config.claudeConfigPath, 'agents')),
+    command: () => parseCommands(join(this.config.claudeConfigPath, 'commands')),
+    plugin: () => parsePlugins(join(this.config.claudeConfigPath, 'plugins')),
+    rule: () => parseRules(join(this.config.claudeConfigPath, 'rules')),
+    hook: () => parseHooks(join(this.config.claudeConfigPath, 'settings.json')),
+  };
+
+  async scanSingle(parserType: ParserType): Promise<void> {
+    const result = await this.parserFns[parserType]();
+
+    const kept = this.entries.filter((e) => e.type !== parserType);
+    this.entries = [...kept, ...result.entries];
+
+    for (const error of result.errors) {
+      this.scanErrors = [...this.scanErrors, error];
+      this.emit('error', error);
+    }
+
+    this.searchEngine.index(this.entries);
+    this.emit('scan:complete', this.getStats());
+  }
+
   private startWatcher(): void {
-    const callback: WatcherCallback = (_event, _path) => {
-      this.scan().catch((err) => {
-        this.emit('error', { filePath: _path, message: `Re-scan failed: ${err}` });
-      });
+    const callback: WatcherCallback = (_event, changedPath) => {
+      const parserType = routePathToParser(changedPath, this.config.claudeConfigPath);
+
+      if (parserType) {
+        const paths = this.pendingChanges.get(parserType) ?? new Set();
+        paths.add(changedPath);
+        this.pendingChanges.set(parserType, paths);
+      } else {
+        this.pendingChanges.set('skill', new Set([changedPath]));
+        this.pendingChanges.set('agent', new Set([changedPath]));
+        this.pendingChanges.set('command', new Set([changedPath]));
+        this.pendingChanges.set('plugin', new Set([changedPath]));
+        this.pendingChanges.set('rule', new Set([changedPath]));
+        this.pendingChanges.set('hook', new Set([changedPath]));
+      }
+
+      if (this.debounceTimer) {
+        clearTimeout(this.debounceTimer);
+      }
+
+      this.debounceTimer = setTimeout(() => {
+        this.debounceTimer = null;
+        this.flushPendingChanges().catch((err) => {
+          this.emit('error', { filePath: changedPath, message: `Re-scan failed: ${err}` });
+        });
+      }, DEBOUNCE_MS);
     };
 
     this.watcher.start(callback);
+  }
+
+  private async flushPendingChanges(): Promise<void> {
+    if (this.pendingChanges.size === 0) return;
+
+    const parserTypes = [...this.pendingChanges.keys()];
+    this.pendingChanges.clear();
+
+    const results = await Promise.all(
+      parserTypes.map((pt) => this.parserFns[pt]()),
+    );
+
+    const typesToReplace = new Set(parserTypes);
+    const kept = this.entries.filter((e) => !typesToReplace.has(e.type as ParserType));
+    const newEntries: VaultEntry[] = [];
+    const newErrors: ParseError[] = [];
+
+    for (const result of results) {
+      newEntries.push(...result.entries);
+      newErrors.push(...result.errors);
+    }
+
+    this.entries = [...kept, ...newEntries];
+    this.scanErrors = [...this.scanErrors, ...newErrors];
+    this.searchEngine.index(this.entries);
+    this.emit('scan:complete', this.getStats());
+
+    for (const error of newErrors) {
+      this.emit('error', error);
+    }
   }
 
   private emit<K extends keyof VaultEventMap>(event: K, data: VaultEventMap[K]): void {
