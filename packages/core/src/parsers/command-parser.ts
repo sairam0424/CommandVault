@@ -2,7 +2,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { join, basename, dirname } from 'node:path';
 import type { VaultEntry, ParserResult, ParseError } from '../types/index.js';
 import {
-  generateId,
+  generateStableId,
   parseFrontmatter,
   getLastModified,
   inferSource,
@@ -52,7 +52,7 @@ export async function parseCommands(commandsDir: string): Promise<ParserResult> 
       const lastModified = await getLastModified(filePath);
 
       const entry: VaultEntry = {
-        id: generateId(filePath),
+        id: generateStableId('command', name, source),
         name,
         type: 'command',
         source,

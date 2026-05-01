@@ -2,7 +2,7 @@ import { readFile, readdir, access } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
 import type { VaultEntry, ParserResult, ParseError, EntrySource } from '../types/index.js';
-import { generateId, parseFrontmatter, getLastModified, extractTags } from './utils.js';
+import { generateStableId, parseFrontmatter, getLastModified, extractTags } from './utils.js';
 
 interface AgentConfigSpec {
   readonly source: EntrySource;
@@ -75,7 +75,7 @@ async function readMarkdownDir(
       const lastModified = await getLastModified(filePath);
 
       const entry: VaultEntry = {
-        id: generateId(filePath),
+        id: generateStableId('rule', name, spec.source),
         name,
         type: 'rule',
         source: spec.source,
@@ -151,7 +151,7 @@ async function readSingleFile(
     const lastModified = await getLastModified(filePath);
 
     const entry: VaultEntry = {
-      id: generateId(filePath),
+      id: generateStableId('rule', name),
       name,
       type: 'rule',
       source: spec.source,

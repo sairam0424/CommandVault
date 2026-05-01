@@ -3,8 +3,13 @@ import { stat } from 'node:fs/promises';
 import matter from 'gray-matter';
 import type { EntrySource, ParsedFrontmatter } from '../types/index.js';
 
-export function generateId(filePath: string): string {
-  return createHash('sha256').update(filePath).digest('hex').slice(0, 12);
+export function generateId(identifier: string): string {
+  return createHash('sha256').update(identifier).digest('hex').slice(0, 12);
+}
+
+export function generateStableId(type: string, name: string, disambiguator = ''): string {
+  const key = disambiguator ? `${type}:${name}:${disambiguator}` : `${type}:${name}`;
+  return generateId(key);
 }
 
 export function parseFrontmatter(raw: string): {

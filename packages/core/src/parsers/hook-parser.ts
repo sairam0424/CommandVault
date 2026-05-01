@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import type { VaultEntry, ParserResult, ParseError } from '../types/index.js';
-import { generateId, getLastModified } from './utils.js';
+import { generateStableId, getLastModified } from './utils.js';
 
 interface HookDefinition {
   readonly type: string;
@@ -64,7 +64,7 @@ export async function parseHooks(settingsPath: string): Promise<ParserResult> {
         }
 
         const entry: VaultEntry = {
-          id: generateId(`${settingsPath}:${name}`),
+          id: generateStableId('hook', name, 'custom'),
           name,
           type: 'hook',
           source: 'custom',

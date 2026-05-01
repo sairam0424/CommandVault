@@ -152,6 +152,39 @@
         "mac": "cmd+shift+v"
       }
     ],
+    "walkthroughs": [
+      {
+        "id": "commandvault.welcome",
+        "title": "Get Started with CommandVault",
+        "description": "Learn how to browse, search, and organize your AI commands",
+        "steps": [
+          {
+            "id": "commandvault.welcome.browse",
+            "title": "Browse Your Commands",
+            "description": "Open the CommandVault sidebar to see all your skills, agents, commands, plugins, rules, and hooks organized by type.\n\n[Open Sidebar](command:workbench.view.extension.commandvault)",
+            "media": { "markdown": "media/walkthrough/browse.md" }
+          },
+          {
+            "id": "commandvault.welcome.search",
+            "title": "Search and Navigate",
+            "description": "Use the search command to quickly find any entry by name, description, or tags. Try it now!\n\n[Search Commands](command:commandvault.search)",
+            "media": { "markdown": "media/walkthrough/search.md" }
+          },
+          {
+            "id": "commandvault.welcome.favorites",
+            "title": "Favorite and Organize",
+            "description": "Star your most-used commands for quick access. Right-click any entry to toggle favorite, copy the slash command, or open the source file.",
+            "media": { "markdown": "media/walkthrough/favorites.md" }
+          },
+          {
+            "id": "commandvault.welcome.stats",
+            "title": "View Your Dashboard",
+            "description": "See statistics about your command collection — entries by type, by source, and your most-used commands.\n\n[Open Dashboard](command:commandvault.stats)",
+            "media": { "markdown": "media/walkthrough/stats.md" }
+          }
+        ]
+      }
+    ],
     "configuration": {
       "title": "CommandVault",
       "properties": {
