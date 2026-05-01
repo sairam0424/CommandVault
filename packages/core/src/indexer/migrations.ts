@@ -1,9 +1,14 @@
+import { createHash } from 'node:crypto';
 import type Database from 'better-sqlite3';
 
 interface Migration {
   readonly version: number;
   readonly description: string;
   readonly up: (db: Database.Database) => void;
+}
+
+function stableId(type: string, name: string, source: string): string {
+  return createHash('sha256').update(`${type}:${name}:${source}`).digest('hex').slice(0, 12);
 }
 
 const MIGRATIONS: readonly Migration[] = [
@@ -19,6 +24,33 @@ const MIGRATIONS: readonly Migration[] = [
         );
         CREATE INDEX IF NOT EXISTS idx_entry_tags_tag ON entry_tags(tag);
       `);
+    },
+  },
+  {
+    version: 2,
+    description: 'Migrate entry IDs from filePath-based to type+name-based',
+    up: (db) => {
+      const rows = db.prepare('SELECT id, name, type, source FROM entries').all() as Array<{
+        id: string;
+        name: string;
+        type: string;
+        source: string;
+      }>;
+
+      const updateEntry = db.prepare('UPDATE entries SET id = ? WHERE id = ?');
+      const updateTag = db.prepare('UPDATE user_tags SET entry_id = ? WHERE entry_id = ?');
+      const updateEntryTag = db.prepare('UPDATE entry_tags SET entry_id = ? WHERE entry_id = ?');
+      const updateSnapshot = db.prepare('UPDATE scan_snapshots SET id = ? WHERE id = ?');
+
+      for (const row of rows) {
+        const newId = stableId(row.type, row.name, row.source);
+        if (newId !== row.id) {
+          updateEntry.run(newId, row.id);
+          updateTag.run(newId, row.id);
+          updateEntryTag.run(newId, row.id);
+          updateSnapshot.run(newId, row.id);
+        }
+      }
     },
   },
 ];

@@ -3,7 +3,7 @@ import { readdir } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 import type { VaultEntry, ParserResult, ParseError } from '../types/index.js';
 import {
-  generateId,
+  generateStableId,
   parseFrontmatter,
   getLastModified,
   inferSource,
@@ -36,7 +36,7 @@ export async function parseSkills(skillsDir: string): Promise<ParserResult> {
       const lastModified = await getLastModified(skillFile);
 
       const entry: VaultEntry = {
-        id: generateId(skillFile),
+        id: generateStableId('skill', name, source),
         name,
         type: 'skill',
         source,

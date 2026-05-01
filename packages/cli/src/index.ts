@@ -17,6 +17,8 @@ import { createWatchCommand } from './commands/watch.js';
 import { createInteractiveCommand } from './commands/interactive.js';
 import { createOpenCommand } from './commands/open.js';
 import { createRunCommand } from './commands/run.js';
+import { createBackupCommand } from './commands/backup.js';
+import { createRestoreCommand } from './commands/restore.js';
 
 const program = new Command();
 
@@ -44,6 +46,8 @@ program.addCommand(createWatchCommand());
 program.addCommand(createInteractiveCommand());
 program.addCommand(createOpenCommand());
 program.addCommand(createRunCommand());
+program.addCommand(createBackupCommand());
+program.addCommand(createRestoreCommand());
 
 // Default action: launch interactive mode when no subcommand is given
 program.action(async (_opts, command) => {
