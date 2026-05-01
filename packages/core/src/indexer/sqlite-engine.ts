@@ -7,6 +7,7 @@ import type {
   VaultStats,
   EntryType,
 } from '../types/index.js';
+import { runMigrations } from './migrations.js';
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS entries (
@@ -80,8 +81,6 @@ interface EntryRow {
 
 const sanitizeFtsToken = (w: string): string => w.replace(/["*+\-()]/g, '').trim();
 
-const escapeLikePattern = (s: string): string => s.replace(/[%_\\]/g, '\\$&');
-
 export class SqliteEngine {
   private db: Database.Database;
 
@@ -89,6 +88,7 @@ export class SqliteEngine {
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
     this.db.exec(SCHEMA);
+    runMigrations(this.db);
   }
 
   index(entries: readonly VaultEntry[]): void {
@@ -104,11 +104,16 @@ export class SqliteEngine {
     const newIds = new Set(entries.map((e) => e.id));
 
     const deleteStmt = this.db.prepare('DELETE FROM entries WHERE id = ?');
+    const deleteTagsStmt = this.db.prepare('DELETE FROM entry_tags WHERE entry_id = ?');
+    const insertTagStmt = this.db.prepare(
+      'INSERT OR IGNORE INTO entry_tags (entry_id, tag) VALUES (?, ?)',
+    );
 
     const transaction = this.db.transaction(() => {
       for (const id of existingIds) {
         if (!newIds.has(id)) {
           deleteStmt.run(id);
+          deleteTagsStmt.run(id);
         }
       }
 
@@ -126,11 +131,16 @@ export class SqliteEngine {
           filePath: entry.filePath,
           tags: entry.tags.join(','),
           metadata: JSON.stringify(entry.metadata),
-          content: entry.content.slice(0, 2000),
+          content: entry.content,
           lastModified: entry.lastModified.toISOString(),
           favorite: existing?.favorite ?? (entry.favorite ? 1 : 0),
           usageCount: existing?.usage_count ?? entry.usageCount,
         });
+
+        deleteTagsStmt.run(entry.id);
+        for (const tag of entry.tags) {
+          if (tag) insertTagStmt.run(entry.id, tag);
+        }
       }
     });
 
@@ -162,8 +172,10 @@ export class SqliteEngine {
     }
     if (options.tags && options.tags.length > 0) {
       for (let i = 0; i < options.tags.length; i++) {
-        conditions.push(`tags LIKE @tag${i} ESCAPE '\\'`);
-        params[`tag${i}`] = `%${escapeLikePattern(options.tags[i])}%`;
+        conditions.push(
+          `EXISTS (SELECT 1 FROM entry_tags WHERE entry_id = entries.id AND tag = @tag${i})`,
+        );
+        params[`tag${i}`] = options.tags[i];
       }
     }
 
@@ -269,7 +281,7 @@ export class SqliteEngine {
       );
       for (const entry of entries) {
         const hash = createHash('sha256')
-          .update(entry.name + entry.type + entry.lastModified.toISOString())
+          .update(entry.name + entry.type + entry.content)
           .digest('hex');
         insertStmt.run(entry.id, entry.name, entry.type, hash);
       }
@@ -302,7 +314,7 @@ export class SqliteEngine {
         added.push(entry);
       } else {
         const currentHash = createHash('sha256')
-          .update(entry.name + entry.type + entry.lastModified.toISOString())
+          .update(entry.name + entry.type + entry.content)
           .digest('hex');
         if (currentHash !== snapshot.content_hash) {
           modified.push(entry);
@@ -324,6 +336,16 @@ export class SqliteEngine {
   }
 
   private rowToEntry(row: EntryRow): VaultEntry {
+    const tagRows = this.db
+      .prepare('SELECT tag FROM entry_tags WHERE entry_id = ?')
+      .all(row.id) as Array<{ tag: string }>;
+    const tags =
+      tagRows.length > 0
+        ? tagRows.map((r) => r.tag)
+        : row.tags
+          ? row.tags.split(',').filter(Boolean)
+          : [];
+
     return {
       id: row.id,
       name: row.name,
@@ -331,7 +353,7 @@ export class SqliteEngine {
       source: row.source as VaultEntry['source'],
       description: row.description,
       filePath: row.file_path,
-      tags: row.tags ? row.tags.split(',').filter(Boolean) : [],
+      tags,
       metadata: JSON.parse(row.metadata || '{}'),
       content: row.content,
       lastModified: new Date(row.last_modified),
