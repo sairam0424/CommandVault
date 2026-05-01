@@ -36,20 +36,18 @@ export function createWatchCommand(): Command {
 
       vault.on('entry:added', (entry: VaultEntry) => {
         console.log(
-          chalk.dim(`[${timestamp()}]`) + chalk.green(` + ${entry.type}: ${entry.name} (added)`)
+          chalk.dim(`[${timestamp()}]`) + chalk.green(` + ${entry.type}: ${entry.name} (added)`),
         );
       });
 
       vault.on('entry:updated', (entry: VaultEntry) => {
         console.log(
-          chalk.dim(`[${timestamp()}]`) + chalk.yellow(` ~ ${entry.type}: ${entry.name} (updated)`)
+          chalk.dim(`[${timestamp()}]`) + chalk.yellow(` ~ ${entry.type}: ${entry.name} (updated)`),
         );
       });
 
       vault.on('entry:removed', (id: string) => {
-        console.log(
-          chalk.dim(`[${timestamp()}]`) + chalk.red(` - ${id} (removed)`)
-        );
+        console.log(chalk.dim(`[${timestamp()}]`) + chalk.red(` - ${id} (removed)`));
       });
 
       console.log('');

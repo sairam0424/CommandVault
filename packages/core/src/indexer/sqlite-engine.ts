@@ -1,6 +1,12 @@
 import { createHash } from 'node:crypto';
 import Database from 'better-sqlite3';
-import type { VaultEntry, SearchResult, SearchOptions, VaultStats, EntryType } from '../types/index.js';
+import type {
+  VaultEntry,
+  SearchResult,
+  SearchOptions,
+  VaultStats,
+  EntryType,
+} from '../types/index.js';
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS entries (
@@ -72,6 +78,10 @@ interface EntryRow {
   usage_count: number;
 }
 
+const sanitizeFtsToken = (w: string): string => w.replace(/["*+\-()]/g, '').trim();
+
+const escapeLikePattern = (s: string): string => s.replace(/[%_\\]/g, '\\$&');
+
 export class SqliteEngine {
   private db: Database.Database;
 
@@ -103,9 +113,9 @@ export class SqliteEngine {
       }
 
       for (const entry of entries) {
-        const existing = this.db.prepare(
-          'SELECT favorite, usage_count FROM entries WHERE id = ?'
-        ).get(entry.id) as { favorite: number; usage_count: number } | undefined;
+        const existing = this.db
+          .prepare('SELECT favorite, usage_count FROM entries WHERE id = ?')
+          .get(entry.id) as { favorite: number; usage_count: number } | undefined;
 
         insertStmt.run({
           id: entry.id,
@@ -131,13 +141,14 @@ export class SqliteEngine {
     const conditions: string[] = [];
     const params: Record<string, unknown> = {};
 
-    if (options.query.trim()) {
-      conditions.push('entries.rowid IN (SELECT rowid FROM entries_fts WHERE entries_fts MATCH @query)');
-      params.query = options.query
-        .split(/\s+/)
-        .map((w) => `"${w}"*`)
-        .join(' ');
-    }
+    const hasFtsQuery = (() => {
+      if (!options.query.trim()) return false;
+      const sanitized = options.query.split(/\s+/).map(sanitizeFtsToken).filter(Boolean);
+      if (sanitized.length === 0) return false;
+      params.query = sanitized.map((w) => `"${w}"*`).join(' ');
+      return true;
+    })();
+
     if (options.type) {
       conditions.push('type = @type');
       params.type = options.type;
@@ -151,28 +162,36 @@ export class SqliteEngine {
     }
     if (options.tags && options.tags.length > 0) {
       for (let i = 0; i < options.tags.length; i++) {
-        conditions.push(`tags LIKE @tag${i}`);
-        params[`tag${i}`] = `%${options.tags[i]}%`;
+        conditions.push(`tags LIKE @tag${i} ESCAPE '\\'`);
+        params[`tag${i}`] = `%${escapeLikePattern(options.tags[i])}%`;
       }
     }
 
-    const where = conditions.length > 0
-      ? `WHERE ${conditions.join(' AND ')}`
-      : '';
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const limit = options.limit ?? 50;
+    params.limit = limit;
 
-    const sql = `SELECT * FROM entries ${where} ORDER BY usage_count DESC, name ASC LIMIT ${limit}`;
+    const ftsJoin = hasFtsQuery
+      ? 'INNER JOIN entries_fts ON entries.rowid = entries_fts.rowid AND entries_fts MATCH @query'
+      : '';
+    const orderBy = hasFtsQuery
+      ? 'ORDER BY rank, usage_count DESC, name ASC'
+      : 'ORDER BY usage_count DESC, name ASC';
+
+    const sql = `SELECT entries.* FROM entries ${ftsJoin} ${where} ${orderBy} LIMIT @limit`;
     const rows = this.db.prepare(sql).all(params) as EntryRow[];
 
     return rows.map((row, idx) => ({
       entry: this.rowToEntry(row),
       score: 1 - idx / Math.max(rows.length, 1),
-      matchedFields: options.query.trim() ? ['name', 'description', 'content'] : [],
+      matchedFields: hasFtsQuery ? ['name', 'description', 'content'] : [],
     }));
   }
 
   toggleFavorite(id: string): boolean {
-    const row = this.db.prepare('SELECT favorite FROM entries WHERE id = ?').get(id) as { favorite: number } | undefined;
+    const row = this.db.prepare('SELECT favorite FROM entries WHERE id = ?').get(id) as
+      | { favorite: number }
+      | undefined;
     if (!row) return false;
     const newVal = row.favorite ? 0 : 1;
     this.db.prepare('UPDATE entries SET favorite = ? WHERE id = ?').run(newVal, id);
@@ -185,11 +204,20 @@ export class SqliteEngine {
 
   getStats(): VaultStats {
     const totalRow = this.db.prepare('SELECT COUNT(*) as c FROM entries').get() as { c: number };
-    const typeRows = this.db.prepare('SELECT type, COUNT(*) as c FROM entries GROUP BY type').all() as Array<{ type: string; c: number }>;
-    const sourceRows = this.db.prepare('SELECT source, COUNT(*) as c FROM entries GROUP BY source').all() as Array<{ source: string; c: number }>;
-    const favRow = this.db.prepare('SELECT COUNT(*) as c FROM entries WHERE favorite = 1').get() as { c: number };
+    const typeRows = this.db
+      .prepare('SELECT type, COUNT(*) as c FROM entries GROUP BY type')
+      .all() as Array<{ type: string; c: number }>;
+    const sourceRows = this.db
+      .prepare('SELECT source, COUNT(*) as c FROM entries GROUP BY source')
+      .all() as Array<{ source: string; c: number }>;
+    const favRow = this.db
+      .prepare('SELECT COUNT(*) as c FROM entries WHERE favorite = 1')
+      .get() as { c: number };
 
-    const byType = Object.fromEntries(typeRows.map((r) => [r.type, r.c])) as Record<EntryType, number>;
+    const byType = Object.fromEntries(typeRows.map((r) => [r.type, r.c])) as Record<
+      EntryType,
+      number
+    >;
     const bySource = Object.fromEntries(sourceRows.map((r) => [r.source, r.c]));
 
     return {
@@ -202,7 +230,9 @@ export class SqliteEngine {
   }
 
   getEntry(id: string): VaultEntry | undefined {
-    const row = this.db.prepare('SELECT * FROM entries WHERE id = ?').get(id) as EntryRow | undefined;
+    const row = this.db.prepare('SELECT * FROM entries WHERE id = ?').get(id) as
+      | EntryRow
+      | undefined;
     if (!row) return undefined;
 
     const entry = this.rowToEntry(row);
@@ -215,21 +245,19 @@ export class SqliteEngine {
   }
 
   addTag(entryId: string, tag: string): void {
-    this.db.prepare(
-      'INSERT OR IGNORE INTO user_tags (entry_id, tag) VALUES (?, ?)'
-    ).run(entryId, tag);
+    this.db
+      .prepare('INSERT OR IGNORE INTO user_tags (entry_id, tag) VALUES (?, ?)')
+      .run(entryId, tag);
   }
 
   removeTag(entryId: string, tag: string): void {
-    this.db.prepare(
-      'DELETE FROM user_tags WHERE entry_id = ? AND tag = ?'
-    ).run(entryId, tag);
+    this.db.prepare('DELETE FROM user_tags WHERE entry_id = ? AND tag = ?').run(entryId, tag);
   }
 
   getTagsForEntry(entryId: string): string[] {
-    const rows = this.db.prepare(
-      'SELECT tag FROM user_tags WHERE entry_id = ?'
-    ).all(entryId) as Array<{ tag: string }>;
+    const rows = this.db
+      .prepare('SELECT tag FROM user_tags WHERE entry_id = ?')
+      .all(entryId) as Array<{ tag: string }>;
     return rows.map((r) => r.tag);
   }
 
@@ -237,7 +265,7 @@ export class SqliteEngine {
     const transaction = this.db.transaction(() => {
       this.db.prepare('DELETE FROM scan_snapshots').run();
       const insertStmt = this.db.prepare(
-        'INSERT INTO scan_snapshots (id, name, type, content_hash) VALUES (?, ?, ?, ?)'
+        'INSERT INTO scan_snapshots (id, name, type, content_hash) VALUES (?, ?, ?, ?)',
       );
       for (const entry of entries) {
         const hash = createHash('sha256')
@@ -249,7 +277,11 @@ export class SqliteEngine {
     transaction();
   }
 
-  getDiff(currentEntries: readonly VaultEntry[]): { added: VaultEntry[]; removed: string[]; modified: VaultEntry[] } {
+  getDiff(currentEntries: readonly VaultEntry[]): {
+    added: VaultEntry[];
+    removed: string[];
+    modified: VaultEntry[];
+  } {
     const snapshotRows = this.db.prepare('SELECT * FROM scan_snapshots').all() as Array<{
       id: string;
       name: string;

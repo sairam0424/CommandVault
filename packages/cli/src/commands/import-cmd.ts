@@ -16,9 +16,7 @@ export function createImportCommand(): Command {
       const spinner = ora('Importing entries...').start();
 
       const isUrl = source.startsWith('http://') || source.startsWith('https://');
-      const result = isUrl
-        ? await importFromUrl(source)
-        : await importFromFile(source);
+      const result = isUrl ? await importFromUrl(source) : await importFromFile(source);
 
       if (result.errors.length > 0) {
         for (const err of result.errors) {

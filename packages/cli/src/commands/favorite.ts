@@ -28,11 +28,11 @@ export function createFavoriteCommand(): Command {
         console.log('');
         if (isFavorite) {
           console.log(
-            `  ${chalk.yellow('★')} Favorited ${colorFn(chalk.bold(entry.name))} ${chalk.dim(`(${typeEmoji(entry.type)} ${entry.type})`)}`
+            `  ${chalk.yellow('★')} Favorited ${colorFn(chalk.bold(entry.name))} ${chalk.dim(`(${typeEmoji(entry.type)} ${entry.type})`)}`,
           );
         } else {
           console.log(
-            `  ${chalk.dim('☆')} Unfavorited ${colorFn(chalk.bold(entry.name))} ${chalk.dim(`(${typeEmoji(entry.type)} ${entry.type})`)}`
+            `  ${chalk.dim('☆')} Unfavorited ${colorFn(chalk.bold(entry.name))} ${chalk.dim(`(${typeEmoji(entry.type)} ${entry.type})`)}`,
           );
         }
         console.log('');

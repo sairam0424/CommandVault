@@ -101,9 +101,7 @@ export interface VaultEventMap {
   readonly 'entry:updated': VaultEntry;
   readonly 'entry:removed': string;
   readonly 'scan:complete': VaultStats;
-  readonly 'error': ParseError;
+  readonly error: ParseError;
 }
 
-export type VaultEventHandler<K extends keyof VaultEventMap> = (
-  data: VaultEventMap[K]
-) => void;
+export type VaultEventHandler<K extends keyof VaultEventMap> = (data: VaultEventMap[K]) => void;

@@ -31,7 +31,10 @@ export async function parseHooks(settingsPath: string): Promise<ParserResult> {
     const raw = await readFile(settingsPath, 'utf-8');
     settings = JSON.parse(raw);
   } catch {
-    return { entries: [], errors: [{ filePath: settingsPath, message: 'Settings file not found' }] };
+    return {
+      entries: [],
+      errors: [{ filePath: settingsPath, message: 'Settings file not found' }],
+    };
   }
 
   if (!settings.hooks) {

@@ -1,7 +1,13 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 import type { VaultEntry, ParserResult, ParseError } from '../types/index.js';
-import { generateId, parseFrontmatter, getLastModified, inferSource, extractTags } from './utils.js';
+import {
+  generateId,
+  parseFrontmatter,
+  getLastModified,
+  inferSource,
+  extractTags,
+} from './utils.js';
 
 export async function parseAgents(agentsDir: string): Promise<ParserResult> {
   const entries: VaultEntry[] = [];
@@ -11,7 +17,10 @@ export async function parseAgents(agentsDir: string): Promise<ParserResult> {
   try {
     files = (await readdir(agentsDir)).filter((f) => f.endsWith('.md'));
   } catch {
-    return { entries: [], errors: [{ filePath: agentsDir, message: 'Agents directory not found' }] };
+    return {
+      entries: [],
+      errors: [{ filePath: agentsDir, message: 'Agents directory not found' }],
+    };
   }
 
   const parsePromises = files.map(async (file) => {
@@ -20,9 +29,7 @@ export async function parseAgents(agentsDir: string): Promise<ParserResult> {
       const raw = await readFile(filePath, 'utf-8');
       const { data, content } = parseFrontmatter(raw);
       const name = data.name ?? basename(file, '.md');
-      const description = typeof data.description === 'string'
-        ? data.description.trim()
-        : '';
+      const description = typeof data.description === 'string' ? data.description.trim() : '';
       const source = inferSource(name, filePath);
       const tags = extractTags(name, description, data);
       const lastModified = await getLastModified(filePath);

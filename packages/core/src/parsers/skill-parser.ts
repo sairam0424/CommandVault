@@ -2,7 +2,13 @@ import { readFile } from 'node:fs/promises';
 import { readdir } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 import type { VaultEntry, ParserResult, ParseError } from '../types/index.js';
-import { generateId, parseFrontmatter, getLastModified, inferSource, extractTags } from './utils.js';
+import {
+  generateId,
+  parseFrontmatter,
+  getLastModified,
+  inferSource,
+  extractTags,
+} from './utils.js';
 
 export async function parseSkills(skillsDir: string): Promise<ParserResult> {
   const entries: VaultEntry[] = [];
@@ -12,7 +18,10 @@ export async function parseSkills(skillsDir: string): Promise<ParserResult> {
   try {
     dirs = await readdir(skillsDir);
   } catch {
-    return { entries: [], errors: [{ filePath: skillsDir, message: 'Skills directory not found' }] };
+    return {
+      entries: [],
+      errors: [{ filePath: skillsDir, message: 'Skills directory not found' }],
+    };
   }
 
   const parsePromises = dirs.map(async (dir) => {
@@ -21,9 +30,7 @@ export async function parseSkills(skillsDir: string): Promise<ParserResult> {
       const raw = await readFile(skillFile, 'utf-8');
       const { data, content } = parseFrontmatter(raw);
       const name = data.name ?? dir;
-      const description = typeof data.description === 'string'
-        ? data.description.trim()
-        : '';
+      const description = typeof data.description === 'string' ? data.description.trim() : '';
       const source = inferSource(name, skillFile);
       const tags = extractTags(name, description, data);
       const lastModified = await getLastModified(skillFile);

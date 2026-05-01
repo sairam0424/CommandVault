@@ -1,7 +1,13 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { join, basename, dirname } from 'node:path';
 import type { VaultEntry, ParserResult, ParseError } from '../types/index.js';
-import { generateId, parseFrontmatter, getLastModified, inferSource, extractTags } from './utils.js';
+import {
+  generateId,
+  parseFrontmatter,
+  getLastModified,
+  inferSource,
+  extractTags,
+} from './utils.js';
 
 async function walkDir(dir: string): Promise<string[]> {
   const results: string[] = [];
@@ -26,7 +32,10 @@ export async function parseCommands(commandsDir: string): Promise<ParserResult> 
   try {
     files = await walkDir(commandsDir);
   } catch {
-    return { entries: [], errors: [{ filePath: commandsDir, message: 'Commands directory not found' }] };
+    return {
+      entries: [],
+      errors: [{ filePath: commandsDir, message: 'Commands directory not found' }],
+    };
   }
 
   const parsePromises = files.map(async (filePath) => {
@@ -35,13 +44,9 @@ export async function parseCommands(commandsDir: string): Promise<ParserResult> 
       const { data, content } = parseFrontmatter(raw);
       const parentDir = basename(dirname(filePath));
       const fileName = basename(filePath, '.md');
-      const commandName = parentDir !== 'commands'
-        ? `${parentDir}:${fileName}`
-        : fileName;
+      const commandName = parentDir !== 'commands' ? `${parentDir}:${fileName}` : fileName;
       const name = data.name ?? commandName;
-      const description = typeof data.description === 'string'
-        ? data.description.trim()
-        : '';
+      const description = typeof data.description === 'string' ? data.description.trim() : '';
       const source = inferSource(name, filePath);
       const tags = extractTags(name, description, data);
       const lastModified = await getLastModified(filePath);
