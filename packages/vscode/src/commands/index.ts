@@ -4,6 +4,7 @@ import type { EntriesProvider } from '../providers/entries-provider';
 import type { FavoritesProvider } from '../providers/favorites-provider';
 import type { RecentProvider } from '../providers/recent-provider';
 import { createDetailPanel } from '../webview/detail-panel';
+import { createStatsPanel } from '../webview/stats-panel';
 
 const TYPE_ICONS: Readonly<Record<EntryType, string>> = {
   skill: '$(symbol-event)',
@@ -212,42 +213,7 @@ export function registerCommands(
   const statsCommand = vscode.commands.registerCommand(
     'commandvault.stats',
     () => {
-      const stats = vault.getStats();
-      const typeLines = Object.entries(stats.byType)
-        .filter(([, count]) => count > 0)
-        .map(([type, count]) => `  ${type}: ${count}`)
-        .join('\n');
-
-      const sourceLines = Object.entries(stats.bySource)
-        .filter(([, count]) => count > 0)
-        .map(([source, count]) => `  ${source}: ${count}`)
-        .join('\n');
-
-      const summary = [
-        `Total Entries: ${stats.totalEntries}`,
-        `Favorites: ${stats.favoriteCount}`,
-        `Last Scan: ${stats.lastScanAt.toLocaleString()}`,
-        '',
-        'By Type:',
-        typeLines,
-        '',
-        'By Source:',
-        sourceLines,
-      ].join('\n');
-
-      vscode.window.showInformationMessage(
-        `CommandVault Stats: ${stats.totalEntries} entries, ${stats.favoriteCount} favorites`,
-        'Show Details'
-      ).then((selection) => {
-        if (selection === 'Show Details') {
-          const outputChannel =
-            vscode.window.createOutputChannel('CommandVault Stats');
-          outputChannel.clear();
-          outputChannel.appendLine('=== CommandVault Stats ===');
-          outputChannel.appendLine(summary);
-          outputChannel.show();
-        }
-      });
+      createStatsPanel(context, vault);
     }
   );
 
