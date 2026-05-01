@@ -15,9 +15,19 @@ const FUSE_OPTIONS: IFuseOptions<VaultEntry> = {
   minMatchCharLength: 2,
 };
 
+function buildFilterKey(options: SearchOptions): string {
+  return JSON.stringify({
+    t: options.type ?? null,
+    s: options.source ?? null,
+    g: options.tags ?? null,
+    f: options.favoritesOnly ?? false,
+  });
+}
+
 export class FuseEngine {
   private fuse: Fuse<VaultEntry>;
   private entries: VaultEntry[];
+  private filterCache: Map<string, Fuse<VaultEntry>> = new Map();
 
   constructor() {
     this.entries = [];
@@ -27,25 +37,38 @@ export class FuseEngine {
   index(entries: readonly VaultEntry[]): void {
     this.entries = [...entries];
     this.fuse = new Fuse(this.entries as VaultEntry[], FUSE_OPTIONS);
+    this.filterCache.clear();
   }
 
   search(options: SearchOptions): SearchResult[] {
-    const preFiltered = this.applyFilters(this.entries, options);
+    const hasFilters = options.type || options.source || options.tags?.length || options.favoritesOnly;
 
     if (!options.query.trim()) {
-      return preFiltered
+      const filtered = hasFilters ? this.applyFilters(this.entries, options) : this.entries;
+      return filtered
         .slice(0, options.limit ?? 50)
         .map((entry) => ({ entry, score: 1, matchedFields: [] }));
     }
 
-    const filteredFuse = new Fuse(preFiltered, FUSE_OPTIONS);
-    const results = filteredFuse.search(options.query);
+    const fuseInstance = hasFilters ? this.getFilteredFuse(options) : this.fuse;
+    const results = fuseInstance.search(options.query);
 
     return results.slice(0, options.limit ?? 50).map((r) => ({
       entry: r.item,
       score: 1 - (r.score ?? 0),
       matchedFields: r.matches?.map((m) => m.key ?? '') ?? [],
     }));
+  }
+
+  private getFilteredFuse(options: SearchOptions): Fuse<VaultEntry> {
+    const key = buildFilterKey(options);
+    const cached = this.filterCache.get(key);
+    if (cached) return cached;
+
+    const filtered = this.applyFilters(this.entries, options);
+    const instance = new Fuse(filtered, FUSE_OPTIONS);
+    this.filterCache.set(key, instance);
+    return instance;
   }
 
   private applyFilters(entries: readonly VaultEntry[], options: SearchOptions): VaultEntry[] {
