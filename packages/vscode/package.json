@@ -139,9 +139,8 @@
     }
   },
   "scripts": {
-    "build": "npm run build:webview && npm run build:extension",
+    "build": "npm run build:extension",
     "build:extension": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --external:better-sqlite3 --format=cjs --platform=node",
-    "build:webview": "cd src/webview && npx vite build",
     "dev": "npm run build:extension -- --watch",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
