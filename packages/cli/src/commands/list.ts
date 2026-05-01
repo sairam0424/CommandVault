@@ -77,6 +77,11 @@ export function createListCommand(): Command {
           entries = entries.filter((e) => e.favorite);
         }
 
+        if (globalOpts.json) {
+          console.log(JSON.stringify({ entries }, null, 2));
+          return;
+        }
+
         if (entries.length === 0) {
           console.log(chalk.yellow('\nNo entries found matching your filters.\n'));
           return;

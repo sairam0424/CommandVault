@@ -80,6 +80,11 @@
       {
         "command": "commandvault.export",
         "title": "CommandVault: Export Collection"
+      },
+      {
+        "command": "commandvault.copyContent",
+        "title": "CommandVault: Copy Content",
+        "icon": "$(copy)"
       }
     ],
     "menus": {
@@ -107,6 +112,10 @@
           "group": "inline"
         },
         {
+          "command": "commandvault.copyContent",
+          "when": "viewItem == entry"
+        },
+        {
           "command": "commandvault.openFile",
           "when": "viewItem == entry"
         },
@@ -116,6 +125,13 @@
         }
       ]
     },
+    "keybindings": [
+      {
+        "command": "commandvault.search",
+        "key": "ctrl+shift+v",
+        "mac": "cmd+shift+v"
+      }
+    ],
     "configuration": {
       "title": "CommandVault",
       "properties": {
