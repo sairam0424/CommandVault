@@ -9,53 +9,69 @@ import { FuseEngine } from './fuse-engine.js';
 import { MiniSearchEngine } from './minisearch-engine.js';
 import { SqliteEngine } from './sqlite-engine.js';
 import { normalizeScore } from './normalizer.js';
+import { LruCache } from './lru-cache.js';
 
 export class SearchEngine {
-  private readonly fuseEngine: FuseEngine;
-  private readonly miniSearchEngine: MiniSearchEngine;
+  private fuseEngine: FuseEngine | null = null;
+  private miniSearchEngine: MiniSearchEngine | null = null;
   private readonly sqliteEngine: SqliteEngine;
   private readonly defaultTier: SearchTier;
+  private pendingEntries: readonly VaultEntry[] = [];
+  private readonly cache = new LruCache<SearchResult[]>(100, 30_000);
 
   constructor(dbPath: string, defaultTier: SearchTier = 'minisearch') {
-    this.fuseEngine = new FuseEngine();
-    this.miniSearchEngine = new MiniSearchEngine();
     this.sqliteEngine = new SqliteEngine(dbPath);
     this.defaultTier = defaultTier;
   }
 
   index(entries: readonly VaultEntry[]): void {
-    this.fuseEngine.index(entries);
-    this.miniSearchEngine.index(entries);
+    this.pendingEntries = entries;
+    this.cache.clear();
+
     this.sqliteEngine.index(entries);
+
+    if (this.fuseEngine) {
+      this.fuseEngine.index(entries);
+    }
+    if (this.miniSearchEngine) {
+      this.miniSearchEngine.index(entries);
+    }
   }
 
   search(options: SearchOptions): SearchResult[] {
-    const tier = options.tier ?? this.defaultTier;
+    const cacheKey = JSON.stringify(options);
+    const cached = this.cache.get(cacheKey);
+    if (cached) return cached;
 
+    const tier = options.tier ?? this.defaultTier;
     let rawResults: SearchResult[];
+
     switch (tier) {
       case 'fuse':
-        rawResults = this.fuseEngine.search(options);
+        rawResults = this.getFuse().search(options);
         break;
       case 'minisearch':
-        rawResults = this.miniSearchEngine.search(options);
+        rawResults = this.getMiniSearch().search(options);
         break;
       case 'sqlite':
         rawResults = this.sqliteEngine.search(options);
         break;
     }
 
-    if (options.query.trim()) {
-      return normalizeScore(rawResults, options.weights, options.query);
-    }
-    return rawResults;
+    const results = options.query.trim()
+      ? normalizeScore(rawResults, options.weights, options.query)
+      : rawResults;
+
+    this.cache.set(cacheKey, results);
+    return results;
   }
 
   suggest(query: string, limit?: number): string[] {
-    return this.miniSearchEngine.suggest(query, limit);
+    return this.getMiniSearch().suggest(query, limit);
   }
 
   toggleFavorite(id: string): boolean {
+    this.cache.clear();
     return this.sqliteEngine.toggleFavorite(id);
   }
 
@@ -97,5 +113,21 @@ export class SearchEngine {
 
   close(): void {
     this.sqliteEngine.close();
+  }
+
+  private getFuse(): FuseEngine {
+    if (!this.fuseEngine) {
+      this.fuseEngine = new FuseEngine();
+      this.fuseEngine.index(this.pendingEntries);
+    }
+    return this.fuseEngine;
+  }
+
+  private getMiniSearch(): MiniSearchEngine {
+    if (!this.miniSearchEngine) {
+      this.miniSearchEngine = new MiniSearchEngine();
+      this.miniSearchEngine.index(this.pendingEntries);
+    }
+    return this.miniSearchEngine;
   }
 }
