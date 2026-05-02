@@ -29,7 +29,7 @@
         {
           "id": "commandvault",
           "title": "CommandVault",
-          "icon": "media/vault-icon.png"
+          "icon": "media/vault-icon.svg"
         }
       ]
     },
