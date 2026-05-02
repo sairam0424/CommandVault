@@ -181,7 +181,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const configWatcher = vscode.workspace.onDidChangeConfiguration(async (e) => {
     if (
       e.affectsConfiguration('commandvault.claudeConfigPath') ||
-      e.affectsConfiguration('commandvault.searchTier')
+      e.affectsConfiguration('commandvault.searchTier') ||
+      e.affectsConfiguration('commandvault.enableFileWatcher')
     ) {
       try {
         if (vault) {
