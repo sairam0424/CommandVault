@@ -34,8 +34,8 @@ const VALID_SOURCES: ReadonlySet<string> = new Set<EntrySource>([
 
 function validateUrl(url: string): void {
   const parsed = new URL(url);
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-    throw new Error(`Unsupported protocol: ${parsed.protocol}`);
+  if (parsed.protocol !== 'https:') {
+    throw new Error('Only HTTPS URLs are supported');
   }
   const hostname = parsed.hostname;
   const blockedPatterns = [
@@ -200,15 +200,37 @@ export async function importFromUrl(url: string): Promise<ParserResult> {
     };
   }
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15_000);
+
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+
     if (!response.ok) {
       return {
         entries: [],
         errors: [{ filePath: url, message: `HTTP ${response.status}: ${response.statusText}` }],
       };
     }
+
+    const MAX_RESPONSE_SIZE = 10 * 1024 * 1024;
+    const contentLength = response.headers.get('content-length');
+    if (contentLength && parseInt(contentLength, 10) > MAX_RESPONSE_SIZE) {
+      return {
+        entries: [],
+        errors: [{ filePath: url, message: 'Response too large (max 10MB)' }],
+      };
+    }
+
     const text = await response.text();
+    if (text.length > MAX_RESPONSE_SIZE) {
+      return {
+        entries: [],
+        errors: [{ filePath: url, message: 'Response exceeds 10MB limit' }],
+      };
+    }
+
     const tempPath = `remote:${url}`;
 
     let bundle: VaultExportBundle;
@@ -251,6 +273,13 @@ export async function importFromUrl(url: string): Promise<ParserResult> {
 
     return { entries, errors: [] };
   } catch (err) {
+    clearTimeout(timeoutId);
+    if (err instanceof Error && err.name === 'AbortError') {
+      return {
+        entries: [],
+        errors: [{ filePath: url, message: 'Request timed out (15s)' }],
+      };
+    }
     return {
       entries: [],
       errors: [{ filePath: url, message: `Fetch failed: ${(err as Error).message}` }],
