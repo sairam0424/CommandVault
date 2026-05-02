@@ -1,19 +1,5 @@
 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- Octagonal vault door outline -->
-  <polygon
-    points="8,2 16,2 22,8 22,16 16,22 8,22 2,16 2,8"
-    stroke="currentColor"
-    stroke-width="1.5"
-    stroke-linejoin="round"
-    fill="none"
-  />
-  <!-- Command prompt chevron ">" -->
-  <polyline
-    points="8.5,8 14,12 8.5,16"
-    stroke="currentColor"
-    stroke-width="1.5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-    fill="none"
-  />
+  <rect x="2.5" y="2.5" width="19" height="19" rx="3" stroke="currentColor" stroke-width="1.8" fill="none"/>
+  <circle cx="12" cy="12" r="6" stroke="currentColor" stroke-width="1.8" fill="none"/>
+  <polyline points="9.5,8.5 14.5,12 9.5,15.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>
