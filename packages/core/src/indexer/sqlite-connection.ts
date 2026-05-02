@@ -95,7 +95,7 @@ export class SqliteConnection {
 
   persist(): void {
     const data = this.db.export();
-    writeFileSync(this.dbPath, Buffer.from(data));
+    writeFileSync(this.dbPath, Buffer.from(data), { mode: 0o600 });
   }
 
   close(): void {
