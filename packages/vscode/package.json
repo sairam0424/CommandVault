@@ -1,11 +1,11 @@
 {
-  "name": "commandvault-vscode",
-  "displayName": "CommandVault",
+  "name": "commandvault-ai",
+  "displayName": "CommandVault AI",
   "description": "Browse, search, and manage AI slash commands, skills, agents, plugins, rules, and hooks from your sidebar",
-  "version": "0.1.3",
-  "author": "sairamugge",
+  "version": "0.1.5",
+  "author": "nothumanslabs",
   "license": "MIT",
-  "publisher": "SairamUgge",
+  "publisher": "nothumanslabs",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/sairam0424/CommandVault.git",

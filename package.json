@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Universal AI command manager — browse, search, and organize slash commands, skills, agents, plugins, rules, and hooks across all AI coding assistants",
-  "author": "sairamugge",
+  "author": "nothumanslabs",
   "license": "MIT",
   "repository": {
     "type": "git",

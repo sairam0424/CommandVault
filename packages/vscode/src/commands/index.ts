@@ -208,7 +208,7 @@ export function registerCommands(
       return;
     }
 
-    const bundle = exportEntries(allEntries, 'commandvault-vscode');
+    const bundle = exportEntries(allEntries, 'commandvault-ai');
     const content = JSON.stringify(bundle, null, 2);
     const encoder = new TextEncoder();
     await vscode.workspace.fs.writeFile(saveUri, encoder.encode(content));
