@@ -68,6 +68,7 @@ export interface VaultConfig {
   readonly dbPath: string;
   readonly enableWatcher: boolean;
   readonly defaultSearchTier: SearchTier;
+  readonly projectRoot?: string;
 }
 
 export interface ParsedFrontmatter {

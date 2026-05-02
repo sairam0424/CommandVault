@@ -117,20 +117,29 @@ export function registerCommands(
     },
   );
 
+  const toggleFavoriteHandler = (
+    entryOrNode: VaultEntry | { readonly entry: VaultEntry },
+  ): void => {
+    const entry = 'entry' in entryOrNode ? entryOrNode.entry : entryOrNode;
+    if (!entry?.id) {
+      vscode.window.showWarningMessage('CommandVault: No entry selected');
+      return;
+    }
+
+    const isFavorite = vault.toggleFavorite(entry.id);
+    const action = isFavorite ? 'added to' : 'removed from';
+    vscode.window.showInformationMessage(`CommandVault: "${entry.name}" ${action} favorites`);
+    refreshAll();
+  };
+
   const toggleFavoriteCommand = vscode.commands.registerCommand(
     'commandvault.toggleFavorite',
-    (entryOrNode: VaultEntry | { readonly entry: VaultEntry }) => {
-      const entry = 'entry' in entryOrNode ? entryOrNode.entry : entryOrNode;
-      if (!entry?.id) {
-        vscode.window.showWarningMessage('CommandVault: No entry selected');
-        return;
-      }
+    toggleFavoriteHandler,
+  );
 
-      const isFavorite = vault.toggleFavorite(entry.id);
-      const action = isFavorite ? 'added to' : 'removed from';
-      vscode.window.showInformationMessage(`CommandVault: "${entry.name}" ${action} favorites`);
-      refreshAll();
-    },
+  const unfavoriteCommand = vscode.commands.registerCommand(
+    'commandvault.unfavorite',
+    toggleFavoriteHandler,
   );
 
   const copyCommandCmd = vscode.commands.registerCommand(
@@ -238,6 +247,7 @@ export function registerCommands(
     refreshCommand,
     openDetailCommand,
     toggleFavoriteCommand,
+    unfavoriteCommand,
     copyCommandCmd,
     copyContentCommand,
     insertToTerminalCommand,

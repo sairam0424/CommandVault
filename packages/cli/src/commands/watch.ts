@@ -18,7 +18,7 @@ export function createWatchCommand(): Command {
     .action(async (_opts: unknown, command: Command) => {
       const globalOpts = command.optsWithGlobals() as CliGlobalOptions;
 
-      const spinner = ora('Initializing vault in watch mode...').start();
+      const spinner = globalOpts.json ? null : ora('Initializing vault in watch mode...').start();
 
       const vault = createVault({
         claudeConfigPath: globalOpts.claudePath,
@@ -28,9 +28,9 @@ export function createWatchCommand(): Command {
 
       try {
         const stats = await vault.initialize();
-        spinner.succeed(`Vault loaded: ${stats.totalEntries} entries indexed`);
+        spinner?.succeed(`Vault loaded: ${stats.totalEntries} entries indexed`);
       } catch (error) {
-        spinner.fail('Failed to initialize vault');
+        spinner?.fail('Failed to initialize vault');
         throw error;
       }
 

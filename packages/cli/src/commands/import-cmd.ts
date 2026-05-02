@@ -13,23 +13,23 @@ export function createImportCommand(): Command {
     .action(async (source: string, opts: { dryRun?: boolean }, command) => {
       const globalOpts = command.optsWithGlobals() as CliGlobalOptions;
 
-      const spinner = ora('Importing entries...').start();
+      const spinner = globalOpts.json ? null : ora('Importing entries...').start();
 
       const isUrl = source.startsWith('http://') || source.startsWith('https://');
       const result = isUrl ? await importFromUrl(source) : await importFromFile(source);
 
       if (result.errors.length > 0) {
         for (const err of result.errors) {
-          spinner.warn(chalk.yellow(`Warning: ${err.message}`));
+          spinner?.warn(chalk.yellow(`Warning: ${err.message}`));
         }
       }
 
       if (result.entries.length === 0) {
-        spinner.fail('No valid entries found in source');
+        spinner?.fail('No valid entries found in source');
         return;
       }
 
-      spinner.succeed(`Found ${result.entries.length} entries to import`);
+      spinner?.succeed(`Found ${result.entries.length} entries to import`);
 
       const table = new Table({
         head: [
@@ -61,6 +61,7 @@ export function createImportCommand(): Command {
 
       const vault = await createVaultInstance(globalOpts);
       try {
+        await vault.addEntries(result.entries);
         console.log(chalk.green(`\n✓ Imported ${result.entries.length} entries`));
       } finally {
         await vault.dispose();

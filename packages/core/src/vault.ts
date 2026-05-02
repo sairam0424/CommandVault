@@ -42,6 +42,7 @@ export class Vault {
   private pendingChanges: Map<ParserType, Set<string>> = new Map();
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private flushPromise: Promise<void> | null = null;
+  private scanLock: Promise<void> = Promise.resolve();
 
   constructor(config?: Partial<VaultConfig>) {
     this.config = {
@@ -61,6 +62,15 @@ export class Vault {
     return this.searchEngine;
   }
 
+  private withScanLock<T>(fn: () => Promise<T>): Promise<T> {
+    const prev = this.scanLock;
+    let resolve!: () => void;
+    this.scanLock = new Promise<void>((r) => {
+      resolve = r;
+    });
+    return prev.then(fn).finally(() => resolve());
+  }
+
   async initialize(): Promise<VaultStats> {
     await mkdir(DEFAULT_DB_DIR, { recursive: true });
     this.searchEngine = await SearchEngine.create(
@@ -77,35 +87,37 @@ export class Vault {
   }
 
   async scan(): Promise<void> {
-    const claudePath = this.config.claudeConfigPath;
+    return this.withScanLock(async () => {
+      const claudePath = this.config.claudeConfigPath;
 
-    const results = await Promise.all([
-      parseSkills(join(claudePath, 'skills')),
-      parseAgents(join(claudePath, 'agents')),
-      parseCommands(join(claudePath, 'commands')),
-      parsePlugins(join(claudePath, 'plugins')),
-      parseRules(join(claudePath, 'rules')),
-      parseHooks(join(claudePath, 'settings.json')),
-      detectAgentConfigs(process.cwd()),
-    ]);
+      const results = await Promise.all([
+        parseSkills(join(claudePath, 'skills')),
+        parseAgents(join(claudePath, 'agents')),
+        parseCommands(join(claudePath, 'commands')),
+        parsePlugins(join(claudePath, 'plugins')),
+        parseRules(join(claudePath, 'rules')),
+        parseHooks(join(claudePath, 'settings.json')),
+        detectAgentConfigs(this.config.projectRoot ?? process.cwd()),
+      ]);
 
-    const allEntries: VaultEntry[] = [];
-    const allErrors: ParseError[] = [];
+      const allEntries: VaultEntry[] = [];
+      const allErrors: ParseError[] = [];
 
-    for (const result of results) {
-      allEntries.push(...result.entries);
-      allErrors.push(...result.errors);
-    }
+      for (const result of results) {
+        allEntries.push(...result.entries);
+        allErrors.push(...result.errors);
+      }
 
-    this.entries = allEntries;
-    this.scanErrors = allErrors;
-    this.getSearchEngine().index(allEntries);
+      this.entries = allEntries;
+      this.scanErrors = allErrors;
+      this.getSearchEngine().index(allEntries);
 
-    this.emit('scan:complete', this.getStats());
+      this.emit('scan:complete', this.getStats());
 
-    for (const error of allErrors) {
-      this.emit('error', error);
-    }
+      for (const error of allErrors) {
+        this.emit('error', error);
+      }
+    });
   }
 
   search(options: SearchOptions): SearchResult[] {
@@ -178,13 +190,24 @@ export class Vault {
         return `/${entry.name}`;
       case 'command': {
         const ns = entry.metadata.namespace as string | undefined;
-        return ns ? `/${ns}:${entry.name.split(':').pop()}` : `/${entry.name}`;
+        if (!ns) return `/${entry.name}`;
+        if (entry.name.startsWith(`${ns}:`)) return `/${entry.name}`;
+        return `/${ns}:${entry.name}`;
       }
       case 'plugin':
         return `plugin:${entry.name}`;
       default:
         return entry.name;
     }
+  }
+
+  async addEntries(newEntries: readonly VaultEntry[]): Promise<number> {
+    return this.withScanLock(async () => {
+      this.entries = [...this.entries, ...newEntries];
+      this.getSearchEngine().index(this.entries);
+      this.emit('scan:complete', this.getStats());
+      return newEntries.length;
+    });
   }
 
   on<K extends keyof VaultEventMap>(event: K, handler: VaultEventHandler<K>): void {
@@ -223,23 +246,25 @@ export class Vault {
   };
 
   async scanSingle(parserType: ParserType): Promise<void> {
-    const result = await this.parserFns[parserType]();
+    return this.withScanLock(async () => {
+      const result = await this.parserFns[parserType]();
 
-    const kept = this.entries.filter((e) => e.type !== parserType);
-    this.entries = [...kept, ...result.entries];
+      const kept = this.entries.filter((e) => e.type !== parserType);
+      this.entries = [...kept, ...result.entries];
 
-    const keptErrors = this.scanErrors.filter((e) => {
-      const errorType = routePathToParser(e.filePath, this.config.claudeConfigPath);
-      return errorType !== parserType;
+      const keptErrors = this.scanErrors.filter((e) => {
+        const errorType = routePathToParser(e.filePath, this.config.claudeConfigPath);
+        return errorType !== parserType;
+      });
+      this.scanErrors = [...keptErrors, ...result.errors];
+
+      for (const error of result.errors) {
+        this.emit('error', error);
+      }
+
+      this.getSearchEngine().index(this.entries);
+      this.emit('scan:complete', this.getStats());
     });
-    this.scanErrors = [...keptErrors, ...result.errors];
-
-    for (const error of result.errors) {
-      this.emit('error', error);
-    }
-
-    this.getSearchEngine().index(this.entries);
-    this.emit('scan:complete', this.getStats());
   }
 
   private startWatcher(): void {
@@ -276,33 +301,35 @@ export class Vault {
   private async flushPendingChanges(): Promise<void> {
     if (this.pendingChanges.size === 0) return;
 
-    const parserTypes = [...this.pendingChanges.keys()];
-    this.pendingChanges.clear();
+    return this.withScanLock(async () => {
+      const parserTypes = [...this.pendingChanges.keys()];
+      this.pendingChanges.clear();
 
-    const results = await Promise.all(parserTypes.map((pt) => this.parserFns[pt]()));
+      const results = await Promise.all(parserTypes.map((pt) => this.parserFns[pt]()));
 
-    const typesToReplace = new Set(parserTypes);
-    const kept = this.entries.filter((e) => !typesToReplace.has(e.type as ParserType));
-    const newEntries: VaultEntry[] = [];
-    const newErrors: ParseError[] = [];
+      const typesToReplace = new Set(parserTypes);
+      const kept = this.entries.filter((e) => !typesToReplace.has(e.type as ParserType));
+      const newEntries: VaultEntry[] = [];
+      const newErrors: ParseError[] = [];
 
-    for (const result of results) {
-      newEntries.push(...result.entries);
-      newErrors.push(...result.errors);
-    }
+      for (const result of results) {
+        newEntries.push(...result.entries);
+        newErrors.push(...result.errors);
+      }
 
-    this.entries = [...kept, ...newEntries];
-    const keptErrors = this.scanErrors.filter((e) => {
-      const errorType = routePathToParser(e.filePath, this.config.claudeConfigPath);
-      return !typesToReplace.has(errorType as ParserType);
+      this.entries = [...kept, ...newEntries];
+      const keptErrors = this.scanErrors.filter((e) => {
+        const errorType = routePathToParser(e.filePath, this.config.claudeConfigPath);
+        return !typesToReplace.has(errorType as ParserType);
+      });
+      this.scanErrors = [...keptErrors, ...newErrors];
+      this.getSearchEngine().index(this.entries);
+      this.emit('scan:complete', this.getStats());
+
+      for (const error of newErrors) {
+        this.emit('error', error);
+      }
     });
-    this.scanErrors = [...keptErrors, ...newErrors];
-    this.getSearchEngine().index(this.entries);
-    this.emit('scan:complete', this.getStats());
-
-    for (const error of newErrors) {
-      this.emit('error', error);
-    }
   }
 
   private emit<K extends keyof VaultEventMap>(event: K, data: VaultEventMap[K]): void {

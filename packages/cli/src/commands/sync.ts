@@ -18,15 +18,15 @@ export function createSyncCommand(): Command {
         process.exit(1);
       }
 
-      const spinner = ora(`Fetching from ${url}...`).start();
+      const spinner = globalOpts.json ? null : ora(`Fetching from ${url}...`).start();
       const result = await importFromUrl(url);
 
       if (result.errors.length > 0) {
-        spinner.fail(chalk.red(result.errors[0].message));
+        spinner?.fail(chalk.red(result.errors[0].message));
         return;
       }
 
-      spinner.succeed(`Fetched ${result.entries.length} entries from remote`);
+      spinner?.succeed(`Fetched ${result.entries.length} entries from remote`);
 
       if (result.entries.length === 0) {
         console.log(chalk.yellow('No entries found at remote URL.'));
@@ -48,6 +48,7 @@ export function createSyncCommand(): Command {
 
       const vault = await createVaultInstance(globalOpts);
       try {
+        await vault.addEntries(result.entries);
         console.log(chalk.green(`\n✓ Synced ${result.entries.length} entries from remote`));
       } finally {
         await vault.dispose();

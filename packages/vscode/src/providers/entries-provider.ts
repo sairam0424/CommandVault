@@ -199,7 +199,7 @@ export class EntriesProvider implements vscode.TreeDataProvider<TreeNode> {
     item.description =
       entry.description.length > 60 ? `${entry.description.slice(0, 57)}...` : entry.description;
     item.tooltip = this.buildTooltip(entry);
-    item.contextValue = 'entry';
+    item.contextValue = entry.favorite ? 'entry-favorited' : 'entry';
     item.command = {
       command: 'commandvault.openDetail',
       title: 'View Detail',
