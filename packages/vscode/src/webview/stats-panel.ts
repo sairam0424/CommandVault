@@ -37,9 +37,19 @@ export function createStatsPanel(
   panel.webview.html = buildHtml(panel.webview, scriptUri, nonce);
 
   panel.webview.onDidReceiveMessage(
-    (message: { type: string }) => {
+    (message: { type: string; data?: string }) => {
       if (message.type === 'ready') {
         sendStats(panel, vault);
+      } else if (message.type === 'refresh') {
+        sendStats(panel, vault);
+      } else if (message.type === 'filterByType' && message.data) {
+        vscode.commands.executeCommand('commandvault.filterEntries', message.data);
+      } else if (message.type === 'openDetail' && message.data) {
+        const allEntries = vault.getAllEntries();
+        const entry = allEntries.find((e) => e.id === message.data);
+        if (entry) {
+          vscode.commands.executeCommand('commandvault.openDetail', entry);
+        }
       }
     },
     undefined,
@@ -65,7 +75,6 @@ function sendStats(panel: vscode.WebviewPanel, vault: Vault): void {
     ...stats,
     lastScanAt: stats.lastScanAt.toISOString(),
   };
-  panel.webview.postMessage({ type: 'stats', data: serializedStats });
 
   const allEntries = vault.getAllEntries();
   const topUsed = [...allEntries]
@@ -73,11 +82,16 @@ function sendStats(panel: vscode.WebviewPanel, vault: Vault): void {
     .sort((a, b) => b.usageCount - a.usageCount)
     .slice(0, 10)
     .map((entry) => ({
+      id: entry.id,
       name: entry.name,
       type: entry.type,
       usageCount: entry.usageCount,
     }));
-  panel.webview.postMessage({ type: 'topUsed', data: topUsed });
+
+  panel.webview.postMessage({
+    type: 'init',
+    data: { stats: serializedStats, topUsed },
+  });
 }
 
 function buildHtml(webview: vscode.Webview, scriptUri: vscode.Uri, nonce: string): string {

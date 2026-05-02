@@ -170,6 +170,42 @@ export class Vault {
     this.getSearchEngine().removeTag(id, tag);
   }
 
+  async toggleFavorites(ids: readonly string[]): Promise<ReadonlyMap<string, boolean>> {
+    return this.withScanLock(async () => {
+      const results = new Map<string, boolean>();
+      const engine = this.getSearchEngine();
+      for (const id of ids) {
+        results.set(id, engine.toggleFavorite(id));
+      }
+      engine.clearCache();
+      return results;
+    });
+  }
+
+  async addTags(ids: readonly string[], tags: readonly string[]): Promise<void> {
+    return this.withScanLock(async () => {
+      const engine = this.getSearchEngine();
+      for (const id of ids) {
+        for (const tag of tags) {
+          engine.addTag(id, tag);
+        }
+      }
+      engine.clearCache();
+    });
+  }
+
+  async removeTags(ids: readonly string[], tags: readonly string[]): Promise<void> {
+    return this.withScanLock(async () => {
+      const engine = this.getSearchEngine();
+      for (const id of ids) {
+        for (const tag of tags) {
+          engine.removeTag(id, tag);
+        }
+      }
+      engine.clearCache();
+    });
+  }
+
   getTagsForEntry(id: string): string[] {
     return this.getSearchEngine().getTagsForEntry(id);
   }

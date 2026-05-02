@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import type { Vault, VaultEntry, EntryType, SearchResult } from '@commandvault/core';
-import { exportEntries } from '@commandvault/core';
+import { exportEntries, importFromFile } from '@commandvault/core';
 import type { EntriesProvider } from '../providers/entries-provider';
 import type { FavoritesProvider } from '../providers/favorites-provider';
 import type { RecentProvider } from '../providers/recent-provider';
@@ -20,6 +20,30 @@ interface SearchQuickPickItem extends vscode.QuickPickItem {
   readonly entry: VaultEntry;
 }
 
+function parseSearchInput(input: string): {
+  query: string;
+  type?: EntryType;
+  tags?: string[];
+} {
+  let query = input;
+  let type: EntryType | undefined;
+  const tags: string[] = [];
+
+  const typeMatch = query.match(/^type:(\w+)\s*/);
+  if (typeMatch) {
+    type = typeMatch[1] as EntryType;
+    query = query.slice(typeMatch[0].length);
+  }
+
+  let tagMatch: RegExpMatchArray | null;
+  while ((tagMatch = query.match(/^tag:(\w+)\s*/))) {
+    tags.push(tagMatch[1]);
+    query = query.slice(tagMatch[0].length);
+  }
+
+  return { query, type, tags: tags.length > 0 ? tags : undefined };
+}
+
 export function registerCommands(
   context: vscode.ExtensionContext,
   vault: Vault,
@@ -35,24 +59,38 @@ export function registerCommands(
 
   const searchCommand = vscode.commands.registerCommand('commandvault.search', async () => {
     const quickPick = vscode.window.createQuickPick<SearchQuickPickItem>();
-    quickPick.placeholder = 'Search commands, skills, agents...';
+    quickPick.placeholder = 'Search commands (try type:skill or tag:security)';
     quickPick.matchOnDescription = true;
     quickPick.matchOnDetail = true;
 
     let debounceTimer: ReturnType<typeof setTimeout> | undefined;
     let isDisposed = false;
 
-    const updateResults = (query: string): void => {
+    const updateResults = (input: string): void => {
       if (isDisposed) return;
 
-      if (!query.trim()) {
+      const { query, type, tags } = parseSearchInput(input);
+
+      if (!query.trim() && !type && !tags) {
         const allEntries = vault.getAllEntries();
+        quickPick.items = allEntries.slice(0, 50).map((entry) => createQuickPickItem(entry));
+        return;
+      }
+
+      if (!query.trim() && (type || tags)) {
+        const allEntries = vault.getAllEntries().filter((entry) => {
+          if (type && entry.type !== type) return false;
+          if (tags && !tags.every((t) => entry.tags.includes(t))) return false;
+          return true;
+        });
         quickPick.items = allEntries.slice(0, 50).map((entry) => createQuickPickItem(entry));
         return;
       }
 
       const results: readonly SearchResult[] = vault.search({
         query,
+        type,
+        tags,
         limit: 50,
       });
 
@@ -242,6 +280,32 @@ export function registerCommands(
     },
   );
 
+  const importCommand = vscode.commands.registerCommand('commandvault.import', async () => {
+    const uris = await vscode.window.showOpenDialog({
+      filters: { 'Vault JSON': ['json'] },
+      canSelectMany: false,
+      title: 'Import CommandVault Collection',
+    });
+    if (!uris?.[0]) return;
+
+    try {
+      const result = await importFromFile(uris[0].fsPath);
+
+      if (result.entries.length === 0) {
+        vscode.window.showWarningMessage('No valid entries found in file');
+        return;
+      }
+
+      await vault.addEntries(result.entries);
+      refreshAll();
+      vscode.window.showInformationMessage(
+        `Imported ${result.entries.length} entries (${result.errors.length} warnings)`,
+      );
+    } catch (err) {
+      vscode.window.showErrorMessage(`Import failed: ${(err as Error).message}`);
+    }
+  });
+
   return [
     searchCommand,
     refreshCommand,
@@ -254,6 +318,7 @@ export function registerCommands(
     openFileCommand,
     statsCommand,
     exportCommand,
+    importCommand,
   ];
 }
 

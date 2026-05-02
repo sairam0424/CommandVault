@@ -181,14 +181,26 @@ export class EntryStore {
         params[paramName] = options.tags[i];
       }
     }
+    if (options.modifiedAfter) {
+      conditions.push(`last_modified >= $modifiedAfter`);
+      params.$modifiedAfter = options.modifiedAfter.toISOString();
+    }
+    if (options.modifiedBefore) {
+      conditions.push(`last_modified <= $modifiedBefore`);
+      params.$modifiedBefore = options.modifiedBefore.toISOString();
+    }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const limit = options.limit ?? 50;
     params.$limit = limit;
 
     const orderBy = 'ORDER BY usage_count DESC, name ASC';
+    const offsetClause = options.offset ? `OFFSET $offset` : '';
+    if (options.offset) {
+      params.$offset = options.offset;
+    }
 
-    const sql = `SELECT * FROM entries ${where} ${orderBy} LIMIT $limit`;
+    const sql = `SELECT * FROM entries ${where} ${orderBy} LIMIT $limit ${offsetClause}`;
     const rows = this.conn.queryAll<EntryRow>(sql, params);
 
     const { entryTagMap, userTagMap } = buildTagMaps(this.conn);

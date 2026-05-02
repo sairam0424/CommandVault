@@ -121,6 +121,11 @@
         "command": "commandvault.filterEntries",
         "title": "CommandVault: Filter Entries",
         "icon": "$(filter)"
+      },
+      {
+        "command": "commandvault.import",
+        "title": "CommandVault: Import Collection",
+        "icon": "$(cloud-download)"
       }
     ],
     "menus": {
@@ -181,6 +186,17 @@
         "command": "commandvault.search",
         "key": "ctrl+shift+v",
         "mac": "cmd+shift+v"
+      },
+      {
+        "command": "commandvault.refresh",
+        "key": "ctrl+shift+r",
+        "mac": "cmd+shift+r",
+        "when": "focusedView =~ /commandvault/"
+      },
+      {
+        "command": "commandvault.stats",
+        "key": "ctrl+shift+d",
+        "mac": "cmd+shift+d"
       }
     ],
     "walkthroughs": [

@@ -87,11 +87,13 @@ export class MiniSearchEngine {
 
   search(options: SearchOptions): SearchResult[] {
     const allEntries = [...this.entriesById.values()];
+    const offset = options.offset ?? 0;
+    const limit = options.limit ?? 50;
 
     if (!options.query.trim()) {
       const filtered = this.applyFilters(allEntries, options);
       return filtered
-        .slice(0, options.limit ?? 50)
+        .slice(offset, offset + limit)
         .map((entry) => ({ entry, score: 1, matchedFields: [] }));
     }
 
@@ -116,7 +118,7 @@ export class MiniSearchEngine {
       });
     }
 
-    return results.slice(0, options.limit ?? 50);
+    return results.slice(offset, offset + limit);
   }
 
   suggest(query: string, limit = 10): string[] {
@@ -137,6 +139,8 @@ export class MiniSearchEngine {
     if (options.tags && options.tags.length > 0) {
       if (!options.tags.every((t) => entry.tags.includes(t))) return false;
     }
+    if (options.modifiedAfter && entry.lastModified < options.modifiedAfter) return false;
+    if (options.modifiedBefore && entry.lastModified > options.modifiedBefore) return false;
     return true;
   }
 }

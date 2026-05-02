@@ -8,6 +8,7 @@ import {
   inferSource,
   extractTags,
 } from './utils.js';
+import { withRetry } from './retry.js';
 
 export async function parseAgents(agentsDir: string): Promise<ParserResult> {
   const entries: VaultEntry[] = [];
@@ -26,7 +27,7 @@ export async function parseAgents(agentsDir: string): Promise<ParserResult> {
   const parsePromises = files.map(async (file) => {
     const filePath = join(agentsDir, file);
     try {
-      const raw = await readFile(filePath, 'utf-8');
+      const raw = await withRetry(() => readFile(filePath, 'utf-8'));
       const { data, content } = parseFrontmatter(raw);
       const name = data.name ?? basename(file, '.md');
       const description = typeof data.description === 'string' ? data.description.trim() : '';

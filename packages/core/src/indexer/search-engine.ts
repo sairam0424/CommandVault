@@ -83,6 +83,10 @@ export class SearchEngine {
     return this.sqliteEngine.toggleFavorite(id);
   }
 
+  clearCache(): void {
+    this.cache.clear();
+  }
+
   incrementUsage(id: string): void {
     this.sqliteEngine.incrementUsage(id);
   }

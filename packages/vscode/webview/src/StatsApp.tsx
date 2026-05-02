@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 interface VaultStats {
   readonly totalEntries: number;
@@ -9,9 +9,18 @@ interface VaultStats {
 }
 
 interface TopEntry {
+  readonly id: string;
   readonly name: string;
   readonly type: string;
   readonly usageCount: number;
+}
+
+interface InitMessage {
+  readonly type: 'init';
+  readonly data: {
+    readonly stats: VaultStats;
+    readonly topUsed: readonly TopEntry[];
+  };
 }
 
 interface StatsMessage {
@@ -24,7 +33,7 @@ interface TopUsedMessage {
   readonly data: readonly TopEntry[];
 }
 
-type IncomingMessage = StatsMessage | TopUsedMessage;
+type IncomingMessage = InitMessage | StatsMessage | TopUsedMessage;
 
 const TYPE_COLORS: Readonly<Record<string, string>> = {
   skill: '#00bcd4',
@@ -40,9 +49,11 @@ const vscodeApi = acquireVsCodeApi();
 function BarChart({
   data,
   colorMap,
+  onBarClick,
 }: {
   readonly data: Readonly<Record<string, number>>;
   readonly colorMap?: Readonly<Record<string, string>>;
+  readonly onBarClick?: (label: string) => void;
 }) {
   const entries = Object.entries(data).filter(([, count]) => count > 0);
   if (entries.length === 0) {
@@ -57,9 +68,29 @@ function BarChart({
         const percentage = maxCount > 0 ? (count / maxCount) * 100 : 0;
         const barColor =
           colorMap?.[label] ?? 'var(--vscode-progressBar-background)';
+        const isClickable = !!onBarClick;
 
         return (
-          <div key={label} style={styles.barRow}>
+          <div
+            key={label}
+            style={{
+              ...styles.barRow,
+              ...(isClickable ? styles.clickableRow : {}),
+            }}
+            onClick={isClickable ? () => onBarClick(label) : undefined}
+            role={isClickable ? 'button' : undefined}
+            tabIndex={isClickable ? 0 : undefined}
+            onKeyDown={
+              isClickable
+                ? (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onBarClick(label);
+                    }
+                  }
+                : undefined
+            }
+          >
             <span style={styles.barLabel}>{label}</span>
             <div style={styles.barTrack}>
               <div
@@ -80,8 +111,10 @@ function BarChart({
 
 function TopUsedList({
   entries,
+  onEntryClick,
 }: {
   readonly entries: readonly TopEntry[];
+  readonly onEntryClick?: (id: string) => void;
 }) {
   if (entries.length === 0) {
     return <p style={styles.muted}>No usage data yet</p>;
@@ -90,9 +123,29 @@ function TopUsedList({
   return (
     <div style={styles.topList}>
       {entries.map((entry, index) => (
-        <div key={entry.name} style={styles.topListItem}>
+        <div key={entry.id ?? entry.name} style={styles.topListItem}>
           <span style={styles.topListRank}>#{index + 1}</span>
-          <span style={styles.topListName}>{entry.name}</span>
+          <span
+            style={{
+              ...styles.topListName,
+              ...(onEntryClick ? styles.clickableName : {}),
+            }}
+            onClick={onEntryClick && entry.id ? () => onEntryClick(entry.id) : undefined}
+            role={onEntryClick && entry.id ? 'button' : undefined}
+            tabIndex={onEntryClick && entry.id ? 0 : undefined}
+            onKeyDown={
+              onEntryClick && entry.id
+                ? (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onEntryClick(entry.id);
+                    }
+                  }
+                : undefined
+            }
+          >
+            {entry.name}
+          </span>
           <span
             style={{
               ...styles.topListBadge,
@@ -111,17 +164,48 @@ function TopUsedList({
   );
 }
 
+const AUTO_REFRESH_INTERVAL_MS = 30_000;
+
+function formatSecondsAgo(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${seconds % 60}s ago`;
+}
+
 export function StatsApp() {
   const [stats, setStats] = useState<VaultStats | null>(null);
   const [topUsed, setTopUsed] = useState<readonly TopEntry[]>([]);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number>(Date.now());
+  const [timeSinceUpdate, setTimeSinceUpdate] = useState<string>('just now');
+  const autoRefreshRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
+  const tickRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   const handleMessage = useCallback((event: MessageEvent) => {
     const message = event.data as IncomingMessage;
-    if (message.type === 'stats') {
+    if (message.type === 'init') {
+      setStats(message.data.stats);
+      setTopUsed(message.data.topUsed);
+      setLastUpdatedAt(Date.now());
+    } else if (message.type === 'stats') {
       setStats(message.data);
+      setLastUpdatedAt(Date.now());
     } else if (message.type === 'topUsed') {
       setTopUsed(message.data);
+      setLastUpdatedAt(Date.now());
     }
+  }, []);
+
+  const handleRefresh = useCallback(() => {
+    vscodeApi.postMessage({ type: 'refresh' });
+  }, []);
+
+  const handleTypeBarClick = useCallback((typeName: string) => {
+    vscodeApi.postMessage({ type: 'filterByType', data: typeName });
+  }, []);
+
+  const handleEntryClick = useCallback((entryId: string) => {
+    vscodeApi.postMessage({ type: 'openDetail', data: entryId });
   }, []);
 
   useEffect(() => {
@@ -131,6 +215,21 @@ export function StatsApp() {
       window.removeEventListener('message', handleMessage);
     };
   }, [handleMessage]);
+
+  useEffect(() => {
+    autoRefreshRef.current = setInterval(() => {
+      vscodeApi.postMessage({ type: 'refresh' });
+    }, AUTO_REFRESH_INTERVAL_MS);
+
+    tickRef.current = setInterval(() => {
+      setTimeSinceUpdate(formatSecondsAgo(Date.now() - lastUpdatedAt));
+    }, 1000);
+
+    return () => {
+      if (autoRefreshRef.current !== undefined) clearInterval(autoRefreshRef.current);
+      if (tickRef.current !== undefined) clearInterval(tickRef.current);
+    };
+  }, [lastUpdatedAt]);
 
   if (!stats) {
     return (
@@ -147,7 +246,20 @@ export function StatsApp() {
   return (
     <div style={styles.container}>
       <header style={styles.header}>
-        <h1 style={styles.title}>CommandVault Dashboard</h1>
+        <div style={styles.titleRow}>
+          <h1 style={styles.title}>CommandVault Dashboard</h1>
+          <div style={styles.refreshArea}>
+            <span style={styles.lastUpdated}>Updated: {timeSinceUpdate}</span>
+            <button
+              style={styles.refreshButton}
+              onClick={handleRefresh}
+              title="Refresh stats"
+              type="button"
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
         <div style={styles.headerStats}>
           <div style={styles.statCard}>
             <span style={styles.statValue}>{stats.totalEntries}</span>
@@ -166,7 +278,7 @@ export function StatsApp() {
 
       <section style={styles.section}>
         <h2 style={styles.sectionTitle}>By Type</h2>
-        <BarChart data={stats.byType} colorMap={TYPE_COLORS} />
+        <BarChart data={stats.byType} colorMap={TYPE_COLORS} onBarClick={handleTypeBarClick} />
       </section>
 
       <section style={styles.section}>
@@ -176,7 +288,7 @@ export function StatsApp() {
 
       <section style={styles.section}>
         <h2 style={styles.sectionTitle}>Top Used</h2>
-        <TopUsedList entries={topUsed} />
+        <TopUsedList entries={topUsed} onEntryClick={handleEntryClick} />
       </section>
     </div>
   );
@@ -197,11 +309,52 @@ const styles: Readonly<Record<string, React.CSSProperties>> = {
     paddingBottom: '16px',
     borderBottom: '1px solid var(--vscode-widget-border)',
   },
+  titleRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: '16px',
+    gap: '12px',
+    flexWrap: 'wrap' as const,
+  },
   title: {
     fontSize: '1.6em',
     fontWeight: 600,
     color: 'var(--vscode-foreground)',
-    margin: '0 0 16px 0',
+    margin: 0,
+  },
+  refreshArea: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    flexShrink: 0,
+  },
+  lastUpdated: {
+    fontSize: '0.8em',
+    color: 'var(--vscode-descriptionForeground)',
+  },
+  refreshButton: {
+    padding: '4px 12px',
+    fontSize: '0.85em',
+    fontWeight: 500,
+    color: 'var(--vscode-button-foreground)',
+    backgroundColor: 'var(--vscode-button-background)',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    lineHeight: 1.4,
+  },
+  clickableRow: {
+    cursor: 'pointer',
+    borderRadius: '4px',
+    padding: '4px 6px',
+    transition: 'background-color 0.15s ease',
+  },
+  clickableName: {
+    cursor: 'pointer',
+    textDecoration: 'underline',
+    textDecorationColor: 'var(--vscode-textLink-foreground)',
+    color: 'var(--vscode-textLink-foreground)',
   },
   headerStats: {
     display: 'flex',

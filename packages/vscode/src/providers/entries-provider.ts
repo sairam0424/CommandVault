@@ -76,6 +76,10 @@ export class EntriesProvider implements vscode.TreeDataProvider<TreeNode> {
     return this.sortBy;
   }
 
+  getFilter(): string {
+    return this.filterText;
+  }
+
   refresh(): void {
     this.onDidChangeTreeDataEmitter.fire(undefined);
   }

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as crypto from 'crypto';
 import type { VaultEntry } from '@commandvault/core';
 
 const PANEL_COLUMN = vscode.ViewColumn.One;
@@ -12,7 +13,8 @@ export function createDetailPanel(
   const existingPanel = activePanels.get(entry.id);
   if (existingPanel) {
     existingPanel.reveal(PANEL_COLUMN);
-    existingPanel.webview.html = buildHtml(entry);
+    const nonce = crypto.randomBytes(16).toString('hex');
+    existingPanel.webview.html = buildHtml(entry, nonce);
     return existingPanel;
   }
 
@@ -21,13 +23,34 @@ export function createDetailPanel(
     `${entry.name} - CommandVault`,
     PANEL_COLUMN,
     {
-      enableScripts: false,
+      enableScripts: true,
       retainContextWhenHidden: false,
     },
   );
 
   panel.iconPath = new vscode.ThemeIcon(getIconForType(entry.type));
-  panel.webview.html = buildHtml(entry);
+  const nonce = crypto.randomBytes(16).toString('hex');
+  panel.webview.html = buildHtml(entry, nonce);
+
+  panel.webview.onDidReceiveMessage(
+    async (message: { type: string; text?: string; path?: string }) => {
+      if (message.type === 'copy' && message.text) {
+        await vscode.env.clipboard.writeText(message.text);
+        vscode.window.showInformationMessage('CommandVault: Copied to clipboard');
+      } else if (message.type === 'openFile' && message.path) {
+        try {
+          const uri = vscode.Uri.file(message.path);
+          const doc = await vscode.workspace.openTextDocument(uri);
+          await vscode.window.showTextDocument(doc);
+        } catch (err) {
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          vscode.window.showErrorMessage(`CommandVault: Could not open file - ${errorMessage}`);
+        }
+      }
+    },
+    undefined,
+    context.subscriptions,
+  );
 
   activePanels.set(entry.id, panel);
 
@@ -98,7 +121,7 @@ function renderContent(content: string): string {
   return `<pre class="content-block">${escapeHtml(content)}</pre>`;
 }
 
-function buildHtml(entry: VaultEntry): string {
+function buildHtml(entry: VaultEntry, nonce: string): string {
   const typeBadgeClass = `badge badge-type badge-${entry.type}`;
   const sourceBadgeClass = 'badge badge-source';
 
@@ -106,7 +129,7 @@ function buildHtml(entry: VaultEntry): string {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     * {
@@ -271,18 +294,59 @@ function buildHtml(entry: VaultEntry): string {
       align-items: center;
       gap: 4px;
     }
+
+    .copy-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2px 8px;
+      margin-left: 8px;
+      font-size: 0.75em;
+      font-weight: 500;
+      color: var(--vscode-button-foreground);
+      background-color: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
+      border: none;
+      border-radius: 3px;
+      cursor: pointer;
+      vertical-align: middle;
+      line-height: 1.4;
+    }
+
+    .copy-btn:hover {
+      background-color: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-hoverBackground));
+    }
+
+    .file-link {
+      font-size: 0.85em;
+      color: var(--vscode-textLink-foreground);
+      word-break: break-all;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+
+    .file-link:hover {
+      color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground));
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+    }
   </style>
 </head>
 <body>
   <div class="header">
-    <h1>${escapeHtml(entry.name)}</h1>
+    <h1>
+      ${escapeHtml(entry.name)}
+      <button class="copy-btn" data-copy="${escapeHtml(entry.name)}" title="Copy name">Copy</button>
+    </h1>
     <div class="badges">
       <span class="${typeBadgeClass}">${escapeHtml(entry.type)}</span>
       <span class="${sourceBadgeClass}">${escapeHtml(entry.source)}</span>
       ${entry.favorite ? '<span class="badge badge-type">&#9733; Favorite</span>' : ''}
     </div>
     <p class="description">${escapeHtml(entry.description)}</p>
-    <p class="file-path">${escapeHtml(entry.filePath)}</p>
+    <a class="file-link" data-path="${escapeHtml(entry.filePath)}" title="Open file in editor">${escapeHtml(entry.filePath)}</a>
     <div class="info-row">
       <span>Used: ${entry.usageCount} times</span>
       <span>Modified: ${entry.lastModified.toLocaleDateString()}</span>
@@ -300,9 +364,44 @@ function buildHtml(entry: VaultEntry): string {
   </div>
 
   <div class="section">
-    <h2>Content</h2>
+    <div class="section-header">
+      <h2>Content</h2>
+      ${entry.content.trim() ? `<button class="copy-btn" data-copy-content="true" title="Copy content">Copy</button>` : ''}
+    </div>
     ${renderContent(entry.content)}
   </div>
+
+  <script nonce="${nonce}">
+    (function() {
+      var vscode = acquireVsCodeApi();
+      var content = ${JSON.stringify(entry.content)};
+
+      document.addEventListener('click', function(e) {
+        var target = e.target;
+
+        if (target.classList && target.classList.contains('copy-btn')) {
+          if (target.getAttribute('data-copy-content') === 'true') {
+            vscode.postMessage({ type: 'copy', text: content });
+          } else {
+            var text = target.getAttribute('data-copy');
+            if (text) {
+              vscode.postMessage({ type: 'copy', text: text });
+            }
+          }
+          return;
+        }
+
+        if (target.classList && target.classList.contains('file-link')) {
+          e.preventDefault();
+          var path = target.getAttribute('data-path');
+          if (path) {
+            vscode.postMessage({ type: 'openFile', path: path });
+          }
+          return;
+        }
+      });
+    })();
+  </script>
 </body>
 </html>`;
 }

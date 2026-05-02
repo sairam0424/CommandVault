@@ -15,13 +15,23 @@ const FUSE_OPTIONS: IFuseOptions<VaultEntry> = {
   minMatchCharLength: 2,
 };
 
+const MAX_FILTER_CACHE = 20;
+
 function buildFilterKey(options: SearchOptions): string {
   return JSON.stringify({
     t: options.type ?? null,
     s: options.source ?? null,
     g: options.tags ?? null,
     f: options.favoritesOnly ?? false,
+    ma: options.modifiedAfter?.toISOString() ?? null,
+    mb: options.modifiedBefore?.toISOString() ?? null,
   });
+}
+
+function matchesDateRange(entry: VaultEntry, options: SearchOptions): boolean {
+  if (options.modifiedAfter && entry.lastModified < options.modifiedAfter) return false;
+  if (options.modifiedBefore && entry.lastModified > options.modifiedBefore) return false;
+  return true;
 }
 
 export class FuseEngine {
@@ -42,19 +52,26 @@ export class FuseEngine {
 
   search(options: SearchOptions): SearchResult[] {
     const hasFilters =
-      options.type || options.source || options.tags?.length || options.favoritesOnly;
+      options.type ||
+      options.source ||
+      options.tags?.length ||
+      options.favoritesOnly ||
+      options.modifiedAfter ||
+      options.modifiedBefore;
+    const offset = options.offset ?? 0;
+    const limit = options.limit ?? 50;
 
     if (!options.query.trim()) {
       const filtered = hasFilters ? this.applyFilters(this.entries, options) : this.entries;
       return filtered
-        .slice(0, options.limit ?? 50)
+        .slice(offset, offset + limit)
         .map((entry) => ({ entry, score: 1, matchedFields: [] }));
     }
 
     const fuseInstance = hasFilters ? this.getFilteredFuse(options) : this.fuse;
     const results = fuseInstance.search(options.query);
 
-    return results.slice(0, options.limit ?? 50).map((r) => ({
+    return results.slice(offset, offset + limit).map((r) => ({
       entry: r.item,
       score: 1 - (r.score ?? 0),
       matchedFields: r.matches?.map((m) => m.key ?? '') ?? [],
@@ -65,6 +82,11 @@ export class FuseEngine {
     const key = buildFilterKey(options);
     const cached = this.filterCache.get(key);
     if (cached) return cached;
+
+    if (this.filterCache.size >= MAX_FILTER_CACHE) {
+      const oldest = this.filterCache.keys().next().value!;
+      this.filterCache.delete(oldest);
+    }
 
     const filtered = this.applyFilters(this.entries, options);
     const instance = new Fuse(filtered, FUSE_OPTIONS);
@@ -86,6 +108,9 @@ export class FuseEngine {
     }
     if (options.favoritesOnly) {
       filtered = filtered.filter((e) => e.favorite);
+    }
+    if (options.modifiedAfter || options.modifiedBefore) {
+      filtered = filtered.filter((e) => matchesDateRange(e, options));
     }
 
     return filtered;
