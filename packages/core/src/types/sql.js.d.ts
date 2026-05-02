@@ -29,3 +29,8 @@ declare module 'sql.js' {
   export type { Database, Statement, QueryExecResult, SqlJsStatic };
   export default function initSqlJs(config?: Record<string, unknown>): Promise<SqlJsStatic>;
 }
+
+declare module 'sql.js/dist/sql-asm.js' {
+  import type { SqlJsStatic } from 'sql.js';
+  export default function initSqlJs(config?: Record<string, unknown>): Promise<SqlJsStatic>;
+}

@@ -41,7 +41,8 @@ export class FuseEngine {
   }
 
   search(options: SearchOptions): SearchResult[] {
-    const hasFilters = options.type || options.source || options.tags?.length || options.favoritesOnly;
+    const hasFilters =
+      options.type || options.source || options.tags?.length || options.favoritesOnly;
 
     if (!options.query.trim()) {
       const filtered = hasFilters ? this.applyFilters(this.entries, options) : this.entries;

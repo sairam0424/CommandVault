@@ -49,7 +49,10 @@ const MIGRATIONS: readonly Migration[] = [
     description: 'Migrate entry IDs from filePath-based to type+name-based',
     up: (db) => {
       const rows = queryAll<{
-        id: string; name: string; type: string; source: string;
+        id: string;
+        name: string;
+        type: string;
+        source: string;
       }>(db, 'SELECT id, name, type, source FROM entries');
 
       const groups = new Map<string, string[]>();
@@ -69,16 +72,41 @@ const MIGRATIONS: readonly Migration[] = [
         }
         if (newId !== oldIds[0]) {
           db.run('UPDATE entries SET id = $new WHERE id = $old', { $new: newId, $old: oldIds[0] });
-          db.run('UPDATE user_tags SET entry_id = $new WHERE entry_id = $old', { $new: newId, $old: oldIds[0] });
-          db.run('UPDATE entry_tags SET entry_id = $new WHERE entry_id = $old', { $new: newId, $old: oldIds[0] });
-          db.run('UPDATE scan_snapshots SET id = $new WHERE id = $old', { $new: newId, $old: oldIds[0] });
+          db.run('UPDATE user_tags SET entry_id = $new WHERE entry_id = $old', {
+            $new: newId,
+            $old: oldIds[0],
+          });
+          db.run('UPDATE entry_tags SET entry_id = $new WHERE entry_id = $old', {
+            $new: newId,
+            $old: oldIds[0],
+          });
+          db.run('UPDATE scan_snapshots SET id = $new WHERE id = $old', {
+            $new: newId,
+            $old: oldIds[0],
+          });
         }
       }
     },
   },
 ];
 
+function removeLegacyFts(db: SqlJsDatabase): void {
+  db.run('DROP TRIGGER IF EXISTS entries_ai');
+  db.run('DROP TRIGGER IF EXISTS entries_ad');
+  db.run('DROP TRIGGER IF EXISTS entries_au');
+  for (const suffix of ['_data', '_idx', '_docsize', '_config']) {
+    db.run(`DROP TABLE IF EXISTS entries_fts${suffix}`);
+  }
+  // The FTS5 virtual table can't be dropped without the fts5 module loaded;
+  // remove it directly from sqlite_master instead.
+  db.run('PRAGMA writable_schema = ON');
+  db.run("DELETE FROM sqlite_master WHERE name = 'entries_fts' AND type = 'table'");
+  db.run('PRAGMA writable_schema = OFF');
+}
+
 export function runMigrations(db: SqlJsDatabase): void {
+  removeLegacyFts(db);
+
   db.run(`
     CREATE TABLE IF NOT EXISTS schema_version (
       version INTEGER PRIMARY KEY,
@@ -100,10 +128,10 @@ export function runMigrations(db: SqlJsDatabase): void {
   try {
     for (const migration of pending) {
       migration.up(db);
-      db.run(
-        'INSERT INTO schema_version (version, description) VALUES ($version, $description)',
-        { $version: migration.version, $description: migration.description },
-      );
+      db.run('INSERT INTO schema_version (version, description) VALUES ($version, $description)', {
+        $version: migration.version,
+        $description: migration.description,
+      });
     }
     db.run('COMMIT');
   } catch (e) {

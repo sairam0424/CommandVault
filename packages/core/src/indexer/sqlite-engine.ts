@@ -1,10 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import type { Database as SqlJsDatabase } from 'sql.js';
-
-const require = createRequire(import.meta.url);
-const initSqlJs = require('sql.js/dist/sql-asm.js') as (config?: Record<string, unknown>) => Promise<{ Database: new (data?: ArrayLike<number> | Buffer | null) => SqlJsDatabase }>;
 import type {
   VaultEntry,
   SearchResult,
@@ -73,6 +69,10 @@ export class SqliteEngine {
   }
 
   static async create(dbPath: string): Promise<SqliteEngine> {
+    const sqlAsmModule = await import('sql.js/dist/sql-asm.js');
+    const initSqlJs = (sqlAsmModule.default ?? sqlAsmModule) as (
+      config?: Record<string, unknown>,
+    ) => Promise<{ Database: new (data?: ArrayLike<number> | Buffer | null) => SqlJsDatabase }>;
     const SQL = await initSqlJs();
     let db: SqlJsDatabase;
     if (existsSync(dbPath)) {
@@ -81,8 +81,7 @@ export class SqliteEngine {
     } else {
       db = new SQL.Database();
     }
-    db.run('PRAGMA journal_mode = WAL');
-    // sql.js db.run() only executes a single statement; use exec() for multi-statement DDL
+    db.run('PRAGMA journal_mode = DELETE');
     db.exec(SCHEMA);
     const engine = new SqliteEngine(db, dbPath);
     runMigrations(db);
@@ -238,10 +237,9 @@ export class SqliteEngine {
   }
 
   toggleFavorite(id: string): boolean {
-    const row = this.queryOne<{ favorite: number }>(
-      'SELECT favorite FROM entries WHERE id = $id',
-      { $id: id },
-    );
+    const row = this.queryOne<{ favorite: number }>('SELECT favorite FROM entries WHERE id = $id', {
+      $id: id,
+    });
     if (!row) return false;
     const newVal = row.favorite ? 0 : 1;
     this.execute('UPDATE entries SET favorite = $fav WHERE id = $id', {
@@ -253,10 +251,7 @@ export class SqliteEngine {
   }
 
   incrementUsage(id: string): void {
-    this.execute(
-      'UPDATE entries SET usage_count = usage_count + 1 WHERE id = $id',
-      { $id: id },
-    );
+    this.execute('UPDATE entries SET usage_count = usage_count + 1 WHERE id = $id', { $id: id });
     this.persist();
   }
 
@@ -288,10 +283,7 @@ export class SqliteEngine {
   }
 
   getEntry(id: string): VaultEntry | undefined {
-    const row = this.queryOne<EntryRow>(
-      'SELECT * FROM entries WHERE id = $id',
-      { $id: id },
-    );
+    const row = this.queryOne<EntryRow>('SELECT * FROM entries WHERE id = $id', { $id: id });
     if (!row) return undefined;
 
     const entry = this.rowToEntry(row);
@@ -304,18 +296,18 @@ export class SqliteEngine {
   }
 
   addTag(entryId: string, tag: string): void {
-    this.execute(
-      'INSERT OR IGNORE INTO user_tags (entry_id, tag) VALUES ($entryId, $tag)',
-      { $entryId: entryId, $tag: tag },
-    );
+    this.execute('INSERT OR IGNORE INTO user_tags (entry_id, tag) VALUES ($entryId, $tag)', {
+      $entryId: entryId,
+      $tag: tag,
+    });
     this.persist();
   }
 
   removeTag(entryId: string, tag: string): void {
-    this.execute(
-      'DELETE FROM user_tags WHERE entry_id = $entryId AND tag = $tag',
-      { $entryId: entryId, $tag: tag },
-    );
+    this.execute('DELETE FROM user_tags WHERE entry_id = $entryId AND tag = $tag', {
+      $entryId: entryId,
+      $tag: tag,
+    });
     this.persist();
   }
 
