@@ -233,7 +233,9 @@ export function createDoctorCommand(): Command {
 
       // Run vault scan check with spinner
       console.log('');
-      const spinner = ora({ text: 'Testing vault scan pipeline...', indent: 2 }).start();
+      const spinner = globalOpts.json
+        ? null
+        : ora({ text: 'Testing vault scan pipeline...', indent: 2 }).start();
 
       let scanResult: CheckResult;
 
@@ -242,7 +244,7 @@ export function createDoctorCommand(): Command {
 
         try {
           const entries = vault.getAllEntries();
-          spinner.stop();
+          spinner?.stop();
 
           scanResult = {
             label: 'Vault scan pipeline',
@@ -253,7 +255,7 @@ export function createDoctorCommand(): Command {
           await vault.dispose();
         }
       } catch (error) {
-        spinner.stop();
+        spinner?.stop();
 
         const message = error instanceof Error ? error.message : String(error);
         scanResult = {

@@ -32,7 +32,7 @@ export function createExportCommand(): Command {
         }
 
         const resolvedPath = resolve(outputPath);
-        const writeSpinner = ora('Writing export file...').start();
+        const writeSpinner = globalOpts.json ? null : ora('Writing export file...').start();
 
         const sourceName = [
           'commandvault-cli',
@@ -43,7 +43,7 @@ export function createExportCommand(): Command {
         const count = await exportToFile(entries, resolvedPath, sourceName, !!opts.pretty);
 
         const fileStats = await stat(resolvedPath);
-        writeSpinner.succeed(`Exported ${count} entries to ${chalk.underline(resolvedPath)}`);
+        writeSpinner?.succeed(`Exported ${count} entries to ${chalk.underline(resolvedPath)}`);
         console.log(chalk.dim(`  Size: ${(fileStats.size / 1024).toFixed(1)} KB\n`));
       } finally {
         await vault.dispose();
