@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import Database from 'better-sqlite3';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import initSqlJs, { type Database as SqlJsDatabase } from 'sql.js';
 import type {
   VaultEntry,
   SearchResult,
@@ -24,29 +25,6 @@ const SCHEMA = `
     favorite INTEGER NOT NULL DEFAULT 0,
     usage_count INTEGER NOT NULL DEFAULT 0
   );
-
-  CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
-    name, description, tags, content,
-    content='entries',
-    content_rowid='rowid'
-  );
-
-  CREATE TRIGGER IF NOT EXISTS entries_ai AFTER INSERT ON entries BEGIN
-    INSERT INTO entries_fts(rowid, name, description, tags, content)
-    VALUES (new.rowid, new.name, new.description, new.tags, new.content);
-  END;
-
-  CREATE TRIGGER IF NOT EXISTS entries_ad AFTER DELETE ON entries BEGIN
-    INSERT INTO entries_fts(entries_fts, rowid, name, description, tags, content)
-    VALUES ('delete', old.rowid, old.name, old.description, old.tags, old.content);
-  END;
-
-  CREATE TRIGGER IF NOT EXISTS entries_au AFTER UPDATE ON entries BEGIN
-    INSERT INTO entries_fts(entries_fts, rowid, name, description, tags, content)
-    VALUES ('delete', old.rowid, old.name, old.description, old.tags, old.content);
-    INSERT INTO entries_fts(rowid, name, description, tags, content)
-    VALUES (new.rowid, new.name, new.description, new.tags, new.content);
-  END;
 
   CREATE TABLE IF NOT EXISTS user_tags (
     entry_id TEXT NOT NULL,
@@ -82,149 +60,213 @@ interface EntryRow {
 const sanitizeFtsToken = (w: string): string => w.replace(/["*+\-()^{}[\]:]/g, '').trim();
 
 export class SqliteEngine {
-  private db: Database.Database;
+  private db: SqlJsDatabase;
+  private readonly dbPath: string;
 
-  constructor(dbPath: string) {
-    this.db = new Database(dbPath);
-    this.db.pragma('journal_mode = WAL');
-    this.db.exec(SCHEMA);
-    runMigrations(this.db);
+  private constructor(db: SqlJsDatabase, dbPath: string) {
+    this.db = db;
+    this.dbPath = dbPath;
+  }
+
+  static async create(dbPath: string): Promise<SqliteEngine> {
+    const SQL = await initSqlJs();
+    let db: SqlJsDatabase;
+    if (existsSync(dbPath)) {
+      const buffer = readFileSync(dbPath);
+      db = new SQL.Database(buffer);
+    } else {
+      db = new SQL.Database();
+    }
+    db.run('PRAGMA journal_mode = WAL');
+    // sql.js db.run() only executes a single statement; use exec() for multi-statement DDL
+    db.exec(SCHEMA);
+    const engine = new SqliteEngine(db, dbPath);
+    runMigrations(db);
+    engine.persist();
+    return engine;
+  }
+
+  /** Run a SELECT and return all matching rows as plain objects. */
+  private queryAll<T>(sql: string, params: Record<string, unknown> = {}): T[] {
+    const stmt = this.db.prepare(sql);
+    if (Object.keys(params).length > 0) {
+      stmt.bind(params);
+    }
+    const results: T[] = [];
+    while (stmt.step()) {
+      results.push(stmt.getAsObject() as T);
+    }
+    stmt.free();
+    return results;
+  }
+
+  /** Run a SELECT and return the first matching row (or undefined). */
+  private queryOne<T>(sql: string, params: Record<string, unknown> = {}): T | undefined {
+    const results = this.queryAll<T>(sql, params);
+    return results[0];
+  }
+
+  /** Execute a mutation statement (INSERT, UPDATE, DELETE). */
+  private execute(sql: string, params: Record<string, unknown> = {}): void {
+    this.db.run(sql, params as Record<string, string | number | null | Uint8Array>);
+  }
+
+  /** Flush the in-memory database to disk. */
+  private persist(): void {
+    const data = this.db.export();
+    writeFileSync(this.dbPath, Buffer.from(data));
   }
 
   index(entries: readonly VaultEntry[]): void {
-    const insertStmt = this.db.prepare(`
-      INSERT OR REPLACE INTO entries
-        (id, name, type, source, description, file_path, tags, metadata, content, last_modified, favorite, usage_count)
-      VALUES
-        (@id, @name, @type, @source, @description, @filePath, @tags, @metadata, @content, @lastModified, @favorite, @usageCount)
-    `);
-
-    const existingRows = this.db.prepare('SELECT id FROM entries').all() as Array<{ id: string }>;
+    const existingRows = this.queryAll<{ id: string }>('SELECT id FROM entries');
     const existingIds = new Set(existingRows.map((r) => r.id));
     const newIds = new Set(entries.map((e) => e.id));
 
-    const deleteStmt = this.db.prepare('DELETE FROM entries WHERE id = ?');
-    const deleteTagsStmt = this.db.prepare('DELETE FROM entry_tags WHERE entry_id = ?');
-    const insertTagStmt = this.db.prepare(
-      'INSERT OR IGNORE INTO entry_tags (entry_id, tag) VALUES (?, ?)',
-    );
-
-    const transaction = this.db.transaction(() => {
+    this.db.run('BEGIN');
+    try {
       for (const id of existingIds) {
         if (!newIds.has(id)) {
-          deleteStmt.run(id);
-          deleteTagsStmt.run(id);
+          this.execute('DELETE FROM entries WHERE id = $id', { $id: id });
+          this.execute('DELETE FROM entry_tags WHERE entry_id = $id', { $id: id });
         }
       }
 
       for (const entry of entries) {
-        const existing = this.db
-          .prepare('SELECT favorite, usage_count FROM entries WHERE id = ?')
-          .get(entry.id) as { favorite: number; usage_count: number } | undefined;
+        const existing = this.queryOne<{ favorite: number; usage_count: number }>(
+          'SELECT favorite, usage_count FROM entries WHERE id = $id',
+          { $id: entry.id },
+        );
 
-        insertStmt.run({
-          id: entry.id,
-          name: entry.name,
-          type: entry.type,
-          source: entry.source,
-          description: entry.description,
-          filePath: entry.filePath,
-          tags: entry.tags.join(','),
-          metadata: JSON.stringify(entry.metadata),
-          content: entry.content,
-          lastModified: entry.lastModified.toISOString(),
-          favorite: existing?.favorite ?? (entry.favorite ? 1 : 0),
-          usageCount: existing?.usage_count ?? entry.usageCount,
-        });
+        this.execute(
+          `INSERT OR REPLACE INTO entries
+            (id, name, type, source, description, file_path, tags, metadata, content, last_modified, favorite, usage_count)
+          VALUES
+            ($id, $name, $type, $source, $description, $filePath, $tags, $metadata, $content, $lastModified, $favorite, $usageCount)`,
+          {
+            $id: entry.id,
+            $name: entry.name,
+            $type: entry.type,
+            $source: entry.source,
+            $description: entry.description,
+            $filePath: entry.filePath,
+            $tags: entry.tags.join(','),
+            $metadata: JSON.stringify(entry.metadata),
+            $content: entry.content,
+            $lastModified: entry.lastModified.toISOString(),
+            $favorite: existing?.favorite ?? (entry.favorite ? 1 : 0),
+            $usageCount: existing?.usage_count ?? entry.usageCount,
+          },
+        );
 
-        deleteTagsStmt.run(entry.id);
+        this.execute('DELETE FROM entry_tags WHERE entry_id = $id', { $id: entry.id });
         for (const tag of entry.tags) {
-          if (tag) insertTagStmt.run(entry.id, tag);
+          if (tag) {
+            this.execute(
+              'INSERT OR IGNORE INTO entry_tags (entry_id, tag) VALUES ($entryId, $tag)',
+              { $entryId: entry.id, $tag: tag },
+            );
+          }
         }
       }
-    });
 
-    transaction();
+      this.db.run('COMMIT');
+    } catch (e) {
+      this.db.run('ROLLBACK');
+      throw e;
+    }
+
+    this.persist();
   }
 
   search(options: SearchOptions): SearchResult[] {
     const conditions: string[] = [];
     const params: Record<string, unknown> = {};
 
-    const hasFtsQuery = (() => {
+    const hasTextQuery = (() => {
       if (!options.query.trim()) return false;
       const sanitized = options.query.split(/\s+/).map(sanitizeFtsToken).filter(Boolean);
       if (sanitized.length === 0) return false;
-      params.query = sanitized.map((w) => `"${w}"*`).join(' ');
+      for (let i = 0; i < sanitized.length; i++) {
+        const param = `$q${i}`;
+        params[param] = `%${sanitized[i]}%`;
+        conditions.push(
+          `(name LIKE ${param} OR description LIKE ${param} OR content LIKE ${param} OR tags LIKE ${param})`,
+        );
+      }
       return true;
     })();
 
     if (options.type) {
-      conditions.push('type = @type');
-      params.type = options.type;
+      conditions.push('type = $type');
+      params.$type = options.type;
     }
     if (options.source) {
-      conditions.push('source = @source');
-      params.source = options.source;
+      conditions.push('source = $source');
+      params.$source = options.source;
     }
     if (options.favoritesOnly) {
       conditions.push('favorite = 1');
     }
     if (options.tags && options.tags.length > 0) {
       for (let i = 0; i < options.tags.length; i++) {
+        const paramName = `$tag${i}`;
         conditions.push(
-          `(EXISTS (SELECT 1 FROM entry_tags WHERE entry_id = entries.id AND tag = @tag${i}) OR EXISTS (SELECT 1 FROM user_tags WHERE entry_id = entries.id AND tag = @tag${i}))`,
+          `(EXISTS (SELECT 1 FROM entry_tags WHERE entry_id = entries.id AND tag = ${paramName}) OR EXISTS (SELECT 1 FROM user_tags WHERE entry_id = entries.id AND tag = ${paramName}))`,
         );
-        params[`tag${i}`] = options.tags[i];
+        params[paramName] = options.tags[i];
       }
     }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const limit = options.limit ?? 50;
-    params.limit = limit;
+    params.$limit = limit;
 
-    const ftsJoin = hasFtsQuery
-      ? 'INNER JOIN entries_fts ON entries.rowid = entries_fts.rowid AND entries_fts MATCH @query'
-      : '';
-    const orderBy = hasFtsQuery
-      ? 'ORDER BY rank, usage_count DESC, name ASC'
-      : 'ORDER BY usage_count DESC, name ASC';
+    const orderBy = 'ORDER BY usage_count DESC, name ASC';
 
-    const sql = `SELECT entries.* FROM entries ${ftsJoin} ${where} ${orderBy} LIMIT @limit`;
-    const rows = this.db.prepare(sql).all(params) as EntryRow[];
+    const sql = `SELECT * FROM entries ${where} ${orderBy} LIMIT $limit`;
+    const rows = this.queryAll<EntryRow>(sql, params);
 
     return rows.map((row, idx) => ({
       entry: this.rowToEntry(row),
       score: 1 - idx / Math.max(rows.length, 1),
-      matchedFields: hasFtsQuery ? ['name', 'description', 'content'] : [],
+      matchedFields: hasTextQuery ? ['name', 'description', 'content'] : [],
     }));
   }
 
   toggleFavorite(id: string): boolean {
-    const row = this.db.prepare('SELECT favorite FROM entries WHERE id = ?').get(id) as
-      | { favorite: number }
-      | undefined;
+    const row = this.queryOne<{ favorite: number }>(
+      'SELECT favorite FROM entries WHERE id = $id',
+      { $id: id },
+    );
     if (!row) return false;
     const newVal = row.favorite ? 0 : 1;
-    this.db.prepare('UPDATE entries SET favorite = ? WHERE id = ?').run(newVal, id);
+    this.execute('UPDATE entries SET favorite = $fav WHERE id = $id', {
+      $fav: newVal,
+      $id: id,
+    });
+    this.persist();
     return newVal === 1;
   }
 
   incrementUsage(id: string): void {
-    this.db.prepare('UPDATE entries SET usage_count = usage_count + 1 WHERE id = ?').run(id);
+    this.execute(
+      'UPDATE entries SET usage_count = usage_count + 1 WHERE id = $id',
+      { $id: id },
+    );
+    this.persist();
   }
 
   getStats(): VaultStats {
-    const totalRow = this.db.prepare('SELECT COUNT(*) as c FROM entries').get() as { c: number };
-    const typeRows = this.db
-      .prepare('SELECT type, COUNT(*) as c FROM entries GROUP BY type')
-      .all() as Array<{ type: string; c: number }>;
-    const sourceRows = this.db
-      .prepare('SELECT source, COUNT(*) as c FROM entries GROUP BY source')
-      .all() as Array<{ source: string; c: number }>;
-    const favRow = this.db
-      .prepare('SELECT COUNT(*) as c FROM entries WHERE favorite = 1')
-      .get() as { c: number };
+    const totalRow = this.queryOne<{ c: number }>('SELECT COUNT(*) as c FROM entries');
+    const typeRows = this.queryAll<{ type: string; c: number }>(
+      'SELECT type, COUNT(*) as c FROM entries GROUP BY type',
+    );
+    const sourceRows = this.queryAll<{ source: string; c: number }>(
+      'SELECT source, COUNT(*) as c FROM entries GROUP BY source',
+    );
+    const favRow = this.queryOne<{ c: number }>(
+      'SELECT COUNT(*) as c FROM entries WHERE favorite = 1',
+    );
 
     const byType = Object.fromEntries(typeRows.map((r) => [r.type, r.c])) as Record<
       EntryType,
@@ -233,18 +275,19 @@ export class SqliteEngine {
     const bySource = Object.fromEntries(sourceRows.map((r) => [r.source, r.c]));
 
     return {
-      totalEntries: totalRow.c,
+      totalEntries: totalRow?.c ?? 0,
       byType,
       bySource,
-      favoriteCount: favRow.c,
+      favoriteCount: favRow?.c ?? 0,
       lastScanAt: new Date(),
     };
   }
 
   getEntry(id: string): VaultEntry | undefined {
-    const row = this.db.prepare('SELECT * FROM entries WHERE id = ?').get(id) as
-      | EntryRow
-      | undefined;
+    const row = this.queryOne<EntryRow>(
+      'SELECT * FROM entries WHERE id = $id',
+      { $id: id },
+    );
     if (!row) return undefined;
 
     const entry = this.rowToEntry(row);
@@ -257,36 +300,48 @@ export class SqliteEngine {
   }
 
   addTag(entryId: string, tag: string): void {
-    this.db
-      .prepare('INSERT OR IGNORE INTO user_tags (entry_id, tag) VALUES (?, ?)')
-      .run(entryId, tag);
+    this.execute(
+      'INSERT OR IGNORE INTO user_tags (entry_id, tag) VALUES ($entryId, $tag)',
+      { $entryId: entryId, $tag: tag },
+    );
+    this.persist();
   }
 
   removeTag(entryId: string, tag: string): void {
-    this.db.prepare('DELETE FROM user_tags WHERE entry_id = ? AND tag = ?').run(entryId, tag);
+    this.execute(
+      'DELETE FROM user_tags WHERE entry_id = $entryId AND tag = $tag',
+      { $entryId: entryId, $tag: tag },
+    );
+    this.persist();
   }
 
   getTagsForEntry(entryId: string): string[] {
-    const rows = this.db
-      .prepare('SELECT tag FROM user_tags WHERE entry_id = ?')
-      .all(entryId) as Array<{ tag: string }>;
+    const rows = this.queryAll<{ tag: string }>(
+      'SELECT tag FROM user_tags WHERE entry_id = $entryId',
+      { $entryId: entryId },
+    );
     return rows.map((r) => r.tag);
   }
 
   saveSnapshot(entries: readonly VaultEntry[]): void {
-    const transaction = this.db.transaction(() => {
-      this.db.prepare('DELETE FROM scan_snapshots').run();
-      const insertStmt = this.db.prepare(
-        'INSERT INTO scan_snapshots (id, name, type, content_hash) VALUES (?, ?, ?, ?)',
-      );
+    this.db.run('BEGIN');
+    try {
+      this.execute('DELETE FROM scan_snapshots');
       for (const entry of entries) {
         const hash = createHash('sha256')
           .update(entry.name + entry.type + entry.content)
           .digest('hex');
-        insertStmt.run(entry.id, entry.name, entry.type, hash);
+        this.execute(
+          'INSERT INTO scan_snapshots (id, name, type, content_hash) VALUES ($id, $name, $type, $hash)',
+          { $id: entry.id, $name: entry.name, $type: entry.type, $hash: hash },
+        );
       }
-    });
-    transaction();
+      this.db.run('COMMIT');
+    } catch (e) {
+      this.db.run('ROLLBACK');
+      throw e;
+    }
+    this.persist();
   }
 
   getDiff(currentEntries: readonly VaultEntry[]): {
@@ -294,12 +349,12 @@ export class SqliteEngine {
     removed: string[];
     modified: VaultEntry[];
   } {
-    const snapshotRows = this.db.prepare('SELECT * FROM scan_snapshots').all() as Array<{
+    const snapshotRows = this.queryAll<{
       id: string;
       name: string;
       type: string;
       content_hash: string;
-    }>;
+    }>('SELECT * FROM scan_snapshots');
 
     const snapshotMap = new Map(snapshotRows.map((r) => [r.id, r]));
     const currentMap = new Map(currentEntries.map((e) => [e.id, e]));
@@ -332,16 +387,19 @@ export class SqliteEngine {
   }
 
   close(): void {
+    this.persist();
     this.db.close();
   }
 
   private rowToEntry(row: EntryRow): VaultEntry {
-    const entryTagRows = this.db
-      .prepare('SELECT tag FROM entry_tags WHERE entry_id = ?')
-      .all(row.id) as Array<{ tag: string }>;
-    const userTagRows = this.db
-      .prepare('SELECT tag FROM user_tags WHERE entry_id = ?')
-      .all(row.id) as Array<{ tag: string }>;
+    const entryTagRows = this.queryAll<{ tag: string }>(
+      'SELECT tag FROM entry_tags WHERE entry_id = $id',
+      { $id: row.id },
+    );
+    const userTagRows = this.queryAll<{ tag: string }>(
+      'SELECT tag FROM user_tags WHERE entry_id = $id',
+      { $id: row.id },
+    );
     const entryTags =
       entryTagRows.length > 0
         ? entryTagRows.map((r) => r.tag)

@@ -19,9 +19,14 @@ export class SearchEngine {
   private pendingEntries: readonly VaultEntry[] = [];
   private readonly cache = new LruCache<SearchResult[]>(100, 30_000);
 
-  constructor(dbPath: string, defaultTier: SearchTier = 'minisearch') {
-    this.sqliteEngine = new SqliteEngine(dbPath);
+  private constructor(sqliteEngine: SqliteEngine, defaultTier: SearchTier) {
+    this.sqliteEngine = sqliteEngine;
     this.defaultTier = defaultTier;
+  }
+
+  static async create(dbPath: string, defaultTier: SearchTier = 'minisearch'): Promise<SearchEngine> {
+    const sqliteEngine = await SqliteEngine.create(dbPath);
+    return new SearchEngine(sqliteEngine, defaultTier);
   }
 
   index(entries: readonly VaultEntry[]): void {
