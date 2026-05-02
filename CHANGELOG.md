@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - v2 Upgrade
+
+### Added
+- Search pagination (offset), date range filters, bulk operations
+- Entry lifecycle events (entry:added/updated/removed)
+- vault config get/set, vault completions (bash/zsh/fish)
+- VS Code: import command, search prefixes (type:skill, tag:security)
+- VS Code: interactive stats dashboard with drill-down
+- VS Code: detail panel copy buttons and clickable file paths
+- VS Code: keyboard shortcuts (Cmd+Shift+R, Cmd+Shift+D)
+- VS Code: empty state messages for Favorites and Most Used
+- VS Code: filled/hollow star icons for favorite state
+- Incremental single-file parsing for faster watcher response
+- Error retry for transient FS errors (EBUSY, EMFILE)
+- Shell completion scripts (bash/zsh/fish)
+
+### Fixed
+- import and sync commands now persist data (was silently lost)
+- getSlashCommand double-namespace bug for namespaced commands
+- Scan race conditions (added concurrency mutex)
+- N+1 tag queries in search (100 queries to 3)
+- Fuse filter cache unbounded growth (capped at 20)
+- "Recently Used" renamed to "Most Used" (matches actual behavior)
+- Spinners suppressed in JSON output mode
+- Dynamic config reload (no window restart required)
+
+### Changed
+- SqliteEngine split into 5 focused modules (facade preserved)
+- Shared parser base reduces markdown parser boilerplate
+- withVault() wrapper for CLI commands
+
 ## [Unreleased] — Phases 4-8
 
 ### Added

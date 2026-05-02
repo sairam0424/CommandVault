@@ -32,11 +32,14 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Test core
-        run: pnpm --filter @commandvault/core test
-
       - name: Typecheck
         run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Format check
+        run: pnpm format:check
 
   package-vscode:
     name: Package VS Code Extension
