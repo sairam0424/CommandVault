@@ -27,7 +27,7 @@ export async function getLastModified(filePath: string): Promise<Date> {
 
 export function inferSource(name: string, filePath: string): EntrySource {
   const lowerName = name.toLowerCase();
-  const lowerPath = filePath.toLowerCase();
+  const lowerPath = filePath.toLowerCase().replace(/\\/g, '/');
 
   if (lowerName.startsWith('bmad-') || lowerPath.includes('/bmad-')) return 'bmad';
   if (lowerName.startsWith('mindforge') || lowerPath.includes('/mindforge/')) return 'mindforge';
