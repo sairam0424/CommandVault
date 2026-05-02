@@ -9,6 +9,7 @@ import {
   inferSource,
   extractTags,
 } from './utils.js';
+import { withRetry } from './retry.js';
 
 export async function parseSkills(skillsDir: string): Promise<ParserResult> {
   const entries: VaultEntry[] = [];
@@ -27,7 +28,7 @@ export async function parseSkills(skillsDir: string): Promise<ParserResult> {
   const parsePromises = dirs.map(async (dir) => {
     const skillFile = join(skillsDir, dir, 'SKILL.md');
     try {
-      const raw = await readFile(skillFile, 'utf-8');
+      const raw = await withRetry(() => readFile(skillFile, 'utf-8'));
       const { data, content } = parseFrontmatter(raw);
       const name = data.name ?? dir;
       const description = typeof data.description === 'string' ? data.description.trim() : '';

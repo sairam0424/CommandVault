@@ -15,6 +15,7 @@ export {
   parseRules,
   parseHooks,
   detectAgentConfigs,
+  withRetry,
 } from './parsers/index.js';
 export type {
   VaultEntry,

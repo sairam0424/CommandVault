@@ -59,6 +59,9 @@ export interface SearchOptions {
   readonly tags?: readonly string[];
   readonly favoritesOnly?: boolean;
   readonly limit?: number;
+  readonly offset?: number;
+  readonly modifiedAfter?: Date;
+  readonly modifiedBefore?: Date;
   readonly tier?: SearchTier;
   readonly weights?: Partial<RankingWeights>;
 }
