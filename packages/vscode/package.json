@@ -2,7 +2,7 @@
   "name": "commandvault-ai",
   "displayName": "CommandVault AI",
   "description": "Browse, search, and manage AI slash commands, skills, agents, plugins, rules, and hooks from your sidebar",
-  "version": "0.1.5",
+  "version": "0.1.7",
   "author": "nothumanslabs",
   "license": "MIT",
   "publisher": "nothumanslabs",
@@ -45,10 +45,20 @@
         },
         {
           "id": "commandvault.recent",
-          "name": "Recently Used"
+          "name": "Most Used"
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "commandvault.favorites",
+        "contents": "No favorites yet.\nRight-click any command and select \"Toggle Favorite\" to pin it here.\n[Search Commands](command:commandvault.search)"
+      },
+      {
+        "view": "commandvault.recent",
+        "contents": "No usage data yet.\nOpen any command to start tracking usage.\n[Search Commands](command:commandvault.search)"
+      }
+    ],
     "commands": [
       {
         "command": "commandvault.search",
@@ -68,6 +78,11 @@
         "command": "commandvault.toggleFavorite",
         "title": "CommandVault: Toggle Favorite",
         "icon": "$(star)"
+      },
+      {
+        "command": "commandvault.unfavorite",
+        "title": "CommandVault: Remove Favorite",
+        "icon": "$(star-full)"
       },
       {
         "command": "commandvault.copyCommand",
@@ -138,21 +153,26 @@
           "group": "inline"
         },
         {
+          "command": "commandvault.unfavorite",
+          "when": "viewItem == entry-favorited",
+          "group": "inline"
+        },
+        {
           "command": "commandvault.copyCommand",
-          "when": "viewItem == entry",
+          "when": "viewItem =~ /^entry/",
           "group": "inline"
         },
         {
           "command": "commandvault.copyContent",
-          "when": "viewItem == entry"
+          "when": "viewItem =~ /^entry/"
         },
         {
           "command": "commandvault.openFile",
-          "when": "viewItem == entry"
+          "when": "viewItem =~ /^entry/"
         },
         {
           "command": "commandvault.insertToTerminal",
-          "when": "viewItem == entry"
+          "when": "viewItem =~ /^entry/"
         }
       ]
     },

@@ -28,7 +28,7 @@ export class FavoritesProvider implements vscode.TreeDataProvider<VaultEntry> {
     item.iconPath = TYPE_ICONS[entry.type];
     item.description = `${entry.type} - ${entry.source}`;
     item.tooltip = this.buildTooltip(entry);
-    item.contextValue = 'entry';
+    item.contextValue = 'entry-favorited';
     item.command = {
       command: 'commandvault.openDetail',
       title: 'View Detail',

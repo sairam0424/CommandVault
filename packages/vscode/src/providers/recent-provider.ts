@@ -30,7 +30,7 @@ export class RecentProvider implements vscode.TreeDataProvider<VaultEntry> {
     item.iconPath = TYPE_ICONS[entry.type];
     item.description = `${entry.type} - used ${entry.usageCount}x`;
     item.tooltip = this.buildTooltip(entry);
-    item.contextValue = 'entry';
+    item.contextValue = entry.favorite ? 'entry-favorited' : 'entry';
     item.command = {
       command: 'commandvault.openDetail',
       title: 'View Detail',
