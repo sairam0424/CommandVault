@@ -13,6 +13,22 @@
   "bugs": {
     "url": "https://github.com/sairam0424/CommandVault/issues"
   },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "ai",
+    "commands",
+    "skills",
+    "agents",
+    "plugins",
+    "claude",
+    "copilot",
+    "cursor",
+    "windsurf",
+    "search",
+    "vault"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

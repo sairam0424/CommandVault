@@ -2,9 +2,11 @@
 src/**
 webview/**
 node_modules/**
+.turbo/**
 .gitignore
 tsconfig.json
 vite.config.ts
 **/*.map
 **/*.ts
 !dist/**
+media/vault-icon.svg
