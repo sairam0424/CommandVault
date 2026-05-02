@@ -6,3 +6,4 @@ export { parseRules } from './rule-parser.js';
 export { parseHooks } from './hook-parser.js';
 export { detectAgentConfigs } from './multi-agent-parser.js';
 export { withRetry } from './retry.js';
+export { parseSingleFile, isSingleFileParseable } from './single-file-parser.js';

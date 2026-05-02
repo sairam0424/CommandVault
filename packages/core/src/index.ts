@@ -16,6 +16,8 @@ export {
   parseHooks,
   detectAgentConfigs,
   withRetry,
+  parseSingleFile,
+  isSingleFileParseable,
 } from './parsers/index.js';
 export type {
   VaultEntry,
