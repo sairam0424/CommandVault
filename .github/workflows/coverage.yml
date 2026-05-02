@@ -1,0 +1,53 @@
+name: Test Coverage
+
+on:
+  pull_request:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  coverage:
+    name: Coverage Report
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Run tests with coverage
+        run: pnpm test -- --coverage
+
+      - name: Core coverage report
+        if: always()
+        uses: davelosert/vitest-coverage-report-action@v2
+        with:
+          name: 'Core'
+          json-summary-path: ./packages/core/coverage/coverage-summary.json
+          json-final-path: ./packages/core/coverage/coverage-final.json
+
+      - name: CLI coverage report
+        if: always()
+        uses: davelosert/vitest-coverage-report-action@v2
+        with:
+          name: 'CLI'
+          json-summary-path: ./packages/cli/coverage/coverage-summary.json
+          json-final-path: ./packages/cli/coverage/coverage-final.json
+
+      - name: VS Code coverage report
+        if: always()
+        uses: davelosert/vitest-coverage-report-action@v2
+        with:
+          name: 'VS Code'
+          json-summary-path: ./packages/vscode/coverage/coverage-summary.json
+          json-final-path: ./packages/vscode/coverage/coverage-final.json
