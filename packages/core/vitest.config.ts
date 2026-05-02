@@ -1,19 +1,11 @@
 import { defineConfig } from 'vitest/config';
-import { resolve } from 'path';
 
 export default defineConfig({
   test: {
-    include: ['src/__tests__/**/*.test.ts'],
-    globals: true,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json-summary', 'json'],
       reportsDirectory: './coverage',
-    },
-  },
-  resolve: {
-    alias: {
-      vscode: resolve(__dirname, 'src/__mocks__/vscode.ts'),
     },
   },
 });

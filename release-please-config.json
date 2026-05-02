@@ -1,0 +1,21 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    "packages/core": {
+      "package-name": "@commandvault/core",
+      "release-type": "node",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "packages/cli": {
+      "package-name": "@commandvault/cli",
+      "release-type": "node",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "packages/vscode": {
+      "package-name": "commandvault-ai",
+      "release-type": "node",
+      "changelog-path": "CHANGELOG.md"
+    }
+  },
+  "linked-versions": false
+}

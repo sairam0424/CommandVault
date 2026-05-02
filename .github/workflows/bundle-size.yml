@@ -1,0 +1,61 @@
+name: Bundle Size Check
+
+on:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - 'packages/*/src/**'
+      - 'packages/*/package.json'
+      - 'pnpm-lock.yaml'
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  size:
+    name: Check Bundle Size
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Measure bundle sizes
+        id: size
+        run: |
+          VSCODE_SIZE=$(stat -f%z packages/vscode/dist/extension.js 2>/dev/null || stat -c%s packages/vscode/dist/extension.js)
+          CORE_SIZE=$(find packages/core/dist -name '*.js' -exec cat {} + | wc -c)
+          CLI_SIZE=$(find packages/cli/dist -name '*.js' -exec cat {} + | wc -c)
+
+          echo "vscode=$VSCODE_SIZE" >> $GITHUB_OUTPUT
+          echo "core=$CORE_SIZE" >> $GITHUB_OUTPUT
+          echo "cli=$CLI_SIZE" >> $GITHUB_OUTPUT
+
+          echo "### Bundle Sizes" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Package | Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| VS Code extension | $(echo $VSCODE_SIZE | numfmt --to=iec-i 2>/dev/null || echo "${VSCODE_SIZE} bytes") |" >> $GITHUB_STEP_SUMMARY
+          echo "| Core | $(echo $CORE_SIZE | numfmt --to=iec-i 2>/dev/null || echo "${CORE_SIZE} bytes") |" >> $GITHUB_STEP_SUMMARY
+          echo "| CLI | $(echo $CLI_SIZE | numfmt --to=iec-i 2>/dev/null || echo "${CLI_SIZE} bytes") |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Comment PR with sizes
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: bundle-size
+          message: |
+            ## 📦 Bundle Sizes
+            | Package | Size |
+            |---------|------|
+            | VS Code extension | ${{ steps.size.outputs.vscode }} bytes |
+            | Core | ${{ steps.size.outputs.core }} bytes |
+            | CLI | ${{ steps.size.outputs.cli }} bytes |

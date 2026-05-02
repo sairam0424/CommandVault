@@ -1,0 +1,13 @@
+# Default owner for everything
+* @sairam0424
+
+# Package-specific ownership
+/packages/core/ @sairam0424
+/packages/cli/ @sairam0424
+/packages/vscode/ @sairam0424
+
+# CI/CD
+/.github/ @sairam0424
+
+# Documentation
+*.md @sairam0424
