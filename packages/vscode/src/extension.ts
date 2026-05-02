@@ -6,6 +6,10 @@ import { FavoritesProvider } from './providers/favorites-provider';
 import { RecentProvider } from './providers/recent-provider';
 import { registerCommands } from './commands/index';
 
+export interface VaultRef {
+  current: Vault | undefined;
+}
+
 let vault: Vault | undefined;
 
 function buildVaultConfig(): Partial<VaultConfig> {
@@ -23,6 +27,7 @@ function buildVaultConfig(): Partial<VaultConfig> {
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   vault = createVault(buildVaultConfig());
+  const vaultRef: VaultRef = { current: vault };
 
   const entriesProvider = new EntriesProvider(vault);
   const favoritesProvider = new FavoritesProvider(vault);
@@ -110,7 +115,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const commandDisposables = registerCommands(
     context,
-    vault,
+    vaultRef,
     entriesProvider,
     favoritesProvider,
     recentProvider,
@@ -185,6 +190,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
 
         vault = createVault(buildVaultConfig());
+        vaultRef.current = vault;
         bindVaultEvents(vault);
 
         const stats = await vault.initialize();

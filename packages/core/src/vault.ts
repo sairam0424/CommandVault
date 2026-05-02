@@ -78,7 +78,14 @@ export class Vault {
       this.config.dbPath,
       this.config.defaultSearchTier,
     );
-    await this.scan();
+
+    try {
+      await this.scan();
+    } catch (err) {
+      this.searchEngine.close();
+      this.searchEngine = null;
+      throw err;
+    }
 
     if (this.config.enableWatcher) {
       this.startWatcher();

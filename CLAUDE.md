@@ -10,7 +10,7 @@ pnpm monorepo with Turborepo orchestration. Three packages:
 packages/
 ├── core/    — @commandvault/core (parsers, three-tier search, watcher, SQLite)
 ├── vscode/  — commandvault-ai (VS Code extension with React webview)
-└── cli/     — @commandvault/cli (18 terminal commands)
+└── cli/     — @commandvault/cli (20 terminal commands)
 ```
 
 Build order: `core` → `vscode` + `cli` (parallel)
@@ -20,7 +20,7 @@ Build order: `core` → `vscode` + `cli` (parallel)
 ```bash
 pnpm install              # Install all deps
 pnpm build                # Build all (via turbo)
-pnpm test                 # Run all tests (91 tests)
+pnpm test                 # Run all tests (211 tests)
 pnpm typecheck            # Type-check all packages
 pnpm format               # Format with Prettier
 pnpm --filter @commandvault/cli link --global  # Global vault command
@@ -47,7 +47,7 @@ vault doctor              # Health check
 - `packages/core/src/indexer/sqlite-engine.ts` — SQLite FTS5, tags junction table, snapshots
 - `packages/core/src/watcher/path-router.ts` — Routes file paths to parser types
 - `packages/core/src/indexer/migrations.ts` — Schema migration system
-- `packages/cli/src/index.ts` — Commander.js with 18 commands
+- `packages/cli/src/index.ts` — Commander.js with 20 commands
 - `packages/cli/src/config.ts` — Config file loader
 - `packages/vscode/src/extension.ts` — Extension activation, status bar, events
 

@@ -4,6 +4,7 @@ import { exportEntries, importFromFile } from '@commandvault/core';
 import type { EntriesProvider } from '../providers/entries-provider';
 import type { FavoritesProvider } from '../providers/favorites-provider';
 import type { RecentProvider } from '../providers/recent-provider';
+import type { VaultRef } from '../extension';
 import { createDetailPanel } from '../webview/detail-panel';
 import { createStatsPanel } from '../webview/stats-panel';
 
@@ -46,11 +47,18 @@ function parseSearchInput(input: string): {
 
 export function registerCommands(
   context: vscode.ExtensionContext,
-  vault: Vault,
+  vaultRef: VaultRef,
   entriesProvider: EntriesProvider,
   favoritesProvider: FavoritesProvider,
   recentProvider: RecentProvider,
 ): readonly vscode.Disposable[] {
+  const getVault = (): Vault => {
+    if (!vaultRef.current) {
+      throw new Error('Vault is not initialized');
+    }
+    return vaultRef.current;
+  };
+
   const refreshAll = (): void => {
     entriesProvider.refresh();
     favoritesProvider.refresh();
@@ -72,22 +80,24 @@ export function registerCommands(
       const { query, type, tags } = parseSearchInput(input);
 
       if (!query.trim() && !type && !tags) {
-        const allEntries = vault.getAllEntries();
+        const allEntries = getVault().getAllEntries();
         quickPick.items = allEntries.slice(0, 50).map((entry) => createQuickPickItem(entry));
         return;
       }
 
       if (!query.trim() && (type || tags)) {
-        const allEntries = vault.getAllEntries().filter((entry) => {
-          if (type && entry.type !== type) return false;
-          if (tags && !tags.every((t) => entry.tags.includes(t))) return false;
-          return true;
-        });
+        const allEntries = getVault()
+          .getAllEntries()
+          .filter((entry) => {
+            if (type && entry.type !== type) return false;
+            if (tags && !tags.every((t) => entry.tags.includes(t))) return false;
+            return true;
+          });
         quickPick.items = allEntries.slice(0, 50).map((entry) => createQuickPickItem(entry));
         return;
       }
 
-      const results: readonly SearchResult[] = vault.search({
+      const results: readonly SearchResult[] = getVault().search({
         query,
         type,
         tags,
@@ -113,7 +123,7 @@ export function registerCommands(
       }
       const selected = quickPick.selectedItems[0];
       if (selected) {
-        vault.recordUsage(selected.entry.id);
+        getVault().recordUsage(selected.entry.id);
         recentProvider.refresh();
         vscode.commands.executeCommand('commandvault.openDetail', selected.entry);
       }
@@ -134,7 +144,7 @@ export function registerCommands(
 
   const refreshCommand = vscode.commands.registerCommand('commandvault.refresh', async () => {
     try {
-      await vault.scan();
+      await getVault().scan();
       vscode.window.showInformationMessage('CommandVault: Vault refreshed');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -149,7 +159,7 @@ export function registerCommands(
         vscode.window.showWarningMessage('CommandVault: No entry selected');
         return;
       }
-      vault.recordUsage(entry.id);
+      getVault().recordUsage(entry.id);
       recentProvider.refresh();
       createDetailPanel(context, entry);
     },
@@ -164,7 +174,7 @@ export function registerCommands(
       return;
     }
 
-    const isFavorite = vault.toggleFavorite(entry.id);
+    const isFavorite = getVault().toggleFavorite(entry.id);
     const action = isFavorite ? 'added to' : 'removed from';
     vscode.window.showInformationMessage(`CommandVault: "${entry.name}" ${action} favorites`);
     refreshAll();
@@ -189,7 +199,7 @@ export function registerCommands(
         return;
       }
 
-      const slashCommand = vault.getSlashCommand(entry);
+      const slashCommand = getVault().getSlashCommand(entry);
       await vscode.env.clipboard.writeText(slashCommand);
       vscode.window.showInformationMessage(`CommandVault: Copied "${slashCommand}" to clipboard`);
     },
@@ -206,7 +216,7 @@ export function registerCommands(
 
       const terminal = vscode.window.activeTerminal ?? vscode.window.createTerminal('CommandVault');
       terminal.show();
-      const slashCommand = vault.getSlashCommand(entry);
+      const slashCommand = getVault().getSlashCommand(entry);
       terminal.sendText(slashCommand, false);
       vscode.window.showInformationMessage(
         `CommandVault: Inserted "${slashCommand}" into terminal`,
@@ -235,11 +245,11 @@ export function registerCommands(
   );
 
   const statsCommand = vscode.commands.registerCommand('commandvault.stats', () => {
-    createStatsPanel(context, vault);
+    createStatsPanel(context, getVault());
   });
 
   const exportCommand = vscode.commands.registerCommand('commandvault.export', async () => {
-    const allEntries = vault.getAllEntries();
+    const allEntries = getVault().getAllEntries();
     if (allEntries.length === 0) {
       vscode.window.showWarningMessage('CommandVault: No entries to export');
       return;
@@ -296,7 +306,7 @@ export function registerCommands(
         return;
       }
 
-      await vault.addEntries(result.entries);
+      await getVault().addEntries(result.entries);
       refreshAll();
       vscode.window.showInformationMessage(
         `Imported ${result.entries.length} entries (${result.errors.length} warnings)`,
