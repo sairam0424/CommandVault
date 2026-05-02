@@ -9,4 +9,6 @@ vite.config.ts
 **/*.map
 **/*.ts
 !dist/**
+!dist/node_modules/**
 media/vault-icon.svg
+scripts/**

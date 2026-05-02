@@ -225,6 +225,7 @@
     "dev": "npm run build:extension -- --watch",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
+    "prepackage": "node scripts/copy-native-deps.js",
     "package": "npx @vscode/vsce package --no-dependencies"
   },
   "dependencies": {
