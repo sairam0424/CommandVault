@@ -42,7 +42,9 @@ export async function loadConfig(): Promise<CliConfig> {
   return {
     claudeConfigPath:
       typeof parsed.claudeConfigPath === 'string' && parsed.claudeConfigPath
-        ? parsed.claudeConfigPath.replace(/^~/, homedir())
+        ? parsed.claudeConfigPath.startsWith('~/')
+          ? join(homedir(), parsed.claudeConfigPath.slice(2))
+          : parsed.claudeConfigPath
         : undefined,
     searchTier:
       typeof parsed.searchTier === 'string' && VALID_TIERS.has(parsed.searchTier)

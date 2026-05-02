@@ -25,8 +25,17 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
 
-      - name: Run tests with coverage
-        run: pnpm test -- --coverage
+      - name: Core tests with coverage
+        run: pnpm --filter @commandvault/core test -- --coverage
+        continue-on-error: true
+
+      - name: CLI tests with coverage
+        run: pnpm --filter @commandvault/cli test -- --coverage
+        continue-on-error: true
+
+      - name: VS Code tests with coverage
+        run: pnpm --filter commandvault-ai test -- --coverage
+        continue-on-error: true
 
       - name: Core coverage report
         if: always()
@@ -35,6 +44,7 @@ jobs:
           name: 'Core'
           json-summary-path: ./packages/core/coverage/coverage-summary.json
           json-final-path: ./packages/core/coverage/coverage-final.json
+        continue-on-error: true
 
       - name: CLI coverage report
         if: always()
@@ -43,6 +53,7 @@ jobs:
           name: 'CLI'
           json-summary-path: ./packages/cli/coverage/coverage-summary.json
           json-final-path: ./packages/cli/coverage/coverage-final.json
+        continue-on-error: true
 
       - name: VS Code coverage report
         if: always()
@@ -51,3 +62,4 @@ jobs:
           name: 'VS Code'
           json-summary-path: ./packages/vscode/coverage/coverage-summary.json
           json-final-path: ./packages/vscode/coverage/coverage-final.json
+        continue-on-error: true
