@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import initSqlJs, { type Database as SqlJsDatabase } from 'sql.js';
+import { createRequire } from 'node:module';
+import type { Database as SqlJsDatabase } from 'sql.js';
+
+const require = createRequire(import.meta.url);
+const initSqlJs = require('sql.js/dist/sql-asm.js') as (config?: Record<string, unknown>) => Promise<{ Database: new (data?: ArrayLike<number> | Buffer | null) => SqlJsDatabase }>;
 import type {
   VaultEntry,
   SearchResult,
