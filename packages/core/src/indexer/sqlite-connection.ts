@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import type { Database as SqlJsDatabase } from 'sql.js';
 import { runMigrations } from './migrations.js';
 
@@ -51,8 +51,15 @@ export class SqliteConnection {
     const SQL = await initSqlJs();
     let db: SqlJsDatabase;
     if (existsSync(dbPath)) {
-      const buffer = readFileSync(dbPath);
-      db = new SQL.Database(buffer);
+      try {
+        const buffer = readFileSync(dbPath);
+        db = new SQL.Database(buffer);
+      } catch {
+        // DB file is corrupt — archive it and start fresh
+        const corruptPath = dbPath.replace(/\.db$/, '.corrupt');
+        renameSync(dbPath, corruptPath);
+        db = new SQL.Database();
+      }
     } else {
       db = new SQL.Database();
     }
@@ -88,7 +95,7 @@ export class SqliteConnection {
 
   persist(): void {
     const data = this.db.export();
-    writeFileSync(this.dbPath, Buffer.from(data));
+    writeFileSync(this.dbPath, Buffer.from(data), { mode: 0o600 });
   }
 
   close(): void {

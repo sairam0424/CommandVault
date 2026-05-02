@@ -18,7 +18,7 @@
   "engines": {
     "vscode": "^1.95.0"
   },
-  "categories": ["Other"],
+  "categories": ["AI", "Other"],
   "keywords": ["ai", "commands", "claude", "copilot", "skills", "agents", "vault"],
   "activationEvents": ["onStartupFinished"],
   "main": "./dist/extension.js",
@@ -185,18 +185,14 @@
       {
         "command": "commandvault.search",
         "key": "ctrl+shift+v",
-        "mac": "cmd+shift+v"
+        "mac": "cmd+shift+v",
+        "when": "!editorFocus"
       },
       {
         "command": "commandvault.refresh",
         "key": "ctrl+shift+r",
         "mac": "cmd+shift+r",
         "when": "focusedView =~ /commandvault/"
-      },
-      {
-        "command": "commandvault.stats",
-        "key": "ctrl+shift+d",
-        "mac": "cmd+shift+d"
       }
     ],
     "walkthroughs": [

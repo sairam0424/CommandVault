@@ -137,7 +137,16 @@ export class EntriesProvider implements vscode.TreeDataProvider<TreeNode> {
   }
 
   private getSourceNodes(type: EntryType): SourceGroupNode[] {
-    const entries = this.vault.getEntriesByType(type);
+    let entries = [...this.vault.getEntriesByType(type)];
+
+    if (this.filterText) {
+      entries = entries.filter(
+        (e) =>
+          e.name.toLowerCase().includes(this.filterText) ||
+          e.description.toLowerCase().includes(this.filterText),
+      );
+    }
+
     const countBySource = new Map<EntrySource, number>();
 
     for (const entry of entries) {

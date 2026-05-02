@@ -73,12 +73,19 @@ export class Vault {
   }
 
   async initialize(): Promise<VaultStats> {
-    await mkdir(DEFAULT_DB_DIR, { recursive: true });
+    await mkdir(DEFAULT_DB_DIR, { recursive: true, mode: 0o700 });
     this.searchEngine = await SearchEngine.create(
       this.config.dbPath,
       this.config.defaultSearchTier,
     );
-    await this.scan();
+
+    try {
+      await this.scan();
+    } catch (err) {
+      this.searchEngine.close();
+      this.searchEngine = null;
+      throw err;
+    }
 
     if (this.config.enableWatcher) {
       this.startWatcher();
