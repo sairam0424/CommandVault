@@ -1,6 +1,8 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { execFileSync } from 'node:child_process';
+import { accessSync, constants } from 'node:fs';
+import { resolve } from 'node:path';
 import { search, select } from '@inquirer/prompts';
 import type { VaultEntry } from '@commandvault/core';
 import {
@@ -104,8 +106,15 @@ export function createInteractiveCommand(): Command {
               }
               case 'open': {
                 const editor = process.env.EDITOR || 'code';
+                const resolvedPath = resolve(selectedEntry.filePath);
                 try {
-                  execFileSync(editor, [selectedEntry.filePath], { stdio: 'inherit' });
+                  accessSync(resolvedPath, constants.R_OK);
+                } catch {
+                  console.log(chalk.red(`\nFile not found or not readable: ${selectedEntry.filePath}`));
+                  break;
+                }
+                try {
+                  execFileSync(editor, [resolvedPath], { stdio: 'inherit' });
                 } catch {
                   console.log(
                     chalk.red(`Failed to open editor (${editor}). Set $EDITOR to override.`),

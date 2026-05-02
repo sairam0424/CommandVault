@@ -40,8 +40,11 @@ export function registerCommands(
     quickPick.matchOnDetail = true;
 
     let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+    let isDisposed = false;
 
     const updateResults = (query: string): void => {
+      if (isDisposed) return;
+
       if (!query.trim()) {
         const allEntries = vault.getAllEntries();
         quickPick.items = allEntries.slice(0, 50).map((entry) => createQuickPickItem(entry));
@@ -66,6 +69,10 @@ export function registerCommands(
     });
 
     quickPick.onDidAccept(() => {
+      isDisposed = true;
+      if (debounceTimer !== undefined) {
+        clearTimeout(debounceTimer);
+      }
       const selected = quickPick.selectedItems[0];
       if (selected) {
         vault.recordUsage(selected.entry.id);
@@ -76,6 +83,7 @@ export function registerCommands(
     });
 
     quickPick.onDidHide(() => {
+      isDisposed = true;
       if (debounceTimer !== undefined) {
         clearTimeout(debounceTimer);
       }

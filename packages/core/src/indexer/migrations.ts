@@ -31,24 +31,38 @@ const MIGRATIONS: readonly Migration[] = [
     description: 'Migrate entry IDs from filePath-based to type+name-based',
     up: (db) => {
       const rows = db.prepare('SELECT id, name, type, source FROM entries').all() as Array<{
-        id: string;
-        name: string;
-        type: string;
-        source: string;
+        id: string; name: string; type: string; source: string;
       }>;
 
       const updateEntry = db.prepare('UPDATE entries SET id = ? WHERE id = ?');
-      const updateTag = db.prepare('UPDATE user_tags SET entry_id = ? WHERE entry_id = ?');
+      const updateUserTag = db.prepare('UPDATE user_tags SET entry_id = ? WHERE entry_id = ?');
       const updateEntryTag = db.prepare('UPDATE entry_tags SET entry_id = ? WHERE entry_id = ?');
       const updateSnapshot = db.prepare('UPDATE scan_snapshots SET id = ? WHERE id = ?');
+      const deleteEntry = db.prepare('DELETE FROM entries WHERE id = ?');
+      const deleteUserTags = db.prepare('DELETE FROM user_tags WHERE entry_id = ?');
+      const deleteEntryTags = db.prepare('DELETE FROM entry_tags WHERE entry_id = ?');
+      const deleteSnapshot = db.prepare('DELETE FROM scan_snapshots WHERE id = ?');
 
+      const groups = new Map<string, string[]>();
       for (const row of rows) {
         const newId = stableId(row.type, row.name, row.source);
-        if (newId !== row.id) {
-          updateEntry.run(newId, row.id);
-          updateTag.run(newId, row.id);
-          updateEntryTag.run(newId, row.id);
-          updateSnapshot.run(newId, row.id);
+        const existing = groups.get(newId) ?? [];
+        existing.push(row.id);
+        groups.set(newId, existing);
+      }
+
+      for (const [newId, oldIds] of groups) {
+        for (let i = 1; i < oldIds.length; i++) {
+          deleteEntryTags.run(oldIds[i]);
+          deleteUserTags.run(oldIds[i]);
+          deleteSnapshot.run(oldIds[i]);
+          deleteEntry.run(oldIds[i]);
+        }
+        if (newId !== oldIds[0]) {
+          updateEntry.run(newId, oldIds[0]);
+          updateUserTag.run(newId, oldIds[0]);
+          updateEntryTag.run(newId, oldIds[0]);
+          updateSnapshot.run(newId, oldIds[0]);
         }
       }
     },

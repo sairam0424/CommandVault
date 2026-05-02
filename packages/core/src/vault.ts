@@ -41,6 +41,7 @@ export class Vault {
   private scanErrors: ParseError[] = [];
   private pendingChanges: Map<ParserType, Set<string>> = new Map();
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private flushPromise: Promise<void> | null = null;
 
   constructor(config?: Partial<VaultConfig>) {
     this.config = {
@@ -193,6 +194,9 @@ export class Vault {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
     }
+    if (this.flushPromise) {
+      await this.flushPromise;
+    }
     await this.flushPendingChanges();
     await this.watcher.stop();
     this.searchEngine.close();
@@ -216,8 +220,13 @@ export class Vault {
     const kept = this.entries.filter((e) => e.type !== parserType);
     this.entries = [...kept, ...result.entries];
 
+    const keptErrors = this.scanErrors.filter((e) => {
+      const errorType = routePathToParser(e.filePath, this.config.claudeConfigPath);
+      return errorType !== parserType;
+    });
+    this.scanErrors = [...keptErrors, ...result.errors];
+
     for (const error of result.errors) {
-      this.scanErrors = [...this.scanErrors, error];
       this.emit('error', error);
     }
 
@@ -234,12 +243,7 @@ export class Vault {
         paths.add(changedPath);
         this.pendingChanges.set(parserType, paths);
       } else {
-        this.pendingChanges.set('skill', new Set([changedPath]));
-        this.pendingChanges.set('agent', new Set([changedPath]));
-        this.pendingChanges.set('command', new Set([changedPath]));
-        this.pendingChanges.set('plugin', new Set([changedPath]));
-        this.pendingChanges.set('rule', new Set([changedPath]));
-        this.pendingChanges.set('hook', new Set([changedPath]));
+        return;
       }
 
       if (this.debounceTimer) {
@@ -248,9 +252,13 @@ export class Vault {
 
       this.debounceTimer = setTimeout(() => {
         this.debounceTimer = null;
-        this.flushPendingChanges().catch((err) => {
-          this.emit('error', { filePath: changedPath, message: `Re-scan failed: ${err}` });
-        });
+        this.flushPromise = this.flushPendingChanges()
+          .catch((err) => {
+            this.emit('error', { filePath: '', message: `Re-scan failed: ${err}` });
+          })
+          .finally(() => {
+            this.flushPromise = null;
+          });
       }, DEBOUNCE_MS);
     };
 
@@ -278,7 +286,11 @@ export class Vault {
     }
 
     this.entries = [...kept, ...newEntries];
-    this.scanErrors = [...this.scanErrors, ...newErrors];
+    const keptErrors = this.scanErrors.filter((e) => {
+      const errorType = routePathToParser(e.filePath, this.config.claudeConfigPath);
+      return !typesToReplace.has(errorType as ParserType);
+    });
+    this.scanErrors = [...keptErrors, ...newErrors];
     this.searchEngine.index(this.entries);
     this.emit('scan:complete', this.getStats());
 

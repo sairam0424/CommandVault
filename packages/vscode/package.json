@@ -3,7 +3,18 @@
   "displayName": "CommandVault",
   "description": "Browse, search, and manage AI slash commands, skills, agents, plugins, rules, and hooks from your sidebar",
   "version": "0.1.0",
+  "author": "sairamugge",
+  "license": "MIT",
   "publisher": "commandvault",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sairam0424/CommandVault.git",
+    "directory": "packages/vscode"
+  },
+  "homepage": "https://github.com/sairam0424/CommandVault/tree/main/packages/vscode#readme",
+  "bugs": {
+    "url": "https://github.com/sairam0424/CommandVault/issues"
+  },
   "engines": {
     "vscode": "^1.95.0"
   },

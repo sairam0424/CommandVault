@@ -79,7 +79,7 @@ interface EntryRow {
   usage_count: number;
 }
 
-const sanitizeFtsToken = (w: string): string => w.replace(/["*+\-()]/g, '').trim();
+const sanitizeFtsToken = (w: string): string => w.replace(/["*+\-()^{}[\]:]/g, '').trim();
 
 export class SqliteEngine {
   private db: Database.Database;
@@ -173,7 +173,7 @@ export class SqliteEngine {
     if (options.tags && options.tags.length > 0) {
       for (let i = 0; i < options.tags.length; i++) {
         conditions.push(
-          `EXISTS (SELECT 1 FROM entry_tags WHERE entry_id = entries.id AND tag = @tag${i})`,
+          `(EXISTS (SELECT 1 FROM entry_tags WHERE entry_id = entries.id AND tag = @tag${i}) OR EXISTS (SELECT 1 FROM user_tags WHERE entry_id = entries.id AND tag = @tag${i}))`,
         );
         params[`tag${i}`] = options.tags[i];
       }
@@ -336,15 +336,19 @@ export class SqliteEngine {
   }
 
   private rowToEntry(row: EntryRow): VaultEntry {
-    const tagRows = this.db
+    const entryTagRows = this.db
       .prepare('SELECT tag FROM entry_tags WHERE entry_id = ?')
       .all(row.id) as Array<{ tag: string }>;
-    const tags =
-      tagRows.length > 0
-        ? tagRows.map((r) => r.tag)
+    const userTagRows = this.db
+      .prepare('SELECT tag FROM user_tags WHERE entry_id = ?')
+      .all(row.id) as Array<{ tag: string }>;
+    const entryTags =
+      entryTagRows.length > 0
+        ? entryTagRows.map((r) => r.tag)
         : row.tags
           ? row.tags.split(',').filter(Boolean)
           : [];
+    const tags = [...new Set([...entryTags, ...userTagRows.map((r) => r.tag)])];
 
     return {
       id: row.id,
