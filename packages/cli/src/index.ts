@@ -19,6 +19,8 @@ import { createOpenCommand } from './commands/open.js';
 import { createRunCommand } from './commands/run.js';
 import { createBackupCommand } from './commands/backup.js';
 import { createRestoreCommand } from './commands/restore.js';
+import { createConfigCommand } from './commands/config.js';
+import { createCompletionsCommand } from './commands/completions.js';
 
 const program = new Command();
 
@@ -48,6 +50,8 @@ program.addCommand(createOpenCommand());
 program.addCommand(createRunCommand());
 program.addCommand(createBackupCommand());
 program.addCommand(createRestoreCommand());
+program.addCommand(createConfigCommand());
+program.addCommand(createCompletionsCommand());
 
 // Default action: launch interactive mode when no subcommand is given
 program.action(async (_opts, command) => {

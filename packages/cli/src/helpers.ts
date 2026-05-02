@@ -1,12 +1,34 @@
 import chalk from 'chalk';
 import ora from 'ora';
-import { createVault, type VaultEntry, type EntryType, type SearchTier } from '@commandvault/core';
+import {
+  createVault,
+  type Vault,
+  type VaultEntry,
+  type EntryType,
+  type SearchTier,
+} from '@commandvault/core';
 import { loadConfig } from './config.js';
 
 export interface CliGlobalOptions {
   readonly claudePath?: string;
   readonly tier?: SearchTier;
   readonly json?: boolean;
+}
+
+export async function withVault<T>(
+  opts: CliGlobalOptions,
+  fn: (vault: Vault) => Promise<T>,
+): Promise<T> {
+  const vault = await createVaultInstance(opts);
+  try {
+    return await fn(vault);
+  } finally {
+    await vault.dispose();
+  }
+}
+
+export function jsonOutput(data: unknown): void {
+  console.log(JSON.stringify(data, null, 2));
 }
 
 export async function createVaultInstance(options: CliGlobalOptions) {

@@ -89,6 +89,7 @@ export class Vault {
   async scan(): Promise<void> {
     return this.withScanLock(async () => {
       const claudePath = this.config.claudeConfigPath;
+      const oldEntries = [...this.entries];
 
       const results = await Promise.all([
         parseSkills(join(claudePath, 'skills')),
@@ -112,6 +113,7 @@ export class Vault {
       this.scanErrors = allErrors;
       this.getSearchEngine().index(allEntries);
 
+      this.diffAndEmit(oldEntries, this.entries);
       this.emit('scan:complete', this.getStats());
 
       for (const error of allErrors) {
@@ -203,8 +205,10 @@ export class Vault {
 
   async addEntries(newEntries: readonly VaultEntry[]): Promise<number> {
     return this.withScanLock(async () => {
+      const oldEntries = [...this.entries];
       this.entries = [...this.entries, ...newEntries];
       this.getSearchEngine().index(this.entries);
+      this.diffAndEmit(oldEntries, this.entries);
       this.emit('scan:complete', this.getStats());
       return newEntries.length;
     });
@@ -302,6 +306,7 @@ export class Vault {
     if (this.pendingChanges.size === 0) return;
 
     return this.withScanLock(async () => {
+      const oldEntries = [...this.entries];
       const parserTypes = [...this.pendingChanges.keys()];
       this.pendingChanges.clear();
 
@@ -324,12 +329,33 @@ export class Vault {
       });
       this.scanErrors = [...keptErrors, ...newErrors];
       this.getSearchEngine().index(this.entries);
+      this.diffAndEmit(oldEntries, this.entries);
       this.emit('scan:complete', this.getStats());
 
       for (const error of newErrors) {
         this.emit('error', error);
       }
     });
+  }
+
+  private diffAndEmit(oldEntries: readonly VaultEntry[], newEntries: readonly VaultEntry[]): void {
+    const oldMap = new Map(oldEntries.map((e) => [e.id, e]));
+    const newMap = new Map(newEntries.map((e) => [e.id, e]));
+
+    for (const [id, entry] of newMap) {
+      const old = oldMap.get(id);
+      if (!old) {
+        this.emit('entry:added', entry);
+      } else if (old.content !== entry.content || old.description !== entry.description) {
+        this.emit('entry:updated', entry);
+      }
+    }
+
+    for (const [id] of oldMap) {
+      if (!newMap.has(id)) {
+        this.emit('entry:removed', id);
+      }
+    }
   }
 
   private emit<K extends keyof VaultEventMap>(event: K, data: VaultEventMap[K]): void {
