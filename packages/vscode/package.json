@@ -22,14 +22,14 @@
   "keywords": ["ai", "commands", "claude", "copilot", "skills", "agents", "vault"],
   "activationEvents": ["onStartupFinished"],
   "main": "./dist/extension.js",
-  "icon": "media/vault-icon.svg",
+  "icon": "media/vault-icon.png",
   "contributes": {
     "viewsContainers": {
       "activitybar": [
         {
           "id": "commandvault",
           "title": "CommandVault",
-          "icon": "media/vault-icon.svg"
+          "icon": "media/vault-icon.png"
         }
       ]
     },
