@@ -2,10 +2,10 @@
   "name": "commandvault-vscode",
   "displayName": "CommandVault",
   "description": "Browse, search, and manage AI slash commands, skills, agents, plugins, rules, and hooks from your sidebar",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "sairamugge",
   "license": "MIT",
-  "publisher": "commandvault",
+  "publisher": "SairamUgge",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/sairam0424/CommandVault.git",
@@ -221,7 +221,7 @@
   "scripts": {
     "build": "npm run build:webview && npm run build:extension",
     "build:webview": "vite build",
-    "build:extension": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --external:better-sqlite3 --format=cjs --platform=node",
+    "build:extension": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
     "dev": "npm run build:extension -- --watch",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",

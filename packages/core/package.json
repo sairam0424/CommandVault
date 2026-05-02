@@ -13,6 +13,22 @@
   "bugs": {
     "url": "https://github.com/sairam0424/CommandVault/issues"
   },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "ai",
+    "commands",
+    "skills",
+    "agents",
+    "plugins",
+    "claude",
+    "copilot",
+    "cursor",
+    "windsurf",
+    "search",
+    "vault"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -34,14 +50,13 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "better-sqlite3": "^11.8.0",
     "chokidar": "^4.0.0",
     "fuse.js": "^7.1.0",
     "gray-matter": "^4.0.3",
-    "minisearch": "^7.1.0"
+    "minisearch": "^7.1.0",
+    "sql.js": "^1.14.1"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.0.0",
     "typescript": "^5.8.0",
     "vitest": "^3.1.0"

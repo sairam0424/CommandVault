@@ -34,7 +34,7 @@ const DEBOUNCE_MS = 500;
 
 export class Vault {
   private readonly config: VaultConfig;
-  private readonly searchEngine: SearchEngine;
+  private searchEngine: SearchEngine | null = null;
   private readonly watcher: VaultWatcher;
   private entries: VaultEntry[] = [];
   private listeners: Map<string, Set<Function>> = new Map();
@@ -51,12 +51,19 @@ export class Vault {
       defaultSearchTier: config?.defaultSearchTier ?? 'minisearch',
     };
 
-    this.searchEngine = new SearchEngine(this.config.dbPath, this.config.defaultSearchTier);
     this.watcher = new VaultWatcher(this.config.claudeConfigPath);
+  }
+
+  private getSearchEngine(): SearchEngine {
+    if (!this.searchEngine) {
+      throw new Error('Vault not initialized. Call initialize() first.');
+    }
+    return this.searchEngine;
   }
 
   async initialize(): Promise<VaultStats> {
     await mkdir(DEFAULT_DB_DIR, { recursive: true });
+    this.searchEngine = await SearchEngine.create(this.config.dbPath, this.config.defaultSearchTier);
     await this.scan();
 
     if (this.config.enableWatcher) {
@@ -89,7 +96,7 @@ export class Vault {
 
     this.entries = allEntries;
     this.scanErrors = allErrors;
-    this.searchEngine.index(allEntries);
+    this.getSearchEngine().index(allEntries);
 
     this.emit('scan:complete', this.getStats());
 
@@ -99,15 +106,15 @@ export class Vault {
   }
 
   search(options: SearchOptions): SearchResult[] {
-    return this.searchEngine.search(options);
+    return this.getSearchEngine().search(options);
   }
 
   quickSearch(query: string, limit = 20): SearchResult[] {
-    return this.searchEngine.search({ query, limit, tier: 'fuse' });
+    return this.getSearchEngine().search({ query, limit, tier: 'fuse' });
   }
 
   suggest(query: string, limit = 10): string[] {
-    return this.searchEngine.suggest(query, limit);
+    return this.getSearchEngine().suggest(query, limit);
   }
 
   getAllEntries(): readonly VaultEntry[] {
@@ -123,39 +130,39 @@ export class Vault {
   }
 
   getEntry(id: string): VaultEntry | undefined {
-    return this.searchEngine.getEntry(id) ?? this.entries.find((e) => e.id === id);
+    return this.getSearchEngine().getEntry(id) ?? this.entries.find((e) => e.id === id);
   }
 
   toggleFavorite(id: string): boolean {
-    return this.searchEngine.toggleFavorite(id);
+    return this.getSearchEngine().toggleFavorite(id);
   }
 
   recordUsage(id: string): void {
-    this.searchEngine.incrementUsage(id);
+    this.getSearchEngine().incrementUsage(id);
   }
 
   getStats(): VaultStats {
-    return this.searchEngine.getStats();
+    return this.getSearchEngine().getStats();
   }
 
   addTag(id: string, tag: string): void {
-    this.searchEngine.addTag(id, tag);
+    this.getSearchEngine().addTag(id, tag);
   }
 
   removeTag(id: string, tag: string): void {
-    this.searchEngine.removeTag(id, tag);
+    this.getSearchEngine().removeTag(id, tag);
   }
 
   getTagsForEntry(id: string): string[] {
-    return this.searchEngine.getTagsForEntry(id);
+    return this.getSearchEngine().getTagsForEntry(id);
   }
 
   saveSnapshot(): void {
-    this.searchEngine.saveSnapshot(this.entries);
+    this.getSearchEngine().saveSnapshot(this.entries);
   }
 
   getDiff(): { added: VaultEntry[]; removed: string[]; modified: VaultEntry[] } {
-    return this.searchEngine.getDiff(this.entries);
+    return this.getSearchEngine().getDiff(this.entries);
   }
 
   getErrors(): readonly ParseError[] {
@@ -199,7 +206,7 @@ export class Vault {
     }
     await this.flushPendingChanges();
     await this.watcher.stop();
-    this.searchEngine.close();
+    this.searchEngine?.close();
     this.listeners.clear();
   }
 
@@ -230,7 +237,7 @@ export class Vault {
       this.emit('error', error);
     }
 
-    this.searchEngine.index(this.entries);
+    this.getSearchEngine().index(this.entries);
     this.emit('scan:complete', this.getStats());
   }
 
@@ -291,7 +298,7 @@ export class Vault {
       return !typesToReplace.has(errorType as ParserType);
     });
     this.scanErrors = [...keptErrors, ...newErrors];
-    this.searchEngine.index(this.entries);
+    this.getSearchEngine().index(this.entries);
     this.emit('scan:complete', this.getStats());
 
     for (const error of newErrors) {

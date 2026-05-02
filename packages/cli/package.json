@@ -13,8 +13,22 @@
   "bugs": {
     "url": "https://github.com/sairam0424/CommandVault/issues"
   },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "ai",
+    "cli",
+    "commands",
+    "skills",
+    "agents",
+    "claude",
+    "vault",
+    "terminal"
+  ],
   "files": [
-    "dist"
+    "dist",
+    "!dist/__tests__"
   ],
   "type": "module",
   "bin": {

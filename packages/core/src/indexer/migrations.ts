@@ -1,14 +1,32 @@
 import { createHash } from 'node:crypto';
-import type Database from 'better-sqlite3';
+import type { Database as SqlJsDatabase } from 'sql.js';
 
 interface Migration {
   readonly version: number;
   readonly description: string;
-  readonly up: (db: Database.Database) => void;
+  readonly up: (db: SqlJsDatabase) => void;
 }
 
 function stableId(type: string, name: string, source: string): string {
   return createHash('sha256').update(`${type}:${name}:${source}`).digest('hex').slice(0, 12);
+}
+
+/** Helper: run a SELECT and return rows as plain objects. */
+function queryAll<T extends Record<string, unknown>>(
+  db: SqlJsDatabase,
+  sql: string,
+  params: Record<string, unknown> = {},
+): T[] {
+  const stmt = db.prepare(sql);
+  if (Object.keys(params).length > 0) {
+    stmt.bind(params);
+  }
+  const results: T[] = [];
+  while (stmt.step()) {
+    results.push(stmt.getAsObject() as T);
+  }
+  stmt.free();
+  return results;
 }
 
 const MIGRATIONS: readonly Migration[] = [
@@ -16,32 +34,23 @@ const MIGRATIONS: readonly Migration[] = [
     version: 1,
     description: 'Add entry_tags junction table for exact tag matching',
     up: (db) => {
-      db.exec(`
+      db.run(`
         CREATE TABLE IF NOT EXISTS entry_tags (
           entry_id TEXT NOT NULL,
           tag TEXT NOT NULL,
           PRIMARY KEY (entry_id, tag)
         );
-        CREATE INDEX IF NOT EXISTS idx_entry_tags_tag ON entry_tags(tag);
       `);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_entry_tags_tag ON entry_tags(tag);`);
     },
   },
   {
     version: 2,
     description: 'Migrate entry IDs from filePath-based to type+name-based',
     up: (db) => {
-      const rows = db.prepare('SELECT id, name, type, source FROM entries').all() as Array<{
+      const rows = queryAll<{
         id: string; name: string; type: string; source: string;
-      }>;
-
-      const updateEntry = db.prepare('UPDATE entries SET id = ? WHERE id = ?');
-      const updateUserTag = db.prepare('UPDATE user_tags SET entry_id = ? WHERE entry_id = ?');
-      const updateEntryTag = db.prepare('UPDATE entry_tags SET entry_id = ? WHERE entry_id = ?');
-      const updateSnapshot = db.prepare('UPDATE scan_snapshots SET id = ? WHERE id = ?');
-      const deleteEntry = db.prepare('DELETE FROM entries WHERE id = ?');
-      const deleteUserTags = db.prepare('DELETE FROM user_tags WHERE entry_id = ?');
-      const deleteEntryTags = db.prepare('DELETE FROM entry_tags WHERE entry_id = ?');
-      const deleteSnapshot = db.prepare('DELETE FROM scan_snapshots WHERE id = ?');
+      }>(db, 'SELECT id, name, type, source FROM entries');
 
       const groups = new Map<string, string[]>();
       for (const row of rows) {
@@ -53,24 +62,24 @@ const MIGRATIONS: readonly Migration[] = [
 
       for (const [newId, oldIds] of groups) {
         for (let i = 1; i < oldIds.length; i++) {
-          deleteEntryTags.run(oldIds[i]);
-          deleteUserTags.run(oldIds[i]);
-          deleteSnapshot.run(oldIds[i]);
-          deleteEntry.run(oldIds[i]);
+          db.run('DELETE FROM entry_tags WHERE entry_id = $id', { $id: oldIds[i] });
+          db.run('DELETE FROM user_tags WHERE entry_id = $id', { $id: oldIds[i] });
+          db.run('DELETE FROM scan_snapshots WHERE id = $id', { $id: oldIds[i] });
+          db.run('DELETE FROM entries WHERE id = $id', { $id: oldIds[i] });
         }
         if (newId !== oldIds[0]) {
-          updateEntry.run(newId, oldIds[0]);
-          updateUserTag.run(newId, oldIds[0]);
-          updateEntryTag.run(newId, oldIds[0]);
-          updateSnapshot.run(newId, oldIds[0]);
+          db.run('UPDATE entries SET id = $new WHERE id = $old', { $new: newId, $old: oldIds[0] });
+          db.run('UPDATE user_tags SET entry_id = $new WHERE entry_id = $old', { $new: newId, $old: oldIds[0] });
+          db.run('UPDATE entry_tags SET entry_id = $new WHERE entry_id = $old', { $new: newId, $old: oldIds[0] });
+          db.run('UPDATE scan_snapshots SET id = $new WHERE id = $old', { $new: newId, $old: oldIds[0] });
         }
       }
     },
   },
 ];
 
-export function runMigrations(db: Database.Database): void {
-  db.exec(`
+export function runMigrations(db: SqlJsDatabase): void {
+  db.run(`
     CREATE TABLE IF NOT EXISTS schema_version (
       version INTEGER PRIMARY KEY,
       applied_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -78,25 +87,27 @@ export function runMigrations(db: Database.Database): void {
     );
   `);
 
-  const currentVersion = (
-    db.prepare('SELECT MAX(version) as v FROM schema_version').get() as {
-      v: number | null;
-    }
-  ).v ?? 0;
+  const versionRows = queryAll<{ v: number | null }>(
+    db,
+    'SELECT MAX(version) as v FROM schema_version',
+  );
+  const currentVersion = versionRows[0]?.v ?? 0;
 
   const pending = MIGRATIONS.filter((m) => m.version > currentVersion);
   if (pending.length === 0) return;
 
-  const insertVersion = db.prepare(
-    'INSERT INTO schema_version (version, description) VALUES (?, ?)',
-  );
-
-  const transaction = db.transaction(() => {
+  db.run('BEGIN');
+  try {
     for (const migration of pending) {
       migration.up(db);
-      insertVersion.run(migration.version, migration.description);
+      db.run(
+        'INSERT INTO schema_version (version, description) VALUES ($version, $description)',
+        { $version: migration.version, $description: migration.description },
+      );
     }
-  });
-
-  transaction();
+    db.run('COMMIT');
+  } catch (e) {
+    db.run('ROLLBACK');
+    throw e;
+  }
 }

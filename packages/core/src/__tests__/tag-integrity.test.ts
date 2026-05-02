@@ -27,7 +27,7 @@ describe('Tag integrity — exact matching via junction table', () => {
 
   beforeEach(async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'cv-tag-test-'));
-    engine = new SqliteEngine(join(tempDir, 'test.db'));
+    engine = await SqliteEngine.create(join(tempDir, 'test.db'));
   });
 
   afterEach(async () => {
