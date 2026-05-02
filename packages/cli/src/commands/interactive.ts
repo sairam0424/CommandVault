@@ -110,7 +110,9 @@ export function createInteractiveCommand(): Command {
                 try {
                   accessSync(resolvedPath, constants.R_OK);
                 } catch {
-                  console.log(chalk.red(`\nFile not found or not readable: ${selectedEntry.filePath}`));
+                  console.log(
+                    chalk.red(`\nFile not found or not readable: ${selectedEntry.filePath}`),
+                  );
                   break;
                 }
                 try {

@@ -24,7 +24,10 @@ export class SearchEngine {
     this.defaultTier = defaultTier;
   }
 
-  static async create(dbPath: string, defaultTier: SearchTier = 'minisearch'): Promise<SearchEngine> {
+  static async create(
+    dbPath: string,
+    defaultTier: SearchTier = 'minisearch',
+  ): Promise<SearchEngine> {
     const sqliteEngine = await SqliteEngine.create(dbPath);
     return new SearchEngine(sqliteEngine, defaultTier);
   }

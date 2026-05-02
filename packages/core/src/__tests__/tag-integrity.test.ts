@@ -77,9 +77,7 @@ describe('Tag integrity — exact matching via junction table', () => {
   });
 
   it('tags are preserved after re-indexing', () => {
-    const entries = [
-      makeEntry({ id: 'e1', name: 'tool', tags: ['deploy', 'ci'] }),
-    ];
+    const entries = [makeEntry({ id: 'e1', name: 'tool', tags: ['deploy', 'ci'] })];
 
     engine.index(entries);
     engine.index(entries);

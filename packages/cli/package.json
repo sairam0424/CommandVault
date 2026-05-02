@@ -2,7 +2,7 @@
   "name": "@commandvault/cli",
   "version": "0.1.0",
   "description": "Terminal companion for CommandVault — list, search, and inspect AI commands",
-  "author": "sairamugge",
+  "author": "nothumanslabs",
   "license": "MIT",
   "repository": {
     "type": "git",

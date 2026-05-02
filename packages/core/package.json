@@ -2,7 +2,7 @@
   "name": "@commandvault/core",
   "version": "0.1.0",
   "description": "Core engine for CommandVault — parsers, three-tier search, file watcher",
-  "author": "sairamugge",
+  "author": "nothumanslabs",
   "license": "MIT",
   "repository": {
     "type": "git",

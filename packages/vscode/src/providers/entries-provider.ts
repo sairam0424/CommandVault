@@ -152,9 +152,7 @@ export class EntriesProvider implements vscode.TreeDataProvider<TreeNode> {
   }
 
   private getEntryNodes(type: EntryType, source: EntrySource): EntryLeafNode[] {
-    let entries = [...this.vault.getEntriesByType(type)].filter(
-      (entry) => entry.source === source,
-    );
+    let entries = [...this.vault.getEntriesByType(type)].filter((entry) => entry.source === source);
 
     if (this.filterText) {
       entries = entries.filter(

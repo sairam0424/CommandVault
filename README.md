@@ -16,7 +16,7 @@ CommandVault indexes everything into a single searchable vault with three interf
 
 | Interface | Package | What it does |
 |-----------|---------|-------------|
-| **VS Code Extension** | `commandvault-vscode` | Sidebar TreeView, search QuickPick, stats dashboard, keyboard shortcuts |
+| **VS Code Extension** | `commandvault-ai` | Sidebar TreeView, search QuickPick, stats dashboard, keyboard shortcuts |
 | **CLI** | `@commandvault/cli` | 18 terminal commands — list, search, open, run, backup, and more |
 | **Core Engine** | `@commandvault/core` | Parsers, three-tier search, SQLite persistence, file watcher |
 
@@ -134,7 +134,7 @@ commandvault/
 │   │   ├── src/helpers.ts     Shared utilities
 │   │   └── src/__tests__/     11 CLI tests
 │   │
-│   └── vscode/                commandvault-vscode
+│   └── vscode/                commandvault-ai
 │       ├── src/providers/     3 TreeView data providers
 │       ├── src/commands/      Command registrations
 │       ├── src/webview/       Detail panel + React stats dashboard

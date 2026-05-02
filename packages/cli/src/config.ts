@@ -31,7 +31,11 @@ export async function loadConfig(): Promise<CliConfig> {
     parsed = JSON.parse(raw) as Record<string, unknown>;
   } catch {
     console.log(chalk.yellow(`Warning: Malformed JSON in config file: ${CONFIG_PATH}`));
-    console.log(chalk.yellow('Using default configuration. Fix the file or delete it to silence this warning.'));
+    console.log(
+      chalk.yellow(
+        'Using default configuration. Fix the file or delete it to silence this warning.',
+      ),
+    );
     return {};
   }
 
@@ -44,7 +48,6 @@ export async function loadConfig(): Promise<CliConfig> {
       typeof parsed.searchTier === 'string' && VALID_TIERS.has(parsed.searchTier)
         ? (parsed.searchTier as SearchTier)
         : undefined,
-    enableWatcher:
-      typeof parsed.enableWatcher === 'boolean' ? parsed.enableWatcher : undefined,
+    enableWatcher: typeof parsed.enableWatcher === 'boolean' ? parsed.enableWatcher : undefined,
   };
 }

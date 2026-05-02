@@ -1,17 +1,8 @@
 import { relative, sep } from 'node:path';
 
-export type ParserType =
-  | 'skill'
-  | 'agent'
-  | 'command'
-  | 'plugin'
-  | 'rule'
-  | 'hook';
+export type ParserType = 'skill' | 'agent' | 'command' | 'plugin' | 'rule' | 'hook';
 
-export function routePathToParser(
-  changedPath: string,
-  claudePath: string,
-): ParserType | null {
+export function routePathToParser(changedPath: string, claudePath: string): ParserType | null {
   const rel = relative(claudePath, changedPath).split(sep).join('/');
 
   if (rel.startsWith('skills/')) return 'skill';

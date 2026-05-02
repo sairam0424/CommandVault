@@ -63,7 +63,10 @@ export class Vault {
 
   async initialize(): Promise<VaultStats> {
     await mkdir(DEFAULT_DB_DIR, { recursive: true });
-    this.searchEngine = await SearchEngine.create(this.config.dbPath, this.config.defaultSearchTier);
+    this.searchEngine = await SearchEngine.create(
+      this.config.dbPath,
+      this.config.defaultSearchTier,
+    );
     await this.scan();
 
     if (this.config.enableWatcher) {
@@ -210,9 +213,7 @@ export class Vault {
     this.listeners.clear();
   }
 
-  private readonly parserFns: Readonly<
-    Record<ParserType, () => Promise<ParserResult>>
-  > = {
+  private readonly parserFns: Readonly<Record<ParserType, () => Promise<ParserResult>>> = {
     skill: () => parseSkills(join(this.config.claudeConfigPath, 'skills')),
     agent: () => parseAgents(join(this.config.claudeConfigPath, 'agents')),
     command: () => parseCommands(join(this.config.claudeConfigPath, 'commands')),
@@ -278,9 +279,7 @@ export class Vault {
     const parserTypes = [...this.pendingChanges.keys()];
     this.pendingChanges.clear();
 
-    const results = await Promise.all(
-      parserTypes.map((pt) => this.parserFns[pt]()),
-    );
+    const results = await Promise.all(parserTypes.map((pt) => this.parserFns[pt]()));
 
     const typesToReplace = new Set(parserTypes);
     const kept = this.entries.filter((e) => !typesToReplace.has(e.type as ParserType));

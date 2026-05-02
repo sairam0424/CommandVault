@@ -68,7 +68,9 @@ export function createInfoCommand(): Command {
         const entry: VaultEntry = results[0].entry;
 
         if (globalOpts.json) {
-          console.log(JSON.stringify({ entry, slashCommand: vault.getSlashCommand(entry) }, null, 2));
+          console.log(
+            JSON.stringify({ entry, slashCommand: vault.getSlashCommand(entry) }, null, 2),
+          );
           vault.recordUsage(entry.id);
           return;
         }

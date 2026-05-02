@@ -38,9 +38,7 @@ export function createOpenCommand(): Command {
         try {
           execFileSync(editor, [resolvedPath], { stdio: 'inherit' });
         } catch {
-          console.log(
-            chalk.red(`Failed to open editor (${editor}). Set $EDITOR to override.`),
-          );
+          console.log(chalk.red(`Failed to open editor (${editor}). Set $EDITOR to override.`));
         }
 
         vault.recordUsage(entry.id);
