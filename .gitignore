@@ -30,5 +30,24 @@ Thumbs.db
 .env.*
 .npmrc
 
+.kiro/
+.qoder/
+.rovodev/
+.trae/
+.windsurf/
+.gemini/
+.zencoder/
+.goose/
+.augment/
+.agents/
+.claude/
+.cerebras/
+.docs/
+. Cursor/
+.Tabnine/
+.codex/
 # Coverage
 coverage/
+
+# Superpowers plan docs (local session artifacts)
+docs/superpowers/
