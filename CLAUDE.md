@@ -9,7 +9,7 @@ pnpm monorepo with Turborepo orchestration. Three packages:
 ```
 packages/
 ├── core/    — @commandvault/core (parsers, three-tier search, watcher, SQLite)
-├── vscode/  — commandvault-vscode (VS Code extension with React webview)
+├── vscode/  — commandvault-ai (VS Code extension with React webview)
 └── cli/     — @commandvault/cli (18 terminal commands)
 ```
 

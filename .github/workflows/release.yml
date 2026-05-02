@@ -47,7 +47,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Package VS Code extension
-        run: pnpm --filter commandvault-vscode run package
+        run: pnpm --filter commandvault-ai run package
 
       - name: Get version
         id: version
