@@ -49,6 +49,12 @@ export function createSearchCommand(): Command {
       const globalOpts = command.optsWithGlobals() as CliGlobalOptions;
       const opts = command.opts();
 
+      const limit = parseInt(opts.limit, 10);
+      if (isNaN(limit) || limit < 1 || limit > 1000) {
+        console.log(chalk.red('--limit must be a number between 1 and 1000'));
+        return;
+      }
+
       const vault = await createVaultInstance(globalOpts);
 
       try {
@@ -56,7 +62,7 @@ export function createSearchCommand(): Command {
           query,
           type: opts.type as EntryType | undefined,
           source: opts.source as EntrySource | undefined,
-          limit: parseInt(opts.limit, 10),
+          limit,
           tier: globalOpts.tier,
         });
 

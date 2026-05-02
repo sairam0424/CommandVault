@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import { copyFile, access, constants } from 'node:fs/promises';
 
 const DB_PATH = join(homedir(), '.commandvault', 'vault.db');
@@ -12,7 +12,13 @@ export function createRestoreCommand(): Command {
     .description('Restore the vault database from a backup')
     .argument('<file>', 'Backup filename (from `vault backup --list`)')
     .action(async (file: string) => {
-      const backupPath = file.includes('/') ? file : join(BACKUP_DIR, file);
+      const filename = basename(file);
+      if (filename !== file) {
+        console.log(chalk.red('\nOnly backup filenames are allowed (no paths).'));
+        console.log(chalk.yellow('Run `vault backup --list` to see available backups.\n'));
+        return;
+      }
+      const backupPath = join(BACKUP_DIR, filename);
 
       try {
         await access(backupPath, constants.R_OK);

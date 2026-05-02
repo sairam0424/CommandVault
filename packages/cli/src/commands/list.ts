@@ -10,7 +10,8 @@ import {
   type CliGlobalOptions,
 } from '../helpers.js';
 
-const TYPE_ORDER: readonly EntryType[] = ['skill', 'agent', 'command', 'plugin', 'rule', 'hook'];
+const VALID_TYPES = ['skill', 'agent', 'command', 'plugin', 'rule', 'hook'] as const;
+const TYPE_ORDER: readonly EntryType[] = VALID_TYPES;
 
 const TYPE_LABELS: Readonly<Record<EntryType, string>> = {
   skill: 'SKL',
@@ -61,6 +62,11 @@ export function createListCommand(): Command {
         let entries: readonly VaultEntry[] = vault.getAllEntries();
 
         if (opts.type) {
+          if (!VALID_TYPES.includes(opts.type as any)) {
+            console.log(chalk.red(`Invalid type: "${opts.type}"`));
+            console.log(chalk.dim(`Valid types: ${VALID_TYPES.join(', ')}`));
+            return;
+          }
           entries = entries.filter((e) => e.type === opts.type);
         }
 
