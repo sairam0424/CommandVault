@@ -2,7 +2,7 @@
   "name": "commandvault-ai",
   "displayName": "CommandVault AI",
   "description": "Browse, search, and manage AI slash commands, skills, agents, plugins, rules, and hooks from your sidebar",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "author": "nothumanslabs",
   "license": "MIT",
   "publisher": "nothumanslabs",
