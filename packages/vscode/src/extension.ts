@@ -8,19 +8,21 @@ import { registerCommands } from './commands/index';
 
 let vault: Vault | undefined;
 
-export async function activate(context: vscode.ExtensionContext): Promise<void> {
+function buildVaultConfig(): Partial<VaultConfig> {
   const config = vscode.workspace.getConfiguration('commandvault');
   const claudeConfigPath = config.get<string>('claudeConfigPath') || '';
   const enableWatcher = config.get<boolean>('enableFileWatcher', true);
   const searchTier = config.get<SearchTier>('searchTier', 'minisearch');
 
-  const vaultConfig: Partial<VaultConfig> = {
+  return {
     enableWatcher,
     defaultSearchTier: searchTier,
     ...(claudeConfigPath ? { claudeConfigPath } : {}),
   };
+}
 
-  vault = createVault(vaultConfig);
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  vault = createVault(buildVaultConfig());
 
   const entriesProvider = new EntriesProvider(vault);
   const favoritesProvider = new FavoritesProvider(vault);
@@ -53,29 +55,56 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     recentProvider.refresh();
   };
 
-  const onScanComplete = (stats: VaultStats): void => {
-    refreshAll();
-    statusBar.text = `$(database) ${stats.totalEntries} cmds`;
+  const updateStatusBar = (): void => {
+    if (!vault) return;
+    const total = vault.getAllEntries().length;
+    const filter = entriesProvider.getFilter();
+    if (filter) {
+      const filtered = vault
+        .getAllEntries()
+        .filter(
+          (e) =>
+            e.name.toLowerCase().includes(filter) || e.description.toLowerCase().includes(filter),
+        ).length;
+      statusBar.text = `$(database) ${filtered}/${total} cmds`;
+    } else {
+      statusBar.text = `$(database) ${total} cmds`;
+    }
   };
-  const onEntryChange = (): void => refreshAll();
+
+  const onScanComplete = (_stats: VaultStats): void => {
+    refreshAll();
+    updateStatusBar();
+  };
+  const onEntryChange = (): void => {
+    refreshAll();
+    updateStatusBar();
+  };
   const onError = (error: { filePath: string; message: string }): void => {
     vscode.window.showWarningMessage(`CommandVault: ${error.message} (${error.filePath})`);
   };
 
-  vault.on('scan:complete', onScanComplete);
-  vault.on('entry:added', onEntryChange);
-  vault.on('entry:updated', onEntryChange);
-  vault.on('entry:removed', onEntryChange);
-  vault.on('error', onError);
+  const bindVaultEvents = (v: Vault): void => {
+    v.on('scan:complete', onScanComplete);
+    v.on('entry:added', onEntryChange);
+    v.on('entry:updated', onEntryChange);
+    v.on('entry:removed', onEntryChange);
+    v.on('error', onError);
+  };
 
-  const vaultRef = vault;
+  const unbindVaultEvents = (v: Vault): void => {
+    v.off('scan:complete', onScanComplete);
+    v.off('entry:added', onEntryChange);
+    v.off('entry:updated', onEntryChange);
+    v.off('entry:removed', onEntryChange);
+    v.off('error', onError);
+  };
+
+  bindVaultEvents(vault);
+
   context.subscriptions.push({
     dispose: () => {
-      vaultRef.off('scan:complete', onScanComplete);
-      vaultRef.off('entry:added', onEntryChange);
-      vaultRef.off('entry:updated', onEntryChange);
-      vaultRef.off('entry:removed', onEntryChange);
-      vaultRef.off('error', onError);
+      if (vault) unbindVaultEvents(vault);
     },
   });
 
@@ -101,13 +130,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (pick) entriesProvider.setSortMode(pick.value);
   });
 
-  const filterCommand = vscode.commands.registerCommand('commandvault.filterEntries', async () => {
-    const text = await vscode.window.showInputBox({
-      placeHolder: 'Filter entries by name or description (empty to clear)',
-      prompt: 'Enter filter text',
-    });
-    if (text !== undefined) entriesProvider.setFilter(text);
-  });
+  const filterCommand = vscode.commands.registerCommand(
+    'commandvault.filterEntries',
+    async (filterText?: string) => {
+      if (typeof filterText === 'string') {
+        entriesProvider.setFilter(filterText);
+        updateStatusBar();
+        return;
+      }
+      const text = await vscode.window.showInputBox({
+        placeHolder: 'Filter entries by name or description (empty to clear)',
+        prompt: 'Enter filter text',
+      });
+      if (text !== undefined) {
+        entriesProvider.setFilter(text);
+        updateStatusBar();
+      }
+    },
+  );
 
   context.subscriptions.push(sortCommand, filterCommand);
 
@@ -133,11 +173,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   }
 
-  const configWatcher = vscode.workspace.onDidChangeConfiguration((e) => {
-    if (e.affectsConfiguration('commandvault')) {
-      vscode.window.showInformationMessage(
-        'CommandVault: Configuration changed. Reload window to apply.',
-      );
+  const configWatcher = vscode.workspace.onDidChangeConfiguration(async (e) => {
+    if (
+      e.affectsConfiguration('commandvault.claudeConfigPath') ||
+      e.affectsConfiguration('commandvault.searchTier')
+    ) {
+      try {
+        if (vault) {
+          unbindVaultEvents(vault);
+          await vault.dispose();
+        }
+
+        vault = createVault(buildVaultConfig());
+        bindVaultEvents(vault);
+
+        const stats = await vault.initialize();
+        refreshAll();
+        updateStatusBar();
+        vscode.window.showInformationMessage(
+          `CommandVault: Configuration reloaded (${stats.totalEntries} entries)`,
+        );
+      } catch (err) {
+        vscode.window.showErrorMessage(`CommandVault: Reload failed — ${(err as Error).message}`);
+      }
     }
   });
 
