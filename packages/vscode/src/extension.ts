@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { createVault, Vault } from '@commandvault/core';
-import type { VaultConfig, SearchTier } from '@commandvault/core';
+import type { VaultConfig, VaultStats, SearchTier } from '@commandvault/core';
 import { EntriesProvider, type SortMode } from './providers/entries-provider';
 import { FavoritesProvider } from './providers/favorites-provider';
 import { RecentProvider } from './providers/recent-provider';
@@ -53,25 +53,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     recentProvider.refresh();
   };
 
-  vault.on('scan:complete', (stats) => {
+  const onScanComplete = (stats: VaultStats): void => {
     refreshAll();
     statusBar.text = `$(database) ${stats.totalEntries} cmds`;
-  });
-
-  vault.on('entry:added', () => {
-    refreshAll();
-  });
-
-  vault.on('entry:updated', () => {
-    refreshAll();
-  });
-
-  vault.on('entry:removed', () => {
-    refreshAll();
-  });
-
-  vault.on('error', (error) => {
+  };
+  const onEntryChange = (): void => refreshAll();
+  const onError = (error: { filePath: string; message: string }): void => {
     vscode.window.showWarningMessage(`CommandVault: ${error.message} (${error.filePath})`);
+  };
+
+  vault.on('scan:complete', onScanComplete);
+  vault.on('entry:added', onEntryChange);
+  vault.on('entry:updated', onEntryChange);
+  vault.on('entry:removed', onEntryChange);
+  vault.on('error', onError);
+
+  context.subscriptions.push({
+    dispose: () => {
+      vault.off('scan:complete', onScanComplete);
+      vault.off('entry:added', onEntryChange);
+      vault.off('entry:updated', onEntryChange);
+      vault.off('entry:removed', onEntryChange);
+      vault.off('error', onError);
+    },
   });
 
   const commandDisposables = registerCommands(
@@ -111,7 +115,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.window.showInformationMessage(`CommandVault: Loaded ${stats.totalEntries} entries`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    vscode.window.showErrorMessage(`CommandVault: Failed to initialize vault - ${message}`);
+    statusBar.text = '$(warning) CommandVault: Init failed';
+    statusBar.tooltip = `Initialization failed: ${message}`;
+    const action = await vscode.window.showErrorMessage(
+      `CommandVault failed to initialize: ${message}`,
+      'Retry',
+      'Open Settings',
+    );
+    if (action === 'Retry') {
+      await vscode.commands.executeCommand('commandvault.refresh');
+    } else if (action === 'Open Settings') {
+      await vscode.commands.executeCommand(
+        'workbench.action.openSettings',
+        'commandvault.claudeConfigPath',
+      );
+    }
   }
 
   const configWatcher = vscode.workspace.onDidChangeConfiguration((e) => {
