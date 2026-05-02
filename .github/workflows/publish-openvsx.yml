@@ -1,0 +1,36 @@
+name: Publish to Open VSX
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Package extension
+        run: cd packages/vscode && npx @vscode/vsce package --no-dependencies
+
+      - name: Publish to Open VSX
+        run: cd packages/vscode && npx ovsx publish *.vsix
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        continue-on-error: true
