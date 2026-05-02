@@ -23,11 +23,12 @@ beforeAll(async () => {
   originalPluginRegistry = await readFile(registryPath, 'utf-8');
 
   const cachePath = join(FIXTURES, 'plugins', 'cache');
+  const jsonSafe = (p: string) => p.replace(/\\/g, '\\\\');
   const patched = originalPluginRegistry
-    .replace('PLACEHOLDER_CACHE_PATH', join(cachePath, 'test-plugin'))
-    .replace('PLACEHOLDER_CLAUDE_PLUGIN_PATH', join(cachePath, 'claude-plugin-test'))
-    .replace('PLACEHOLDER_PKG_JSON_PATH', join(cachePath, 'pkg-json-test'))
-    .replace('PLACEHOLDER_NO_MANIFEST_PATH', join(cachePath, 'no-manifest-test'));
+    .replace('PLACEHOLDER_CACHE_PATH', jsonSafe(join(cachePath, 'test-plugin')))
+    .replace('PLACEHOLDER_CLAUDE_PLUGIN_PATH', jsonSafe(join(cachePath, 'claude-plugin-test')))
+    .replace('PLACEHOLDER_PKG_JSON_PATH', jsonSafe(join(cachePath, 'pkg-json-test')))
+    .replace('PLACEHOLDER_NO_MANIFEST_PATH', jsonSafe(join(cachePath, 'no-manifest-test')));
 
   await writeFile(registryPath, patched, 'utf-8');
 });
