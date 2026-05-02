@@ -1,0 +1,78 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+      core_release_created: ${{ steps.release.outputs['packages/core--release_created'] }}
+      cli_release_created: ${{ steps.release.outputs['packages/cli--release_created'] }}
+      vscode_release_created: ${{ steps.release.outputs['packages/vscode--release_created'] }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-npm:
+    needs: release-please
+    if: needs.release-please.outputs.core_release_created || needs.release-please.outputs.cli_release_created
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Publish core
+        if: needs.release-please.outputs.core_release_created
+        run: pnpm --filter @commandvault/core publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish CLI
+        if: needs.release-please.outputs.cli_release_created
+        run: pnpm --filter @commandvault/cli publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-vscode:
+    needs: release-please
+    if: needs.release-please.outputs.vscode_release_created
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Package & publish extension
+        run: |
+          cd packages/vscode
+          npx @vscode/vsce package --no-dependencies
+          npx @vscode/vsce publish --packagePath *.vsix
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
