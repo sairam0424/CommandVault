@@ -22,6 +22,7 @@ import {
   parseHooks,
   detectAgentConfigs,
 } from './parsers/index.js';
+import { parseSingleFile, isSingleFileParseable } from './parsers/single-file-parser.js';
 import { SearchEngine } from './indexer/search-engine.js';
 import { VaultWatcher, type WatcherCallback } from './watcher/index.js';
 import { routePathToParser, type ParserType } from './watcher/path-router.js';
@@ -343,34 +344,61 @@ export class Vault {
 
     return this.withScanLock(async () => {
       const oldEntries = [...this.entries];
-      const parserTypes = [...this.pendingChanges.keys()];
+      const snapshot = new Map(this.pendingChanges);
       this.pendingChanges.clear();
 
-      const results = await Promise.all(parserTypes.map((pt) => this.parserFns[pt]()));
+      const singleFileTypes: ParserType[] = [];
+      const fullReparseTypes: ParserType[] = [];
 
-      const typesToReplace = new Set(parserTypes);
-      const kept = this.entries.filter((e) => !typesToReplace.has(e.type as ParserType));
-      const newEntries: VaultEntry[] = [];
-      const newErrors: ParseError[] = [];
-
-      for (const result of results) {
-        newEntries.push(...result.entries);
-        newErrors.push(...result.errors);
+      for (const [parserType, paths] of snapshot) {
+        if (paths.size === 1 && isSingleFileParseable(parserType)) {
+          singleFileTypes.push(parserType);
+        } else {
+          fullReparseTypes.push(parserType);
+        }
       }
 
-      this.entries = [...kept, ...newEntries];
-      const keptErrors = this.scanErrors.filter((e) => {
-        const errorType = routePathToParser(e.filePath, this.config.claudeConfigPath);
-        return !typesToReplace.has(errorType as ParserType);
-      });
-      this.scanErrors = [...keptErrors, ...newErrors];
+      for (const parserType of singleFileTypes) {
+        const filePath = [...snapshot.get(parserType)!][0];
+        const entry = await parseSingleFile(filePath, parserType);
+        if (entry) {
+          const existed = this.entries.some((e) => e.filePath === filePath);
+          this.entries = existed
+            ? this.entries.map((e) => (e.filePath === filePath ? entry : e))
+            : [...this.entries, entry];
+        } else {
+          this.entries = this.entries.filter((e) => e.filePath !== filePath);
+        }
+        this.scanErrors = this.scanErrors.filter((e) => e.filePath !== filePath);
+      }
+
+      if (fullReparseTypes.length > 0) {
+        const results = await Promise.all(fullReparseTypes.map((pt) => this.parserFns[pt]()));
+        const typesToReplace = new Set(fullReparseTypes);
+        const kept = this.entries.filter((e) => !typesToReplace.has(e.type as ParserType));
+        const newEntries: VaultEntry[] = [];
+        const newErrors: ParseError[] = [];
+
+        for (const result of results) {
+          newEntries.push(...result.entries);
+          newErrors.push(...result.errors);
+        }
+
+        this.entries = [...kept, ...newEntries];
+        const keptErrors = this.scanErrors.filter((e) => {
+          const errorType = routePathToParser(e.filePath, this.config.claudeConfigPath);
+          return !typesToReplace.has(errorType as ParserType);
+        });
+        this.scanErrors = [...keptErrors, ...newErrors];
+
+        for (const error of newErrors) {
+          this.emit('error', error);
+        }
+      }
+
       this.getSearchEngine().index(this.entries);
       this.diffAndEmit(oldEntries, this.entries);
       this.emit('scan:complete', this.getStats());
-
-      for (const error of newErrors) {
-        this.emit('error', error);
-      }
     });
   }
 
