@@ -20,7 +20,9 @@ describe('routePathToParser', () => {
 
   it('routes plugins/ paths to plugin parser', () => {
     expect(routePathToParser(`${CLAUDE}/plugins/installed_plugins.json`, CLAUDE)).toBe('plugin');
-    expect(routePathToParser(`${CLAUDE}/plugins/cache/some-plugin/plugin.json`, CLAUDE)).toBe('plugin');
+    expect(routePathToParser(`${CLAUDE}/plugins/cache/some-plugin/plugin.json`, CLAUDE)).toBe(
+      'plugin',
+    );
   });
 
   it('routes rules/ paths to rule parser', () => {

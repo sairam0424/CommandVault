@@ -68,9 +68,7 @@ async function listBackups(): Promise<void> {
 async function pruneBackups(): Promise<void> {
   try {
     const files = await readdir(BACKUP_DIR);
-    const backups = files
-      .filter((f) => f.startsWith('vault-') && f.endsWith('.db'))
-      .sort();
+    const backups = files.filter((f) => f.startsWith('vault-') && f.endsWith('.db')).sort();
 
     if (backups.length <= MAX_BACKUPS) return;
 
@@ -81,7 +79,9 @@ async function pruneBackups(): Promise<void> {
     }
 
     if (toRemove.length > 0) {
-      console.log(chalk.dim(`Pruned ${toRemove.length} old backup(s) (keeping last ${MAX_BACKUPS})`));
+      console.log(
+        chalk.dim(`Pruned ${toRemove.length} old backup(s) (keeping last ${MAX_BACKUPS})`),
+      );
     }
   } catch {
     // ignore prune errors
