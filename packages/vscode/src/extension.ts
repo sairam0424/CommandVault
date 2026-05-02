@@ -68,13 +68,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   vault.on('entry:removed', onEntryChange);
   vault.on('error', onError);
 
+  const vaultRef = vault;
   context.subscriptions.push({
     dispose: () => {
-      vault.off('scan:complete', onScanComplete);
-      vault.off('entry:added', onEntryChange);
-      vault.off('entry:updated', onEntryChange);
-      vault.off('entry:removed', onEntryChange);
-      vault.off('error', onError);
+      vaultRef.off('scan:complete', onScanComplete);
+      vaultRef.off('entry:added', onEntryChange);
+      vaultRef.off('entry:updated', onEntryChange);
+      vaultRef.off('entry:removed', onEntryChange);
+      vaultRef.off('error', onError);
     },
   });
 
