@@ -2,6 +2,17 @@
   "name": "@commandvault/core",
   "version": "0.1.0",
   "description": "Core engine for CommandVault — parsers, three-tier search, file watcher",
+  "author": "sairamugge",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sairam0424/CommandVault.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/sairam0424/CommandVault/tree/main/packages/core#readme",
+  "bugs": {
+    "url": "https://github.com/sairam0424/CommandVault/issues"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

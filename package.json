@@ -5,6 +5,14 @@
   "description": "Universal AI command manager — browse, search, and organize slash commands, skills, agents, plugins, rules, and hooks across all AI coding assistants",
   "author": "sairamugge",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sairam0424/CommandVault.git"
+  },
+  "homepage": "https://github.com/sairam0424/CommandVault#readme",
+  "bugs": {
+    "url": "https://github.com/sairam0424/CommandVault/issues"
+  },
   "engines": {
     "node": ">=20.0.0",
     "pnpm": ">=9.0.0"

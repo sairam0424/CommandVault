@@ -2,6 +2,20 @@
   "name": "@commandvault/cli",
   "version": "0.1.0",
   "description": "Terminal companion for CommandVault — list, search, and inspect AI commands",
+  "author": "sairamugge",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sairam0424/CommandVault.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/sairam0424/CommandVault/tree/main/packages/cli#readme",
+  "bugs": {
+    "url": "https://github.com/sairam0424/CommandVault/issues"
+  },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "bin": {
     "vault": "dist/index.js"
