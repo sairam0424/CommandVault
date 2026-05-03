@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Box, Text, useInput, useStdout, useApp } from 'ink';
 import { execFileSync } from 'node:child_process';
+import { resolve } from 'node:path';
 import type { VaultEntry, EntryType, EntrySource } from '@commandvault/core';
 import type { Vault } from '@commandvault/core';
 import { SearchBar } from './SearchBar.js';
@@ -52,24 +53,21 @@ export function App({ vault }: Props) {
 
   const results = useVaultSearch(vault, query, filterType, filterSource, handleError);
 
-  const scroll = useScroll(results.length, visibleCount);
-  const selectedEntry: VaultEntry | null = results[scroll.selectedIndex]?.entry ?? null;
+  const { selectedIndex, scrollTop, moveUp, moveDown, reset: scrollReset } = useScroll(results.length, visibleCount);
+  const selectedEntry: VaultEntry | null = results[selectedIndex]?.entry ?? null;
 
-  // Estimate content line count for preview scroll — use 200 as a reasonable default
   const contentLineCount = selectedEntry ? selectedEntry.content.split('\n').length : 0;
-  const previewScroll = usePreviewScroll(contentLineCount, bodyHeight);
+  const { scrollTop: previewScrollTop, scrollUp: previewScrollUp, scrollDown: previewScrollDown, reset: previewReset } = usePreviewScroll(contentLineCount, bodyHeight);
 
-  // Reset scroll when filters/query change
+  // Reset list scroll when search parameters change
   useEffect(() => {
-    scroll.reset();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, filterType, filterSource]);
+    scrollReset();
+  }, [query, filterType, filterSource, scrollReset]);
 
   // Reset preview scroll when selected entry changes
   useEffect(() => {
-    previewScroll.reset();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scroll.selectedIndex]);
+    previewReset();
+  }, [selectedIndex, previewReset]);
 
   // Auto-clear error messages
   useEffect(() => {
@@ -80,7 +78,7 @@ export function App({ vault }: Props) {
 
   useInput((input, key) => {
     // Quit
-    if (input === 'q' || key.ctrl && input === 'c') {
+    if (input === 'q' || (key.ctrl && input === 'c')) {
       exit();
       return;
     }
@@ -97,11 +95,11 @@ export function App({ vault }: Props) {
 
     // Navigation
     if (key.upArrow) {
-      scroll.moveUp();
+      moveUp();
       return;
     }
     if (key.downArrow) {
-      scroll.moveDown();
+      moveDown();
       return;
     }
 
@@ -113,11 +111,11 @@ export function App({ vault }: Props) {
 
     // Preview scroll
     if (input === '[') {
-      previewScroll.scrollUp();
+      previewScrollUp();
       return;
     }
     if (input === ']') {
-      previewScroll.scrollDown();
+      previewScrollDown();
       return;
     }
 
@@ -143,7 +141,7 @@ export function App({ vault }: Props) {
     if (input === 'o' && selectedEntry) {
       const editor = process.env['EDITOR'] ?? 'vi';
       try {
-        execFileSync(editor, [selectedEntry.filePath], { stdio: 'ignore' });
+        execFileSync(editor, [resolve(selectedEntry.filePath)], { stdio: 'ignore' });
       } catch (err) {
         setErrorMessage(`Editor error: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -189,8 +187,8 @@ export function App({ vault }: Props) {
       <Box flexDirection="row" height={bodyHeight}>
         <ResultsList
           results={results}
-          selectedIndex={scroll.selectedIndex}
-          scrollTop={scroll.scrollTop}
+          selectedIndex={selectedIndex}
+          scrollTop={scrollTop}
           visibleCount={visibleCount}
           width={resultsWidth}
         />
@@ -200,7 +198,7 @@ export function App({ vault }: Props) {
             <PreviewPane
               entry={selectedEntry}
               query={query}
-              scrollTop={previewScroll.scrollTop}
+              scrollTop={previewScrollTop}
               height={bodyHeight}
               width={previewWidth}
             />
