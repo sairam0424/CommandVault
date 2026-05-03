@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import type { Vault, VaultEntry, SearchResult } from '@commandvault/core';
@@ -62,7 +61,7 @@ describe('useVaultSearch', () => {
     expect(vault.search).not.toHaveBeenCalled();
   });
 
-  it('debounce: rapid query changes fire vault.search only once after 80ms', async () => {
+  it('debounce: rapid query changes fire vault.search only once after 80ms', () => {
     const entries = [makeEntry()];
     const searchResults = [makeSearchResult(entries[0])];
     const vault = makeVault(entries, searchResults);
@@ -88,7 +87,7 @@ describe('useVaultSearch', () => {
     );
   });
 
-  it('debounce fires only once per burst (10 rapid rerenders → 1 search call)', async () => {
+  it('debounce fires only once per burst (10 rapid rerenders → 1 search call)', () => {
     const entries = [makeEntry()];
     const searchResults = [makeSearchResult(entries[0])];
     const vault = makeVault(entries, searchResults);

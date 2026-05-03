@@ -19,6 +19,8 @@ export function useVaultSearch(
 ): SearchResult[] {
   const [results, setResults] = useState<SearchResult[]>(() => sortedByUsage(vault));
   const lastGood = useRef<SearchResult[]>(results);
+  const onErrorRef = useRef(onError);
+  useEffect(() => { onErrorRef.current = onError; });
 
   useEffect(() => {
     if (!query.trim()) {
@@ -40,13 +42,13 @@ export function useVaultSearch(
         lastGood.current = found;
         setResults(found);
       } catch (err) {
-        onError(err instanceof Error ? err : new Error(String(err)));
+        onErrorRef.current(err instanceof Error ? err : new Error(String(err)));
         setResults(lastGood.current);
       }
     }, DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
-  }, [vault, query, filterType, filterSource, onError]);
+  }, [vault, query, filterType, filterSource]);
 
   return results;
 }
