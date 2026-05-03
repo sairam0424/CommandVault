@@ -67,7 +67,7 @@ export function getContentExcerpt(
   // Clamp to valid range
   if (start < 0) {
     start = 0;
-    end = maxLines;
+    end = Math.min(maxLines, allLines.length);
   } else if (end > allLines.length) {
     end = allLines.length;
     start = end - maxLines;

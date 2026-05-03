@@ -68,6 +68,14 @@ describe('getContentExcerpt', () => {
     expect(result.matchLine).toBeNull();
   });
 
+  it('empty query returns first maxLines lines with null matchLine', () => {
+    const content = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join('\n');
+    const result = getContentExcerpt(content, '', 12);
+    expect(result.matchLine).toBeNull();
+    expect(result.lines).toHaveLength(12);
+    expect(result.lines[0]).toBe('line 1');
+  });
+
   it('uses default maxLines of 12 when not specified', () => {
     const content = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join('\n');
     const result = getContentExcerpt(content, 'zzznomatch');
