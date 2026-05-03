@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import type { SearchResult } from '@commandvault/core';
+import { truncate } from '../helpers.js';
 
 interface Props {
   readonly results: SearchResult[];
@@ -8,11 +9,6 @@ interface Props {
   readonly scrollTop: number;
   readonly visibleCount: number;
   readonly width: number;
-}
-
-function truncate(str: string, max: number): string {
-  if (str.length <= max) return str;
-  return `${str.slice(0, max - 1)}…`;
 }
 
 export function ResultsList({ results, selectedIndex, scrollTop, visibleCount, width }: Props) {

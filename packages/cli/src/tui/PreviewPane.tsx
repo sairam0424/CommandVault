@@ -63,7 +63,8 @@ export function PreviewPane({ entry, query, scrollTop, height, width }: Props) {
   }
 
   const { lines, matchLine } = getContentExcerpt(entry.content, query, height * 2);
-  const visible = lines.slice(scrollTop, scrollTop + height);
+  const clampedScrollTop = Math.min(scrollTop, Math.max(0, lines.length - height));
+  const visible = lines.slice(clampedScrollTop, clampedScrollTop + height);
 
   return (
     <Box
@@ -76,7 +77,7 @@ export function PreviewPane({ entry, query, scrollTop, height, width }: Props) {
       overflow="hidden"
     >
       {visible.map((line, i) => {
-        const absIdx = scrollTop + i;
+        const absIdx = clampedScrollTop + i;
         const isMatch = matchLine !== null && absIdx === matchLine;
         return (
           <Text key={i} color={isMatch ? 'yellow' : undefined} bold={isMatch}>
