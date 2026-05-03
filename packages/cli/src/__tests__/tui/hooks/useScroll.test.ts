@@ -44,14 +44,14 @@ describe('useScroll', () => {
 
   it('scrollTop retreats on moveUp back past window top', () => {
     const { result } = renderHook(() => useScroll(10, 3));
-    // Move down to scrollTop=1
-    act(() => result.current.moveDown());
-    act(() => result.current.moveDown());
+    act(() => result.current.moveDown()); // idx=1
+    act(() => result.current.moveDown()); // idx=2
     act(() => result.current.moveDown()); // idx=3, top=1
-    // Move back up: idx=2, top still 1; idx=1, top should retreat to 1 (still ok); idx=0, top should be 0
-    act(() => result.current.moveUp()); // idx=2, top=1
-    act(() => result.current.moveUp()); // idx=1, top=1
-    act(() => result.current.moveUp()); // idx=0, top=0
+    expect(result.current.scrollTop).toBe(1); // intermediate: verify top advanced
+    act(() => result.current.moveUp()); // idx=2, top=1 (2 still in [1,2,3])
+    expect(result.current.scrollTop).toBe(1); // intermediate: not yet retreated
+    act(() => result.current.moveUp()); // idx=1, top=1 (1 still in [1,2,3])
+    act(() => result.current.moveUp()); // idx=0, top=0 (0 not in [1,2,3] → retreat)
     expect(result.current.selectedIndex).toBe(0);
     expect(result.current.scrollTop).toBe(0);
   });

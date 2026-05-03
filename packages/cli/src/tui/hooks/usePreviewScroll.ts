@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useReducer, useCallback } from 'react';
 
 export interface PreviewScrollState {
   scrollTop: number;
@@ -7,21 +7,39 @@ export interface PreviewScrollState {
   reset: () => void;
 }
 
-export function usePreviewScroll(contentLineCount: number, visibleLines: number): PreviewScrollState {
-  const [scrollTop, setScrollTop] = useState(0);
+type Action =
+  | { type: 'up' }
+  | { type: 'down'; contentLineCount: number; visibleLines: number }
+  | { type: 'reset' };
 
-  const scrollUp = useCallback(() => {
-    setScrollTop((prev) => Math.max(0, prev - 1));
-  }, []);
+function reducer(state: number, action: Action): number {
+  switch (action.type) {
+    case 'reset':
+      return 0;
+    case 'up':
+      return Math.max(0, state - 1);
+    case 'down': {
+      if (action.visibleLines <= 0) return state;
+      const maxTop = Math.max(0, action.contentLineCount - action.visibleLines);
+      return Math.min(state + 1, maxTop);
+    }
+    default:
+      return state;
+  }
+}
 
-  const scrollDown = useCallback(() => {
-    setScrollTop((prev) => {
-      const maxTop = Math.max(0, contentLineCount - visibleLines);
-      return Math.min(prev + 1, maxTop);
-    });
-  }, [contentLineCount, visibleLines]);
+export function usePreviewScroll(
+  contentLineCount: number,
+  visibleLines: number,
+): PreviewScrollState {
+  const [scrollTop, dispatch] = useReducer(reducer, 0);
 
-  const reset = useCallback(() => setScrollTop(0), []);
+  const scrollUp = useCallback(() => dispatch({ type: 'up' }), []);
+  const scrollDown = useCallback(
+    () => dispatch({ type: 'down', contentLineCount, visibleLines }),
+    [contentLineCount, visibleLines],
+  );
+  const reset = useCallback(() => dispatch({ type: 'reset' }), []);
 
   return { scrollTop, scrollUp, scrollDown, reset };
 }

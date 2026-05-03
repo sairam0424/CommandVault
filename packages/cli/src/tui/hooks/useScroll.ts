@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useReducer, useCallback } from 'react';
 
 export interface ScrollState {
   selectedIndex: number;
@@ -8,35 +8,48 @@ export interface ScrollState {
   reset: () => void;
 }
 
+interface State {
+  selectedIndex: number;
+  scrollTop: number;
+}
+
+type Action =
+  | { type: 'up' }
+  | { type: 'down'; itemCount: number; visibleCount: number }
+  | { type: 'reset' };
+
+function reducer(state: State, action: Action): State {
+  switch (action.type) {
+    case 'reset':
+      return { selectedIndex: 0, scrollTop: 0 };
+    case 'up': {
+      if (state.selectedIndex <= 0) return state;
+      const next = state.selectedIndex - 1;
+      return { selectedIndex: next, scrollTop: Math.min(state.scrollTop, next) };
+    }
+    case 'down': {
+      if (action.itemCount === 0 || state.selectedIndex >= action.itemCount - 1) return state;
+      const next = state.selectedIndex + 1;
+      const maxTop = next - action.visibleCount + 1;
+      return {
+        selectedIndex: next,
+        scrollTop: maxTop > state.scrollTop ? maxTop : state.scrollTop,
+      };
+    }
+    default:
+      return state;
+  }
+}
+
 export function useScroll(itemCount: number, visibleCount: number): ScrollState {
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const [scrollTop, setScrollTop] = useState(0);
+  const [state, dispatch] = useReducer(reducer, { selectedIndex: 0, scrollTop: 0 });
 
-  const moveUp = useCallback(() => {
-    setSelectedIndex((prev) => {
-      if (prev <= 0) return prev;
-      const next = prev - 1;
-      setScrollTop((top) => Math.min(top, next));
-      return next;
-    });
-  }, []);
+  const moveUp = useCallback(() => dispatch({ type: 'up' }), []);
+  const moveDown = useCallback(
+    () => dispatch({ type: 'down', itemCount, visibleCount }),
+    [itemCount, visibleCount],
+  );
+  const reset = useCallback(() => dispatch({ type: 'reset' }), []);
 
-  const moveDown = useCallback(() => {
-    setSelectedIndex((prev) => {
-      if (itemCount === 0 || prev >= itemCount - 1) return prev;
-      const next = prev + 1;
-      setScrollTop((top) => {
-        const maxTop = next - visibleCount + 1;
-        return maxTop > top ? maxTop : top;
-      });
-      return next;
-    });
-  }, [itemCount, visibleCount]);
-
-  const reset = useCallback(() => {
-    setSelectedIndex(0);
-    setScrollTop(0);
-  }, []);
-
-  return { selectedIndex, scrollTop, moveUp, moveDown, reset };
+  return { ...state, moveUp, moveDown, reset };
 }
