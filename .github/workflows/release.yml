@@ -1,9 +1,13 @@
-name: Release
+name: Release (Manual)
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Perform a dry run without publishing'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -15,6 +19,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Validate secrets
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "::error::NPM_TOKEN secret is not configured"
+            exit 1
+          fi
+          if [ -z "$VSCE_PAT" ]; then
+            echo "::error::VSCE_PAT secret is not configured"
+            exit 1
+          fi
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
       - name: Checkout
         uses: actions/checkout@v4
 

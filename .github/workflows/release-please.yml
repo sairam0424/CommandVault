@@ -27,6 +27,15 @@ jobs:
     if: needs.release-please.outputs.core_release_created || needs.release-please.outputs.cli_release_created
     runs-on: ubuntu-latest
     steps:
+      - name: Validate NPM_TOKEN
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "::error::NPM_TOKEN secret is not configured"
+            exit 1
+          fi
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
@@ -57,6 +66,15 @@ jobs:
     if: needs.release-please.outputs.vscode_release_created
     runs-on: ubuntu-latest
     steps:
+      - name: Validate VSCE_PAT
+        run: |
+          if [ -z "$VSCE_PAT" ]; then
+            echo "::error::VSCE_PAT secret is not configured"
+            exit 1
+          fi
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4

@@ -35,3 +35,5 @@ export type {
   VaultEventMap,
   VaultEventHandler,
 } from './types/index.js';
+export { getContentExcerpt } from './utils/excerpt.js';
+export type { ContentExcerpt } from './utils/excerpt.js';
