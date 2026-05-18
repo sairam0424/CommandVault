@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createRequire } from 'node:module';
 import { Command } from 'commander';
 import { createListCommand } from './commands/list.js';
 import { createSearchCommand } from './commands/search.js';
@@ -22,11 +23,14 @@ import { createRestoreCommand } from './commands/restore.js';
 import { createConfigCommand } from './commands/config.js';
 import { createCompletionsCommand } from './commands/completions.js';
 
+const require = createRequire(import.meta.url);
+const { version } = require('../package.json');
+
 const program = new Command();
 
 program
   .name('vault')
-  .version('0.1.0')
+  .version(version)
   .description('CommandVault — terminal companion for managing AI slash commands')
   .option('--claude-path <path>', 'Override ~/.claude config location')
   .option('--tier <tier>', 'Search engine tier (fuse|minisearch|sqlite)')
