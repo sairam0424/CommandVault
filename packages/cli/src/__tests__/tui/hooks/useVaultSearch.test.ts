@@ -82,9 +82,7 @@ describe('useVaultSearch', () => {
     });
 
     expect(vault.search).toHaveBeenCalledTimes(1);
-    expect(vault.search).toHaveBeenCalledWith(
-      expect.objectContaining({ query: 'abc' }),
-    );
+    expect(vault.search).toHaveBeenCalledWith(expect.objectContaining({ query: 'abc' }));
   });
 
   it('debounce fires only once per burst (10 rapid rerenders → 1 search call)', () => {
@@ -115,9 +113,7 @@ describe('useVaultSearch', () => {
     const vault = makeVault(entries, searchResults);
     const onError = vi.fn();
 
-    renderHook(() =>
-      useVaultSearch(vault, 'myquery', 'agent', 'gstack', onError),
-    );
+    renderHook(() => useVaultSearch(vault, 'myquery', 'agent', 'gstack', onError));
 
     act(() => {
       vi.advanceTimersByTime(80);
@@ -140,9 +136,7 @@ describe('useVaultSearch', () => {
     const vault = makeVault(entries, searchResults);
     const onError = vi.fn();
 
-    renderHook(() =>
-      useVaultSearch(vault, 'query', null, null, onError),
-    );
+    renderHook(() => useVaultSearch(vault, 'query', null, null, onError));
 
     act(() => {
       vi.advanceTimersByTime(80);
@@ -193,10 +187,7 @@ describe('useVaultSearch', () => {
   });
 
   it('query → empty: immediately returns usage-sorted (no debounce needed)', () => {
-    const entries = [
-      makeEntry({ id: 'x', usageCount: 10 }),
-      makeEntry({ id: 'y', usageCount: 2 }),
-    ];
+    const entries = [makeEntry({ id: 'x', usageCount: 10 }), makeEntry({ id: 'y', usageCount: 2 })];
     const vault = makeVault(entries, []);
     const onError = vi.fn();
 
@@ -222,9 +213,7 @@ describe('useVaultSearch', () => {
     const vault = makeVault(entries, []);
     const onError = vi.fn();
 
-    const { result } = renderHook(() =>
-      useVaultSearch(vault, '   ', null, null, onError),
-    );
+    const { result } = renderHook(() => useVaultSearch(vault, '   ', null, null, onError));
 
     expect(result.current).toHaveLength(1);
     expect(result.current[0].score).toBe(1);

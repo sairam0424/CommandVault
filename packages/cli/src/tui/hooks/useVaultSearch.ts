@@ -20,7 +20,9 @@ export function useVaultSearch(
   const [results, setResults] = useState<SearchResult[]>(() => sortedByUsage(vault));
   const lastGood = useRef<SearchResult[]>(results);
   const onErrorRef = useRef(onError);
-  useEffect(() => { onErrorRef.current = onError; });
+  useEffect(() => {
+    onErrorRef.current = onError;
+  });
 
   useEffect(() => {
     if (!query.trim()) {

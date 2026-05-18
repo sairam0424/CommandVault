@@ -14,11 +14,7 @@ export interface ContentExcerpt {
  *                   `matchLine` is the index within the returned `lines` array,
  *                   or null if no match was found.
  */
-export function getContentExcerpt(
-  content: string,
-  query: string,
-  maxLines = 12,
-): ContentExcerpt {
+export function getContentExcerpt(content: string, query: string, maxLines = 12): ContentExcerpt {
   if (!content) {
     return { lines: [], matchLine: null };
   }
