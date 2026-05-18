@@ -1,6 +1,6 @@
 {
   "name": "@commandvault/core",
-  "version": "0.1.0",
+  "version": "0.1.7",
   "description": "Core engine for CommandVault — parsers, three-tier search, file watcher",
   "author": "nothumanslabs",
   "license": "MIT",
