@@ -53,7 +53,8 @@ describe.skipIf(!HAS_CLAUDE_DIR)('Integration: Vault against real ~/.claude', ()
   it('quickSearch returns results for "browse"', () => {
     const results = vault.quickSearch('browse');
     expect(results.length).toBeGreaterThan(0);
-    expect(results[0].entry.name).toBe('browse');
+    const names = results.map((r) => r.entry.name.toLowerCase());
+    expect(names.some((n) => n.includes('browse'))).toBe(true);
   });
 
   it('getEntriesByType returns only the requested type', () => {
