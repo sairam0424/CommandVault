@@ -184,8 +184,8 @@
     "keybindings": [
       {
         "command": "commandvault.search",
-        "key": "ctrl+shift+v",
-        "mac": "cmd+shift+v",
+        "key": "ctrl+shift+.",
+        "mac": "cmd+shift+.",
         "when": "!editorFocus"
       },
       {
@@ -253,7 +253,7 @@
   "scripts": {
     "build": "npm run build:webview && npm run build:extension",
     "build:webview": "vite build",
-    "build:extension": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
+    "build:extension": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify",
     "dev": "npm run build:extension -- --watch",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
