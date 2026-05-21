@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { stat } from 'node:fs/promises';
+import { stat, realpath } from 'node:fs/promises';
+import { resolve, normalize } from 'node:path';
 import matter from 'gray-matter';
 import type { EntrySource, ParsedFrontmatter } from '../types/index.js';
 
@@ -101,4 +102,44 @@ export function extractTags(
   }
 
   return [...tags];
+}
+
+/**
+ * Validates that a file path resolves within one of the allowed root directories.
+ * Returns the resolved real path if safe, or null if the path escapes containment.
+ */
+export async function safePath(
+  filePath: string,
+  allowedRoots: readonly string[],
+): Promise<string | null> {
+  try {
+    const resolved = await realpath(filePath);
+    const normalizedResolved = normalize(resolved);
+    for (const root of allowedRoots) {
+      const normalizedRoot = normalize(resolve(root));
+      if (
+        normalizedResolved.startsWith(normalizedRoot + '/') ||
+        normalizedResolved === normalizedRoot
+      ) {
+        return resolved;
+      }
+    }
+    return null;
+  } catch {
+    return null; // File doesn't exist or can't be resolved
+  }
+}
+
+const SECRET_PATTERNS = [
+  /\.env($|\.)/,
+  /credentials/i,
+  /secret/i,
+  /\.pem$/,
+  /id_rsa/,
+  /id_ed25519/,
+  /\.key$/,
+];
+
+export function isSecretFile(fileName: string): boolean {
+  return SECRET_PATTERNS.some((pattern) => pattern.test(fileName));
 }

@@ -25,6 +25,7 @@ export class VaultWatcher {
 
     this.watcher = watch(watchPaths, {
       ignoreInitial: true,
+      followSymlinks: false,
       awaitWriteFinish: { stabilityThreshold: 300, pollInterval: 100 },
     });
 

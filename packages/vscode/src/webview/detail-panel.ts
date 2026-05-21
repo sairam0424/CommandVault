@@ -1,6 +1,14 @@
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
+import * as path from 'path';
+import * as os from 'os';
 import type { VaultEntry } from '@commandvault/core';
+
+const allowedRoots = [
+  path.join(os.homedir(), '.claude'),
+  path.join(os.homedir(), '.cursor'),
+  path.join(os.homedir(), '.continue'),
+];
 
 const PANEL_COLUMN = vscode.ViewColumn.One;
 
@@ -39,7 +47,17 @@ export function createDetailPanel(
         vscode.window.showInformationMessage('CommandVault: Copied to clipboard');
       } else if (message.type === 'openFile' && message.path) {
         try {
-          const uri = vscode.Uri.file(message.path);
+          const normalizedPath = path.normalize(message.path);
+          const isWithinAllowed = allowedRoots.some(
+            (root) => normalizedPath.startsWith(root + path.sep) || normalizedPath === root,
+          );
+          if (!isWithinAllowed) {
+            vscode.window.showErrorMessage(
+              'CommandVault: Cannot open file outside allowed directories',
+            );
+            return;
+          }
+          const uri = vscode.Uri.file(normalizedPath);
           const doc = await vscode.workspace.openTextDocument(uri);
           await vscode.window.showTextDocument(doc);
         } catch (err) {

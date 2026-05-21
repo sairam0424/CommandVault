@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
-import { basename } from 'node:path';
+import { basename, dirname } from 'node:path';
 import type { VaultEntry, ParserResult, ParseError } from '../types/index.js';
-import { generateStableId, getLastModified } from './utils.js';
+import { generateStableId, getLastModified, safePath } from './utils.js';
 
 interface HookDefinition {
   readonly type: string;
@@ -25,6 +25,11 @@ interface SettingsJson {
 export async function parseHooks(settingsPath: string): Promise<ParserResult> {
   const entries: VaultEntry[] = [];
   const errors: ParseError[] = [];
+
+  // Allowed roots for script path containment:
+  // 1. The directory containing the settings file (e.g., ~/.claude/)
+  // 2. The current working directory (for project-level hooks)
+  const allowedRoots = [dirname(settingsPath), process.cwd()] as const;
 
   let settings: SettingsJson;
   try {
@@ -56,11 +61,19 @@ export async function parseHooks(settingsPath: string): Promise<ParserResult> {
 
         let content = '';
         let lastModified = new Date();
-        try {
-          content = await readFile(scriptPath, 'utf-8');
-          lastModified = await getLastModified(scriptPath);
-        } catch {
-          content = `// Script at: ${scriptPath}`;
+
+        // Validate script path stays within allowed roots (path containment)
+        const validatedPath = await safePath(scriptPath, allowedRoots);
+        if (validatedPath) {
+          try {
+            content = await readFile(validatedPath, 'utf-8');
+            lastModified = await getLastModified(validatedPath);
+          } catch {
+            content = `// Script at: ${scriptPath}`;
+          }
+        } else {
+          // Path escapes containment or doesn't exist — use command string as content
+          content = `// Command: ${hook.command}`;
         }
 
         const entry: VaultEntry = {
