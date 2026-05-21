@@ -126,6 +126,11 @@
         "command": "commandvault.import",
         "title": "CommandVault: Import Collection",
         "icon": "$(cloud-download)"
+      },
+      {
+        "command": "commandvault.filterByType",
+        "title": "CommandVault: Filter by Type",
+        "icon": "$(filter)"
       }
     ],
     "menus": {
@@ -147,6 +152,11 @@
         },
         {
           "command": "commandvault.filterEntries",
+          "when": "view == commandvault.entries",
+          "group": "navigation"
+        },
+        {
+          "command": "commandvault.filterByType",
           "when": "view == commandvault.entries",
           "group": "navigation"
         }

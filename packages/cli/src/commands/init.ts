@@ -90,30 +90,19 @@ export function createInitCommand(): Command {
       if (isReset && configExists) {
         console.log(chalk.green('  Config reset to defaults.'));
       } else {
-        console.log(chalk.green('  Created ~/.commandvault/ directory'));
-        console.log(chalk.green(`  Created config at ${CONFIG_PATH}`));
+        console.log(chalk.green('  ✓ CommandVault initialized successfully!'));
       }
 
       console.log('');
-      console.log(chalk.white('  Default configuration:'));
-      console.log('');
-
-      const entries = Object.entries(DEFAULT_CONFIG);
-      for (const [key, value] of entries) {
-        const formatted = Array.isArray(value)
-          ? value.length > 0
-            ? value.join(', ')
-            : chalk.dim('(empty)')
-          : String(value);
-        console.log(`  ${chalk.dim(key + ':')}  ${formatted}`);
-      }
-
+      console.log(`  ${chalk.dim('Scanned:')}   ~/.claude/`);
+      console.log(`  ${chalk.dim('Database:')}  ~/.commandvault/vault.db`);
       console.log('');
       console.log(chalk.bold.white('  Next steps:'));
       console.log(chalk.dim('  ' + '-'.repeat(40)));
-      console.log(`  1. Run ${chalk.cyan('vault list')} to see all indexed entries`);
-      console.log(`  2. Run ${chalk.cyan('vault search <query>')} to search commands`);
-      console.log(`  3. Run ${chalk.cyan('vault doctor')} to verify your setup`);
+      console.log(`    ${chalk.cyan('vault list')}              List all indexed entries`);
+      console.log(`    ${chalk.cyan('vault search <query>')}    Search your vault`);
+      console.log(`    ${chalk.cyan('vault stats')}             View entry statistics`);
+      console.log(`    ${chalk.cyan('vault doctor')}            Run health check`);
       console.log('');
     });
 

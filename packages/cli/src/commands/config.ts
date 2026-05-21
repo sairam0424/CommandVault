@@ -24,8 +24,22 @@ function parseValue(raw: string): unknown {
   if (raw === 'true') return true;
   if (raw === 'false') return false;
 
+  // Parse JSON arrays and objects
+  if (raw.startsWith('[') || raw.startsWith('{')) {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      // Fall through to treat as plain string
+    }
+  }
+
   const asNum = Number(raw);
   if (!Number.isNaN(asNum) && raw.trim() !== '') return asNum;
+
+  // Expand tilde to home directory
+  if (raw.startsWith('~')) {
+    return raw.replace(/^~/, homedir());
+  }
 
   return raw;
 }

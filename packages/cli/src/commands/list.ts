@@ -89,7 +89,16 @@ export function createListCommand(): Command {
         }
 
         if (entries.length === 0) {
-          console.log(chalk.yellow('\nNo entries found matching your filters.\n'));
+          const hasFilter = opts.type || opts.source || opts.tag || opts.favorites;
+          if (hasFilter) {
+            console.log(chalk.yellow('\nNo entries found matching your filters.\n'));
+          } else {
+            console.log(
+              chalk.yellow(
+                "\nNo entries found. Try running 'vault init' or check that ~/.claude/ exists.\n",
+              ),
+            );
+          }
           return;
         }
 
