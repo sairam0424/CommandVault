@@ -1,17 +1,16 @@
 import { createHash } from 'node:crypto';
 import type { VaultEntry } from '../types/index.js';
-import type { SqliteConnection } from './sqlite-connection.js';
+import type { DatabaseAdapter } from './database-adapter.js';
 
 export class SnapshotStore {
-  private readonly conn: SqliteConnection;
+  private readonly conn: DatabaseAdapter;
 
-  constructor(conn: SqliteConnection) {
+  constructor(conn: DatabaseAdapter) {
     this.conn = conn;
   }
 
   saveSnapshot(entries: readonly VaultEntry[]): void {
-    this.conn.db.run('BEGIN');
-    try {
+    this.conn.transaction(() => {
       this.conn.execute('DELETE FROM scan_snapshots');
       for (const entry of entries) {
         const hash = createHash('sha256')
@@ -22,12 +21,7 @@ export class SnapshotStore {
           { $id: entry.id, $name: entry.name, $type: entry.type, $hash: hash },
         );
       }
-      this.conn.db.run('COMMIT');
-    } catch (e) {
-      this.conn.db.run('ROLLBACK');
-      throw e;
-    }
-    this.conn.persist();
+    });
   }
 
   getDiff(currentEntries: readonly VaultEntry[]): {

@@ -1,10 +1,10 @@
 import type { VaultStats, EntryType } from '../types/index.js';
-import type { SqliteConnection } from './sqlite-connection.js';
+import type { DatabaseAdapter } from './database-adapter.js';
 
 export class StatsStore {
-  private readonly conn: SqliteConnection;
+  private readonly conn: DatabaseAdapter;
 
-  constructor(conn: SqliteConnection) {
+  constructor(conn: DatabaseAdapter) {
     this.conn = conn;
   }
 
