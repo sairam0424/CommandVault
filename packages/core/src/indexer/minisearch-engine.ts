@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import MiniSearch from 'minisearch';
 import type { VaultEntry, SearchResult, SearchOptions } from '../types/index.js';
+import { matchesFilters, applyFilters } from './filter-utils.js';
+import { parseQuery, applyQueryFilters } from './query-parser.js';
 
 const FIELDS = ['name', 'description', 'tags', 'source', 'type', 'content'];
 const STORED_FIELDS = ['id'];
@@ -86,18 +88,33 @@ export class MiniSearchEngine {
   }
 
   search(options: SearchOptions): SearchResult[] {
-    const allEntries = [...this.entriesById.values()];
-    const offset = options.offset ?? 0;
-    const limit = options.limit ?? 50;
+    const parsed = parseQuery(options.query);
 
-    if (!options.query.trim()) {
-      const filtered = this.applyFilters(allEntries, options);
-      return filtered
+    // Merge inline filters from query operators into search options
+    const mergedOptions: SearchOptions = {
+      ...options,
+      ...(parsed.filters.type ? { type: parsed.filters.type as SearchOptions['type'] } : {}),
+      ...(parsed.filters.source
+        ? { source: parsed.filters.source as SearchOptions['source'] }
+        : {}),
+      ...(parsed.filters.tags ? { tags: parsed.filters.tags } : {}),
+    };
+
+    const allEntries = [...this.entriesById.values()];
+    const offset = mergedOptions.offset ?? 0;
+    const limit = mergedOptions.limit ?? 50;
+
+    const fuzzyQuery = parsed.terms.join(' ');
+
+    if (!fuzzyQuery) {
+      const filtered = applyFilters(allEntries, mergedOptions);
+      const postFiltered = applyQueryFilters(filtered, parsed);
+      return postFiltered
         .slice(offset, offset + limit)
         .map((entry) => ({ entry, score: 1, matchedFields: [] }));
     }
 
-    const rawResults = this.engine.search(options.query, {
+    const rawResults = this.engine.search(fuzzyQuery, {
       boost: BOOST,
       prefix: true,
       fuzzy: 0.2,
@@ -109,7 +126,7 @@ export class MiniSearchEngine {
     for (const raw of rawResults) {
       const entry = this.entriesById.get(raw.id as string);
       if (!entry) continue;
-      if (!this.matchesFilters(entry, options)) continue;
+      if (!matchesFilters(entry, mergedOptions)) continue;
 
       results.push({
         entry,
@@ -118,7 +135,13 @@ export class MiniSearchEngine {
       });
     }
 
-    return results.slice(offset, offset + limit);
+    const postFiltered = applyQueryFilters(
+      results.map((r) => r.entry),
+      parsed,
+    );
+    const postFilteredIds = new Set(postFiltered.map((e) => e.id));
+
+    return results.filter((r) => postFilteredIds.has(r.entry.id)).slice(offset, offset + limit);
   }
 
   suggest(query: string, limit = 10): string[] {
@@ -126,21 +149,5 @@ export class MiniSearchEngine {
       .autoSuggest(query, { boost: BOOST })
       .slice(0, limit)
       .map((s) => s.suggestion);
-  }
-
-  private applyFilters(entries: VaultEntry[], options: SearchOptions): VaultEntry[] {
-    return entries.filter((e) => this.matchesFilters(e, options));
-  }
-
-  private matchesFilters(entry: VaultEntry, options: SearchOptions): boolean {
-    if (options.type && entry.type !== options.type) return false;
-    if (options.source && entry.source !== options.source) return false;
-    if (options.favoritesOnly && !entry.favorite) return false;
-    if (options.tags && options.tags.length > 0) {
-      if (!options.tags.every((t) => entry.tags.includes(t))) return false;
-    }
-    if (options.modifiedAfter && entry.lastModified < options.modifiedAfter) return false;
-    if (options.modifiedBefore && entry.lastModified > options.modifiedBefore) return false;
-    return true;
   }
 }

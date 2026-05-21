@@ -38,7 +38,8 @@ export class Vault {
   private searchEngine: SearchEngine | null = null;
   private readonly watcher: VaultWatcher;
   private entries: VaultEntry[] = [];
-  private listeners: Map<string, Set<Function>> = new Map();
+  private listeners: Map<keyof VaultEventMap, Set<VaultEventHandler<keyof VaultEventMap>>> =
+    new Map();
   private scanErrors: ParseError[] = [];
   private pendingChanges: Map<ParserType, Set<string>> = new Map();
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -117,11 +118,16 @@ export class Vault {
         allErrors.push(...result.errors);
       }
 
-      this.entries = allEntries;
+      // Deterministic ordering: sort by stable ID to avoid non-determinism from Promise.all
+      this.entries = [...allEntries].sort((a, b) => a.id.localeCompare(b.id));
       this.scanErrors = allErrors;
-      this.getSearchEngine().index(allEntries);
+      this.getSearchEngine().index(this.entries);
 
-      this.diffAndEmit(oldEntries, this.entries);
+      // Skip per-entry events on first scan (oldEntries empty) to avoid 1000+ individual emissions
+      const isFirstScan = oldEntries.length === 0;
+      if (!isFirstScan) {
+        this.diffAndEmit(oldEntries, this.entries);
+      }
       this.emit('scan:complete', this.getStats());
 
       for (const error of allErrors) {
@@ -259,15 +265,14 @@ export class Vault {
   }
 
   on<K extends keyof VaultEventMap>(event: K, handler: VaultEventHandler<K>): void {
-    const key = event as string;
-    if (!this.listeners.has(key)) {
-      this.listeners.set(key, new Set());
+    if (!this.listeners.has(event)) {
+      this.listeners.set(event, new Set());
     }
-    this.listeners.get(key)!.add(handler);
+    this.listeners.get(event)!.add(handler as VaultEventHandler<keyof VaultEventMap>);
   }
 
   off<K extends keyof VaultEventMap>(event: K, handler: VaultEventHandler<K>): void {
-    this.listeners.get(event as string)?.delete(handler);
+    this.listeners.get(event)?.delete(handler as VaultEventHandler<keyof VaultEventMap>);
   }
 
   async dispose(): Promise<void> {
@@ -430,10 +435,14 @@ export class Vault {
   }
 
   private emit<K extends keyof VaultEventMap>(event: K, data: VaultEventMap[K]): void {
-    const handlers = this.listeners.get(event as string);
+    const handlers = this.listeners.get(event);
     if (handlers) {
       for (const handler of handlers) {
-        (handler as VaultEventHandler<K>)(data);
+        try {
+          (handler as VaultEventHandler<K>)(data);
+        } catch {
+          // Isolate handler errors — one failing listener shouldn't break others
+        }
       }
     }
   }
