@@ -67,25 +67,33 @@ export function registerCommands(
 
   const searchCommand = vscode.commands.registerCommand('commandvault.search', async () => {
     const quickPick = vscode.window.createQuickPick<SearchQuickPickItem>();
-    quickPick.placeholder = 'Search commands (try type:skill or tag:security)';
+    quickPick.placeholder =
+      "Search entries (try: 'exact  ^prefix  !exclude  type:skill  tag:security)";
     quickPick.matchOnDescription = true;
     quickPick.matchOnDetail = true;
 
     let debounceTimer: ReturnType<typeof setTimeout> | undefined;
     let isDisposed = false;
 
+    const syntaxHelpItem: SearchQuickPickItem = {
+      label: "$(lightbulb) Search syntax: 'exact  ^prefix  !exclude  type:skill  tag:security",
+      description: '',
+      detail: '',
+      entry: undefined as unknown as VaultEntry,
+      alwaysShow: true,
+    };
+
     const updateResults = (input: string): void => {
       if (isDisposed) return;
 
       const { query, type, tags } = parseSearchInput(input);
 
+      let items: SearchQuickPickItem[];
+
       if (!query.trim() && !type && !tags) {
         const allEntries = getVault().getAllEntries();
-        quickPick.items = allEntries.slice(0, 50).map((entry) => createQuickPickItem(entry));
-        return;
-      }
-
-      if (!query.trim() && (type || tags)) {
+        items = allEntries.slice(0, 50).map((entry) => createQuickPickItem(entry));
+      } else if (!query.trim() && (type || tags)) {
         const allEntries = getVault()
           .getAllEntries()
           .filter((entry) => {
@@ -93,18 +101,18 @@ export function registerCommands(
             if (tags && !tags.every((t) => entry.tags.includes(t))) return false;
             return true;
           });
-        quickPick.items = allEntries.slice(0, 50).map((entry) => createQuickPickItem(entry));
-        return;
+        items = allEntries.slice(0, 50).map((entry) => createQuickPickItem(entry));
+      } else {
+        const results: readonly SearchResult[] = getVault().search({
+          query,
+          type,
+          tags,
+          limit: 50,
+        });
+        items = results.map((result) => createQuickPickItem(result.entry, result.score));
       }
 
-      const results: readonly SearchResult[] = getVault().search({
-        query,
-        type,
-        tags,
-        limit: 50,
-      });
-
-      quickPick.items = results.map((result) => createQuickPickItem(result.entry, result.score));
+      quickPick.items = [...items, syntaxHelpItem];
     };
 
     quickPick.onDidChangeValue((value) => {
@@ -122,7 +130,7 @@ export function registerCommands(
         clearTimeout(debounceTimer);
       }
       const selected = quickPick.selectedItems[0];
-      if (selected) {
+      if (selected && selected.entry) {
         getVault().recordUsage(selected.entry.id);
         recentProvider.refresh();
         vscode.commands.executeCommand('commandvault.openDetail', selected.entry);
@@ -316,6 +324,34 @@ export function registerCommands(
     }
   });
 
+  const filterByTypeCommand = vscode.commands.registerCommand(
+    'commandvault.filterByType',
+    async () => {
+      const currentFilter = entriesProvider.getTypeFilter();
+      const items: Array<{ label: string; value: EntryType | null }> = [
+        { label: '$(list-flat) All Types', value: null },
+        { label: '$(symbol-event) Skills', value: 'skill' as EntryType },
+        { label: '$(person) Agents', value: 'agent' as EntryType },
+        { label: '$(terminal) Commands', value: 'command' as EntryType },
+        { label: '$(extensions) Plugins', value: 'plugin' as EntryType },
+        { label: '$(law) Rules', value: 'rule' as EntryType },
+        { label: '$(zap) Hooks', value: 'hook' as EntryType },
+      ];
+
+      const pick = await vscode.window.showQuickPick(
+        items.map((item) => ({
+          ...item,
+          description: item.value === currentFilter ? '(active)' : '',
+        })),
+        { placeHolder: `Filter by type (current: ${currentFilter ?? 'All Types'})` },
+      );
+
+      if (pick) {
+        entriesProvider.setTypeFilter(pick.value);
+      }
+    },
+  );
+
   return [
     searchCommand,
     refreshCommand,
@@ -329,6 +365,7 @@ export function registerCommands(
     statsCommand,
     exportCommand,
     importCommand,
+    filterByTypeCommand,
   ];
 }
 

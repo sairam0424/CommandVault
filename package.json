@@ -1,6 +1,6 @@
 {
   "name": "commandvault",
-  "version": "0.1.0",
+  "version": "0.1.7",
   "private": true,
   "description": "Universal AI command manager — browse, search, and organize slash commands, skills, agents, plugins, rules, and hooks across all AI coding assistants",
   "author": "nothumanslabs",
@@ -27,6 +27,13 @@
     "typecheck": "turbo run typecheck",
     "format": "prettier --write 'packages/*/src/**/*.ts'",
     "format:check": "prettier --check 'packages/*/src/**/*.ts'"
+  },
+  "pnpm": {
+    "overrides": {
+      "fast-uri": ">=3.1.2",
+      "ws": ">=8.20.1",
+      "brace-expansion": ">=5.0.6"
+    }
   },
   "devDependencies": {
     "@commitlint/cli": "^20.5.3",

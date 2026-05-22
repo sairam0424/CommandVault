@@ -1,9 +1,9 @@
-import type { SqliteConnection } from './sqlite-connection.js';
+import type { DatabaseAdapter } from './database-adapter.js';
 
 export class TagStore {
-  private readonly conn: SqliteConnection;
+  private readonly conn: DatabaseAdapter;
 
-  constructor(conn: SqliteConnection) {
+  constructor(conn: DatabaseAdapter) {
     this.conn = conn;
   }
 
@@ -12,7 +12,6 @@ export class TagStore {
       $entryId: entryId,
       $tag: tag,
     });
-    this.conn.persist();
   }
 
   removeTag(entryId: string, tag: string): void {
@@ -20,7 +19,6 @@ export class TagStore {
       $entryId: entryId,
       $tag: tag,
     });
-    this.conn.persist();
   }
 
   getTagsForEntry(entryId: string): string[] {

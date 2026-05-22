@@ -59,6 +59,7 @@ export class EntriesProvider implements vscode.TreeDataProvider<TreeNode> {
 
   private sortBy: SortMode = 'name';
   private filterText = '';
+  private filterType: EntryType | null = null;
 
   constructor(private readonly vault: Vault) {}
 
@@ -70,6 +71,15 @@ export class EntriesProvider implements vscode.TreeDataProvider<TreeNode> {
   setFilter(text: string): void {
     this.filterText = text.toLowerCase();
     this.refresh();
+  }
+
+  setTypeFilter(type: EntryType | null): void {
+    this.filterType = type;
+    this.refresh();
+  }
+
+  getTypeFilter(): EntryType | null {
+    return this.filterType;
   }
 
   getSortMode(): SortMode {
@@ -114,6 +124,10 @@ export class EntriesProvider implements vscode.TreeDataProvider<TreeNode> {
   private getRootNodes(): TypeGroupNode[] {
     let entries = [...this.vault.getAllEntries()];
 
+    if (this.filterType) {
+      entries = entries.filter((e) => e.type === this.filterType);
+    }
+
     if (this.filterText) {
       entries = entries.filter(
         (e) =>
@@ -138,6 +152,10 @@ export class EntriesProvider implements vscode.TreeDataProvider<TreeNode> {
 
   private getSourceNodes(type: EntryType): SourceGroupNode[] {
     let entries = [...this.vault.getEntriesByType(type)];
+
+    if (this.filterType && type !== this.filterType) {
+      return [];
+    }
 
     if (this.filterText) {
       entries = entries.filter(

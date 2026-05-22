@@ -44,6 +44,7 @@ export function createSearchCommand(): Command {
     .argument('<query>', 'Search query')
     .option('-t, --type <type>', 'Filter by entry type')
     .option('-s, --source <source>', 'Filter by source')
+    .option('--tag <tag>', 'Filter results by tag')
     .option('-l, --limit <n>', 'Maximum results', '20')
     .action(async (query: string, _opts, command) => {
       const globalOpts = command.optsWithGlobals() as CliGlobalOptions;
@@ -62,6 +63,7 @@ export function createSearchCommand(): Command {
           query,
           type: opts.type as EntryType | undefined,
           source: opts.source as EntrySource | undefined,
+          tags: opts.tag ? [opts.tag as string] : undefined,
           limit,
           tier: globalOpts.tier,
         });

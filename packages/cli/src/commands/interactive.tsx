@@ -154,11 +154,22 @@ export function createInteractiveCommand(): Command {
   return new Command('interactive')
     .alias('i')
     .description('Interactive fuzzy search mode (full TUI in terminal, legacy mode in pipes)')
+    .option('--tui', 'Force TUI mode')
+    .option('--no-tui', 'Force legacy non-interactive mode')
     .action(async (_opts, command) => {
       const globalOpts = command.optsWithGlobals() as CliGlobalOptions;
-      const isTTY = Boolean(process.stdout.isTTY && process.stdin.isTTY);
+      const localOpts = command.opts();
 
-      if (isTTY) {
+      let useTui: boolean;
+      if (localOpts.tui === true) {
+        useTui = true;
+      } else if (localOpts.tui === false) {
+        useTui = false;
+      } else {
+        useTui = Boolean(process.stdout.isTTY && process.stdin.isTTY);
+      }
+
+      if (useTui) {
         await runTuiMode(globalOpts);
       } else {
         await runLegacyMode(globalOpts);

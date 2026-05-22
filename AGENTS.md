@@ -13,6 +13,8 @@ packages/
 
 **Core** is ESM (`"type": "module"`). **CLI** is ESM. **VS Code extension** is CommonJS (esbuild bundles to CJS). Core uses `sql.js` (ASM.js build, not WASM) for cross-IDE compatibility — no native modules.
 
+**File watcher uses path-routing**: Chokidar watches multiple source directories; `path-router.ts` pattern-matches each changed file to its specific parser (skill, agent, command, plugin, rule, hook) — avoids full rescans on file change events.
+
 ## Build, Test, and Development Commands
 
 ```bash
@@ -56,9 +58,13 @@ pnpm --filter @commandvault/core test -- src/__tests__/search.test.ts
 
 ## Commit & Pull Request Guidelines
 
-Conventional commits: `<type>(<scope>): <description>`. Types: `feat`, `fix`, `refactor`, `perf`, `chore`, `docs`, `test`, `ci`, `build`. Scope is the package (`core`, `cli`, `vscode`) or area.
+Conventional commits: `<type>(<scope>): <description>`. Types: `feat`, `fix`, `refactor`, `perf`, `chore`, `docs`, `test`, `ci`, `build`. Scope is the package (`core`, `cli`, `vscode`, `deps`, `ci`) or area.
+
+**Commitlint** enforces format via `.commitlintrc.json` — invalid types or scopes will be rejected.
 
 Branches from `develop`: `feat/<name>` or `fix/<name>`. PRs target `develop`, not `main`. Do not include `Co-Authored-By` lines.
+
+**PR template** (`.github/PULL_REQUEST_TEMPLATE.md`): requires Summary, Changes list, type checkbox, and a checklist gate — `pnpm typecheck`, `pnpm test`, `pnpm format:check` must pass. CHANGELOG update required for user-facing changes.
 
 ## CI
 

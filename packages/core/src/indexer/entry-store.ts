@@ -1,5 +1,5 @@
 import type { VaultEntry, SearchResult, SearchOptions } from '../types/index.js';
-import type { SqliteConnection } from './sqlite-connection.js';
+import type { DatabaseAdapter } from './database-adapter.js';
 
 interface EntryRow {
   id: string;
@@ -49,7 +49,7 @@ function rowToEntry(
   };
 }
 
-function buildTagMaps(conn: SqliteConnection): {
+function buildTagMaps(conn: DatabaseAdapter): {
   entryTagMap: Map<string, string[]>;
   userTagMap: Map<string, string[]>;
 } {
@@ -76,19 +76,38 @@ function buildTagMaps(conn: SqliteConnection): {
 }
 
 export class EntryStore {
-  private readonly conn: SqliteConnection;
+  private readonly conn: DatabaseAdapter;
+  private tagMapCache: {
+    entryTagMap: Map<string, string[]>;
+    userTagMap: Map<string, string[]>;
+  } | null = null;
 
-  constructor(conn: SqliteConnection) {
+  constructor(conn: DatabaseAdapter) {
     this.conn = conn;
   }
 
+  /** Invalidate the cached tag maps. Call after any tag mutation or re-index. */
+  invalidateTagCache(): void {
+    this.tagMapCache = null;
+  }
+
+  private getTagMaps(): { entryTagMap: Map<string, string[]>; userTagMap: Map<string, string[]> } {
+    if (this.tagMapCache === null) {
+      this.tagMapCache = buildTagMaps(this.conn);
+    }
+    return this.tagMapCache;
+  }
+
   index(entries: readonly VaultEntry[]): void {
-    const existingRows = this.conn.queryAll<{ id: string }>('SELECT id FROM entries');
-    const existingIds = new Set(existingRows.map((r) => r.id));
+    // Batch-load existing favorite/usage_count to avoid N+1 query
+    const existingRows = this.conn.queryAll<{ id: string; favorite: number; usage_count: number }>(
+      'SELECT id, favorite, usage_count FROM entries',
+    );
+    const existingMap = new Map(existingRows.map((r) => [r.id, r]));
+    const existingIds = new Set(existingMap.keys());
     const newIds = new Set(entries.map((e) => e.id));
 
-    this.conn.db.run('BEGIN');
-    try {
+    this.conn.transaction(() => {
       for (const id of existingIds) {
         if (!newIds.has(id)) {
           this.conn.execute('DELETE FROM entries WHERE id = $id', { $id: id });
@@ -97,10 +116,7 @@ export class EntryStore {
       }
 
       for (const entry of entries) {
-        const existing = this.conn.queryOne<{ favorite: number; usage_count: number }>(
-          'SELECT favorite, usage_count FROM entries WHERE id = $id',
-          { $id: entry.id },
-        );
+        const existing = existingMap.get(entry.id);
 
         this.conn.execute(
           `INSERT OR REPLACE INTO entries
@@ -133,17 +149,116 @@ export class EntryStore {
           }
         }
       }
+    });
 
-      this.conn.db.run('COMMIT');
-    } catch (e) {
-      this.conn.db.run('ROLLBACK');
-      throw e;
+    this.invalidateTagCache();
+
+    // Rebuild FTS5 index after entries transaction
+    this.rebuildFts();
+  }
+
+  /** Rebuild the FTS5 index from the entries table. Gracefully no-ops if FTS5 is unavailable. */
+  private rebuildFts(): void {
+    try {
+      this.conn.execute('DELETE FROM entries_fts');
+      this.conn.execute(`
+        INSERT INTO entries_fts(id, name, description, content, tags)
+        SELECT id, name, description, content, tags FROM entries
+      `);
+    } catch {
+      // FTS5 table may not exist yet (pre-migration) — silently skip
     }
-
-    this.conn.persist();
   }
 
   search(options: SearchOptions): SearchResult[] {
+    const queryText = options.query.trim();
+    const hasTextQuery = queryText.length > 0;
+
+    // Attempt FTS5 search when a text query is present
+    if (hasTextQuery) {
+      try {
+        return this.searchFts(options, queryText);
+      } catch {
+        // FTS5 MATCH failed (malformed query or table missing) — fall back to LIKE
+      }
+    }
+
+    return this.searchLike(options);
+  }
+
+  /** FTS5-based search using MATCH for full-text relevance ranking. */
+  private searchFts(options: SearchOptions, queryText: string): SearchResult[] {
+    const conditions: string[] = [];
+    const params: Record<string, unknown> = {};
+
+    // Build FTS5 match expression: sanitize each word and join with AND
+    const sanitized = queryText.split(/\s+/).map(sanitizeFtsToken).filter(Boolean);
+    if (sanitized.length === 0) {
+      return this.searchLike(options);
+    }
+    // Use prefix matching with * for better partial-word matches
+    const ftsQuery = sanitized.map((w) => `"${w}"*`).join(' AND ');
+    params.$ftsQuery = ftsQuery;
+
+    // Apply non-text filters on the entries table
+    if (options.type) {
+      conditions.push('e.type = $type');
+      params.$type = options.type;
+    }
+    if (options.source) {
+      conditions.push('e.source = $source');
+      params.$source = options.source;
+    }
+    if (options.favoritesOnly) {
+      conditions.push('e.favorite = 1');
+    }
+    if (options.tags && options.tags.length > 0) {
+      for (let i = 0; i < options.tags.length; i++) {
+        const paramName = `$tag${i}`;
+        conditions.push(
+          `(EXISTS (SELECT 1 FROM entry_tags WHERE entry_id = e.id AND tag = ${paramName}) OR EXISTS (SELECT 1 FROM user_tags WHERE entry_id = e.id AND tag = ${paramName}))`,
+        );
+        params[paramName] = options.tags[i];
+      }
+    }
+    if (options.modifiedAfter) {
+      conditions.push('e.last_modified >= $modifiedAfter');
+      params.$modifiedAfter = options.modifiedAfter.toISOString();
+    }
+    if (options.modifiedBefore) {
+      conditions.push('e.last_modified <= $modifiedBefore');
+      params.$modifiedBefore = options.modifiedBefore.toISOString();
+    }
+
+    const filterClause = conditions.length > 0 ? `AND ${conditions.join(' AND ')}` : '';
+    const limit = options.limit ?? 50;
+    params.$limit = limit;
+
+    const offsetClause = options.offset ? 'OFFSET $offset' : '';
+    if (options.offset) {
+      params.$offset = options.offset;
+    }
+
+    const sql = `
+      SELECT e.* FROM entries e
+      JOIN entries_fts f ON e.id = f.id
+      WHERE entries_fts MATCH $ftsQuery ${filterClause}
+      ORDER BY f.rank, e.usage_count DESC, e.name ASC
+      LIMIT $limit ${offsetClause}
+    `;
+
+    const rows = this.conn.queryAll<EntryRow>(sql, params);
+    const { entryTagMap, userTagMap } = this.getTagMaps();
+
+    return rows.map((row, idx) => ({
+      entry: rowToEntry(row, entryTagMap, userTagMap),
+      score: 1 - idx / Math.max(rows.length, 1),
+      matchedFields: ['name', 'description', 'content'],
+    }));
+  }
+
+  /** Fallback LIKE-based search for when FTS5 is unavailable or query is malformed. */
+  private searchLike(options: SearchOptions): SearchResult[] {
     const conditions: string[] = [];
     const params: Record<string, unknown> = {};
 
@@ -203,7 +318,7 @@ export class EntryStore {
     const sql = `SELECT * FROM entries ${where} ${orderBy} LIMIT $limit ${offsetClause}`;
     const rows = this.conn.queryAll<EntryRow>(sql, params);
 
-    const { entryTagMap, userTagMap } = buildTagMaps(this.conn);
+    const { entryTagMap, userTagMap } = this.getTagMaps();
 
     return rows.map((row, idx) => ({
       entry: rowToEntry(row, entryTagMap, userTagMap),
@@ -223,7 +338,6 @@ export class EntryStore {
       $fav: newVal,
       $id: id,
     });
-    this.conn.persist();
     return newVal === 1;
   }
 
@@ -231,7 +345,6 @@ export class EntryStore {
     this.conn.execute('UPDATE entries SET usage_count = usage_count + 1 WHERE id = $id', {
       $id: id,
     });
-    this.conn.persist();
   }
 
   getEntry(id: string): VaultEntry | undefined {
@@ -264,7 +377,7 @@ export class EntryStore {
 
   getEntries(): VaultEntry[] {
     const rows = this.conn.queryAll<EntryRow>('SELECT * FROM entries');
-    const { entryTagMap, userTagMap } = buildTagMaps(this.conn);
+    const { entryTagMap, userTagMap } = this.getTagMaps();
     return rows.map((row) => rowToEntry(row, entryTagMap, userTagMap));
   }
 }

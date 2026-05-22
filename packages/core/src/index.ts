@@ -37,3 +37,12 @@ export type {
 } from './types/index.js';
 export { getContentExcerpt } from './utils/excerpt.js';
 export type { ContentExcerpt } from './utils/excerpt.js';
+export { RegistryManager, JsonRegistryAdapter } from './registry/index.js';
+export type {
+  RegistryAdapter,
+  RegistryConfig,
+  RegistryEntry,
+  RegistrySearchResult,
+} from './registry/types.js';
+export { detectStaleness, type StalenessResult } from './indexer/staleness-detector.js';
+export { scoreEntries, type QualityScore } from './indexer/quality-scorer.js';

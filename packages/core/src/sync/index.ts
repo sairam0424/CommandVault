@@ -204,7 +204,7 @@ export async function importFromUrl(url: string): Promise<ParserResult> {
   const timeoutId = setTimeout(() => controller.abort(), 15_000);
 
   try {
-    const response = await fetch(url, { signal: controller.signal });
+    const response = await fetch(url, { signal: controller.signal, redirect: 'error' });
     clearTimeout(timeoutId);
 
     if (!response.ok) {

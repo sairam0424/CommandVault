@@ -1,7 +1,16 @@
 import Fuse, { type IFuseOptions } from 'fuse.js';
 import type { VaultEntry, SearchResult, SearchOptions } from '../types/index.js';
+import { matchesFilters, applyFilters } from './filter-utils.js';
+import { parseQuery, applyQueryFilters } from './query-parser.js';
 
-const FUSE_OPTIONS: IFuseOptions<VaultEntry> = {
+/** Maximum content length indexed by Fuse to avoid bloating the in-memory index. */
+const CONTENT_TRUNCATE_LENGTH = 500;
+
+interface TruncatedEntry extends VaultEntry {
+  readonly content: string;
+}
+
+const FUSE_OPTIONS: IFuseOptions<TruncatedEntry> = {
   keys: [
     { name: 'name', weight: 3 },
     { name: 'description', weight: 2 },
@@ -28,57 +37,78 @@ function buildFilterKey(options: SearchOptions): string {
   });
 }
 
-function matchesDateRange(entry: VaultEntry, options: SearchOptions): boolean {
-  if (options.modifiedAfter && entry.lastModified < options.modifiedAfter) return false;
-  if (options.modifiedBefore && entry.lastModified > options.modifiedBefore) return false;
-  return true;
-}
-
 export class FuseEngine {
-  private fuse: Fuse<VaultEntry>;
-  private entries: VaultEntry[];
-  private filterCache: Map<string, Fuse<VaultEntry>> = new Map();
+  private fuse: Fuse<TruncatedEntry>;
+  private entries: TruncatedEntry[];
+  private filterCache: Map<string, Fuse<TruncatedEntry>> = new Map();
 
   constructor() {
     this.entries = [];
-    this.fuse = new Fuse([] as VaultEntry[], FUSE_OPTIONS);
+    this.fuse = new Fuse([] as TruncatedEntry[], FUSE_OPTIONS);
   }
 
   index(entries: readonly VaultEntry[]): void {
-    this.entries = [...entries];
-    this.fuse = new Fuse(this.entries as VaultEntry[], FUSE_OPTIONS);
+    this.entries = entries.map((e) => ({
+      ...e,
+      content: e.content.slice(0, CONTENT_TRUNCATE_LENGTH),
+    }));
+    this.fuse = new Fuse(this.entries, FUSE_OPTIONS);
     this.filterCache.clear();
   }
 
   search(options: SearchOptions): SearchResult[] {
-    const hasFilters =
-      options.type ||
-      options.source ||
-      options.tags?.length ||
-      options.favoritesOnly ||
-      options.modifiedAfter ||
-      options.modifiedBefore;
-    const offset = options.offset ?? 0;
-    const limit = options.limit ?? 50;
+    const parsed = parseQuery(options.query);
 
-    if (!options.query.trim()) {
-      const filtered = hasFilters ? this.applyFilters(this.entries, options) : this.entries;
-      return filtered
+    // Merge inline filters from query operators into search options
+    const mergedOptions: SearchOptions = {
+      ...options,
+      ...(parsed.filters.type ? { type: parsed.filters.type as SearchOptions['type'] } : {}),
+      ...(parsed.filters.source
+        ? { source: parsed.filters.source as SearchOptions['source'] }
+        : {}),
+      ...(parsed.filters.tags ? { tags: parsed.filters.tags } : {}),
+    };
+
+    const hasFilters =
+      mergedOptions.type ||
+      mergedOptions.source ||
+      mergedOptions.tags?.length ||
+      mergedOptions.favoritesOnly ||
+      mergedOptions.modifiedAfter ||
+      mergedOptions.modifiedBefore;
+    const offset = mergedOptions.offset ?? 0;
+    const limit = mergedOptions.limit ?? 50;
+
+    const fuzzyQuery = parsed.terms.join(' ');
+
+    if (!fuzzyQuery) {
+      const filtered = hasFilters ? applyFilters(this.entries, mergedOptions) : this.entries;
+      const postFiltered = applyQueryFilters(filtered, parsed);
+      return postFiltered
         .slice(offset, offset + limit)
         .map((entry) => ({ entry, score: 1, matchedFields: [] }));
     }
 
-    const fuseInstance = hasFilters ? this.getFilteredFuse(options) : this.fuse;
-    const results = fuseInstance.search(options.query);
+    const fuseInstance = hasFilters ? this.getFilteredFuse(mergedOptions) : this.fuse;
+    const results = fuseInstance.search(fuzzyQuery);
 
-    return results.slice(offset, offset + limit).map((r) => ({
-      entry: r.item,
-      score: 1 - (r.score ?? 0),
-      matchedFields: r.matches?.map((m) => m.key ?? '') ?? [],
-    }));
+    const postFiltered = applyQueryFilters(
+      results.map((r) => r.item),
+      parsed,
+    );
+    const postFilteredIds = new Set(postFiltered.map((e) => e.id));
+
+    return results
+      .filter((r) => postFilteredIds.has(r.item.id))
+      .slice(offset, offset + limit)
+      .map((r) => ({
+        entry: r.item,
+        score: 1 - (r.score ?? 0),
+        matchedFields: r.matches?.map((m) => m.key ?? '') ?? [],
+      }));
   }
 
-  private getFilteredFuse(options: SearchOptions): Fuse<VaultEntry> {
+  private getFilteredFuse(options: SearchOptions): Fuse<TruncatedEntry> {
     const key = buildFilterKey(options);
     const cached = this.filterCache.get(key);
     if (cached) return cached;
@@ -88,31 +118,9 @@ export class FuseEngine {
       this.filterCache.delete(oldest);
     }
 
-    const filtered = this.applyFilters(this.entries, options);
+    const filtered = applyFilters(this.entries, options);
     const instance = new Fuse(filtered, FUSE_OPTIONS);
     this.filterCache.set(key, instance);
     return instance;
-  }
-
-  private applyFilters(entries: readonly VaultEntry[], options: SearchOptions): VaultEntry[] {
-    let filtered = [...entries];
-
-    if (options.type) {
-      filtered = filtered.filter((e) => e.type === options.type);
-    }
-    if (options.source) {
-      filtered = filtered.filter((e) => e.source === options.source);
-    }
-    if (options.tags && options.tags.length > 0) {
-      filtered = filtered.filter((e) => options.tags!.every((t) => e.tags.includes(t)));
-    }
-    if (options.favoritesOnly) {
-      filtered = filtered.filter((e) => e.favorite);
-    }
-    if (options.modifiedAfter || options.modifiedBefore) {
-      filtered = filtered.filter((e) => matchesDateRange(e, options));
-    }
-
-    return filtered;
   }
 }
