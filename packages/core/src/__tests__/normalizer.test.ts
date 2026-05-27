@@ -19,12 +19,11 @@ function makeEntry(overrides: Partial<VaultEntry> = {}): VaultEntry {
   };
 }
 
-function makeResult(overrides: Partial<SearchResult> & { entry?: Partial<VaultEntry> } = {}): SearchResult {
-  const { entry: entryOverrides, ...resultOverrides } = overrides;
+function makeResult(overrides: { score?: number; matchedFields?: string[]; entry?: Partial<VaultEntry> } = {}): SearchResult {
   return {
-    entry: makeEntry(entryOverrides),
-    score: resultOverrides.score ?? 0.5,
-    matchedFields: resultOverrides.matchedFields ?? ['name'],
+    entry: makeEntry(overrides.entry),
+    score: overrides.score ?? 0.5,
+    matchedFields: overrides.matchedFields ?? ['name'],
   };
 }
 
