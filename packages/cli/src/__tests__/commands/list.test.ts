@@ -6,10 +6,11 @@ vi.mock('../../helpers.js', async () => {
   return {
     ...actual,
     createVaultInstance: vi.fn(),
+    withVault: vi.fn(),
   };
 });
 
-import { createVaultInstance } from '../../helpers.js';
+import { createVaultInstance, withVault } from '../../helpers.js';
 import { createListCommand } from '../../commands/list.js';
 import { Command } from 'commander';
 
@@ -27,6 +28,13 @@ function createMockVault(entries = MOCK_ENTRIES) {
   };
 }
 
+function setupVaultMock(vault: ReturnType<typeof createMockVault>) {
+  vi.mocked(withVault).mockImplementation(async (_opts, fn) => {
+    return fn(vault as any);
+  });
+  vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
+}
+
 describe('list command', () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
 
@@ -41,19 +49,19 @@ describe('list command', () => {
 
   it('lists all entries when no filters specified', async () => {
     const vault = createMockVault();
-    vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
+    setupVaultMock(vault);
 
     const program = buildProgram();
     await program.parseAsync(['node', 'vault', 'list']);
 
     const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
     expect(output).toContain(`Total: ${MOCK_ENTRIES.length} entries`);
-    expect(vault.dispose).toHaveBeenCalled();
+    expect(withVault).toHaveBeenCalled();
   });
 
   it('filters by type (--type skill)', async () => {
     const vault = createMockVault();
-    vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
+    setupVaultMock(vault);
 
     const program = buildProgram();
     await program.parseAsync(['node', 'vault', 'list', '--type', 'skill']);
@@ -65,7 +73,7 @@ describe('list command', () => {
 
   it('filters by source (--source gstack)', async () => {
     const vault = createMockVault();
-    vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
+    setupVaultMock(vault);
 
     const program = buildProgram();
     await program.parseAsync(['node', 'vault', 'list', '--source', 'gstack']);
@@ -77,7 +85,7 @@ describe('list command', () => {
 
   it('shows empty message when no entries match filter', async () => {
     const vault = createMockVault();
-    vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
+    setupVaultMock(vault);
 
     const program = buildProgram();
     await program.parseAsync(['node', 'vault', 'list', '--source', 'nonexistent']);
@@ -88,7 +96,7 @@ describe('list command', () => {
 
   it('outputs JSON when --json flag is set', async () => {
     const vault = createMockVault();
-    vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
+    setupVaultMock(vault);
 
     const program = buildProgram();
     await program.parseAsync(['node', 'vault', '--json', 'list']);
@@ -101,7 +109,7 @@ describe('list command', () => {
 
   it('rejects invalid type values', async () => {
     const vault = createMockVault();
-    vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
+    setupVaultMock(vault);
 
     const program = buildProgram();
     await program.parseAsync(['node', 'vault', 'list', '--type', 'invalid']);
@@ -117,7 +125,7 @@ describe('list command', () => {
       makeMockEntry({ id: 'fav1', name: 'my-fav', favorite: true }),
     ];
     const vault = createMockVault(entriesWithFav);
-    vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
+    setupVaultMock(vault);
 
     const program = buildProgram();
     await program.parseAsync(['node', 'vault', 'list', '--favorites']);

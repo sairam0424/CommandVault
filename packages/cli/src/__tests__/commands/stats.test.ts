@@ -7,10 +7,11 @@ vi.mock('../../helpers.js', async () => {
   return {
     ...actual,
     createVaultInstance: vi.fn(),
+    withVault: vi.fn(),
   };
 });
 
-import { createVaultInstance } from '../../helpers.js';
+import { createVaultInstance, withVault } from '../../helpers.js';
 import { createStatsCommand } from '../../commands/stats.js';
 import { Command } from 'commander';
 
@@ -29,6 +30,13 @@ function createMockVault(stats: VaultStats = MOCK_STATS, entries = MOCK_ENTRIES)
   };
 }
 
+function setupVaultMock(vault: ReturnType<typeof createMockVault>) {
+  vi.mocked(withVault).mockImplementation(async (_opts, fn) => {
+    return fn(vault as any);
+  });
+  vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
+}
+
 describe('stats command', () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
 
@@ -43,7 +51,7 @@ describe('stats command', () => {
 
   it('returns correct entry counts by type', async () => {
     const vault = createMockVault();
-    vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
+    setupVaultMock(vault);
 
     const program = buildProgram();
     await program.parseAsync(['node', 'vault', 'stats']);
@@ -59,7 +67,7 @@ describe('stats command', () => {
 
   it('returns correct counts by source', async () => {
     const vault = createMockVault();
-    vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
+    setupVaultMock(vault);
 
     const program = buildProgram();
     await program.parseAsync(['node', 'vault', 'stats']);
@@ -78,7 +86,7 @@ describe('stats command', () => {
       favoriteCount: 5,
     };
     const vault = createMockVault(statsWithFavorites);
-    vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
+    setupVaultMock(vault);
 
     const program = buildProgram();
     await program.parseAsync(['node', 'vault', 'stats']);
@@ -89,7 +97,7 @@ describe('stats command', () => {
 
   it('outputs JSON when --json flag is set', async () => {
     const vault = createMockVault();
-    vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
+    setupVaultMock(vault);
 
     const program = buildProgram();
     await program.parseAsync(['node', 'vault', '--json', 'stats']);
@@ -108,7 +116,7 @@ describe('stats command', () => {
       makeMockEntry({ id: 'u2', name: 'unused-skill', usageCount: 0 }),
     ];
     const vault = createMockVault(MOCK_STATS, entriesWithUsage);
-    vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
+    setupVaultMock(vault);
 
     const program = buildProgram();
     await program.parseAsync(['node', 'vault', 'stats']);
@@ -121,7 +129,7 @@ describe('stats command', () => {
   it('shows "no usage data" message when all entries have zero usage', async () => {
     const noUsageEntries = [makeMockEntry({ id: 'z1', name: 'zero-usage', usageCount: 0 })];
     const vault = createMockVault(MOCK_STATS, noUsageEntries);
-    vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
+    setupVaultMock(vault);
 
     const program = buildProgram();
     await program.parseAsync(['node', 'vault', 'stats']);
