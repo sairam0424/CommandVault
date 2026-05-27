@@ -1,9 +1,5 @@
 export { Vault, createVault } from './vault.js';
 export { SearchEngine } from './indexer/search-engine.js';
-export { FuseEngine } from './indexer/fuse-engine.js';
-export { MiniSearchEngine } from './indexer/minisearch-engine.js';
-export { SqliteEngine } from './indexer/sqlite-engine.js';
-export { normalizeScore } from './indexer/normalizer.js';
 export { VaultWatcher } from './watcher/index.js';
 export { exportEntries, exportToFile, importFromFile, importFromUrl } from './sync/index.js';
 export type { VaultExportBundle, ExportedEntry } from './sync/index.js';
@@ -19,6 +15,17 @@ export {
   parseSingleFile,
   isSingleFileParseable,
 } from './parsers/index.js';
+export { parseMarkdownDir } from './parsers/base-parser.js';
+export type { ParseConfig, ParseContext } from './parsers/base-parser.js';
+export { ParserRegistry, getDefaultRegistry } from './parsers/parser-registry.js';
+export type { ParserPlugin } from './parsers/parser-registry.js';
+export { registerBuiltinParsers } from './parsers/builtin-registrations.js';
+export {
+  TYPE_EMOJIS,
+  TYPE_COLORS,
+  TYPE_LABELS,
+  KNOWN_ENTRY_TYPES,
+} from './constants.js';
 export type {
   VaultEntry,
   VaultStats,
