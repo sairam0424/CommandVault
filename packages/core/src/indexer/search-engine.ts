@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type {
   VaultEntry,
   SearchResult,
@@ -11,6 +12,23 @@ import { SqliteEngine } from './sqlite-engine.js';
 import { normalizeScore } from './normalizer.js';
 import { LruCache } from './lru-cache.js';
 
+function canonicalCacheKey(options: SearchOptions): string {
+  const obj = options as unknown as Record<string, unknown>;
+  const sorted = Object.keys(obj)
+    .sort()
+    .reduce<Record<string, unknown>>((acc, key) => {
+      acc[key] = obj[key];
+      return acc;
+    }, {});
+  return JSON.stringify(sorted);
+}
+
+function entryContentHash(entry: VaultEntry): string {
+  return createHash('md5')
+    .update(`${entry.name}|${entry.description}|${entry.content}|${entry.tags.join(',')}|${entry.lastModified.getTime()}`)
+    .digest('hex');
+}
+
 export class SearchEngine {
   private fuseEngine: FuseEngine | null = null;
   private miniSearchEngine: MiniSearchEngine | null = null;
@@ -18,6 +36,7 @@ export class SearchEngine {
   private readonly defaultTier: SearchTier;
   private pendingEntries: readonly VaultEntry[] = [];
   private readonly cache = new LruCache<SearchResult[]>(100, 30_000);
+  private contentHashes = new Map<string, string>();
 
   private constructor(sqliteEngine: SqliteEngine, defaultTier: SearchTier) {
     this.sqliteEngine = sqliteEngine;
@@ -36,18 +55,49 @@ export class SearchEngine {
     this.pendingEntries = entries;
     this.cache.clear();
 
-    this.sqliteEngine.index(entries);
+    const changedIds = this.computeChangeset(entries);
+
+    this.sqliteEngine.index(entries, changedIds);
 
     if (this.fuseEngine) {
       this.fuseEngine.index(entries);
     }
     if (this.miniSearchEngine) {
-      this.miniSearchEngine.index(entries);
+      this.miniSearchEngine.index(entries, changedIds);
     }
   }
 
+  private computeChangeset(entries: readonly VaultEntry[]): ReadonlySet<string> | undefined {
+    if (this.contentHashes.size === 0) {
+      for (const entry of entries) {
+        this.contentHashes.set(entry.id, entryContentHash(entry));
+      }
+      return undefined;
+    }
+
+    const changed = new Set<string>();
+    const newHashes = new Map<string, string>();
+
+    for (const entry of entries) {
+      const hash = entryContentHash(entry);
+      newHashes.set(entry.id, hash);
+      if (this.contentHashes.get(entry.id) !== hash) {
+        changed.add(entry.id);
+      }
+    }
+
+    for (const id of this.contentHashes.keys()) {
+      if (!newHashes.has(id)) {
+        changed.add(id);
+      }
+    }
+
+    this.contentHashes = newHashes;
+    return changed.size > 0 ? changed : undefined;
+  }
+
   search(options: SearchOptions): SearchResult[] {
-    const cacheKey = JSON.stringify(options);
+    const cacheKey = canonicalCacheKey(options);
     const cached = this.cache.get(cacheKey);
     if (cached) return cached;
 

@@ -203,8 +203,8 @@ export class SqliteEngine {
     return new SqliteEngine(conn);
   }
 
-  index(entries: readonly VaultEntry[]): void {
-    this.entryStore.index(entries);
+  index(entries: readonly VaultEntry[], changedIds?: ReadonlySet<string>): void {
+    this.entryStore.index(entries, changedIds);
   }
 
   search(options: SearchOptions): SearchResult[] {

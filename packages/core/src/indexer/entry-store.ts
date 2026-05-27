@@ -98,14 +98,17 @@ export class EntryStore {
     return this.tagMapCache;
   }
 
-  index(entries: readonly VaultEntry[]): void {
-    // Batch-load existing favorite/usage_count to avoid N+1 query
+  index(entries: readonly VaultEntry[], changedIds?: ReadonlySet<string>): void {
     const existingRows = this.conn.queryAll<{ id: string; favorite: number; usage_count: number }>(
       'SELECT id, favorite, usage_count FROM entries',
     );
     const existingMap = new Map(existingRows.map((r) => [r.id, r]));
     const existingIds = new Set(existingMap.keys());
     const newIds = new Set(entries.map((e) => e.id));
+
+    const entriesToUpsert = changedIds
+      ? entries.filter((e) => changedIds.has(e.id))
+      : entries;
 
     this.conn.transaction(() => {
       for (const id of existingIds) {
@@ -115,7 +118,7 @@ export class EntryStore {
         }
       }
 
-      for (const entry of entries) {
+      for (const entry of entriesToUpsert) {
         const existing = existingMap.get(entry.id);
 
         this.conn.execute(
@@ -152,21 +155,29 @@ export class EntryStore {
     });
 
     this.invalidateTagCache();
-
-    // Rebuild FTS5 index after entries transaction
-    this.rebuildFts();
+    this.rebuildFts(changedIds);
   }
 
-  /** Rebuild the FTS5 index from the entries table. Gracefully no-ops if FTS5 is unavailable. */
-  private rebuildFts(): void {
+  private rebuildFts(changedIds?: ReadonlySet<string>): void {
     try {
-      this.conn.execute('DELETE FROM entries_fts');
-      this.conn.execute(`
-        INSERT INTO entries_fts(id, name, description, content, tags)
-        SELECT id, name, description, content, tags FROM entries
-      `);
+      if (!changedIds) {
+        this.conn.execute('DELETE FROM entries_fts');
+        this.conn.execute(`
+          INSERT INTO entries_fts(id, name, description, content, tags)
+          SELECT id, name, description, content, tags FROM entries
+        `);
+      } else {
+        for (const id of changedIds) {
+          this.conn.execute('DELETE FROM entries_fts WHERE id = $id', { $id: id });
+          this.conn.execute(
+            `INSERT OR IGNORE INTO entries_fts(id, name, description, content, tags)
+             SELECT id, name, description, content, tags FROM entries WHERE id = $id`,
+            { $id: id },
+          );
+        }
+      }
     } catch {
-      // FTS5 table may not exist yet (pre-migration) — silently skip
+      // FTS5 table may not exist yet (pre-migration)
     }
   }
 
