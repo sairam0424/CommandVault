@@ -1,9 +1,26 @@
+import { z } from 'zod';
 import type {
   RegistryAdapter,
   RegistryConfig,
   RegistryEntry,
   RegistrySearchResult,
 } from './types.js';
+
+const RegistryEntrySchema = z.object({
+  name: z.string().min(1),
+  description: z.string().default(''),
+  type: z.string().default('skill'),
+  author: z.string().optional(),
+  version: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  downloads: z.number().int().nonnegative().optional(),
+  url: z.string().default(''),
+});
+
+const RegistryResponseSchema = z.union([
+  z.array(RegistryEntrySchema),
+  z.object({ entries: z.array(RegistryEntrySchema) }),
+]);
 
 export class JsonRegistryAdapter implements RegistryAdapter {
   readonly config: RegistryConfig;
@@ -55,24 +72,23 @@ export class JsonRegistryAdapter implements RegistryAdapter {
     }
 
     const data = await response.json();
-    const raw: unknown[] = Array.isArray(data)
-      ? data
-      : (((data as Record<string, unknown>).entries as unknown[]) ?? []);
+    const parsed = RegistryResponseSchema.safeParse(data);
+    if (!parsed.success) {
+      throw new Error(`Invalid registry response: ${parsed.error.message}`);
+    }
 
-    const entries: readonly RegistryEntry[] = raw.map((e: unknown) => {
-      const entry = e as Record<string, unknown>;
-      return {
-        name: String(entry.name ?? ''),
-        description: String(entry.description ?? ''),
-        type: String(entry.type ?? 'skill'),
-        author: entry.author ? String(entry.author) : undefined,
-        version: entry.version ? String(entry.version) : undefined,
-        tags: Array.isArray(entry.tags) ? entry.tags.map(String) : undefined,
-        downloads: typeof entry.downloads === 'number' ? entry.downloads : undefined,
-        url: String(entry.url ?? ''),
-        source: this.config.name,
-      };
-    });
+    const raw = Array.isArray(parsed.data) ? parsed.data : parsed.data.entries;
+    const entries: readonly RegistryEntry[] = raw.map((entry) => ({
+      name: entry.name,
+      description: entry.description,
+      type: entry.type,
+      author: entry.author,
+      version: entry.version,
+      tags: entry.tags,
+      downloads: entry.downloads,
+      url: entry.url,
+      source: this.config.name,
+    }));
 
     this.cache = entries;
     this.cacheExpiry = Date.now() + JsonRegistryAdapter.CACHE_TTL;

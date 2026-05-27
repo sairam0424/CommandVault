@@ -17,7 +17,13 @@ export function parseFrontmatter(raw: string): {
   data: ParsedFrontmatter;
   content: string;
 } {
-  const { data, content } = matter(raw);
+  const { data, content } = matter(raw, {
+    engines: {
+      javascript: { parse: () => ({}) },
+      coffee: { parse: () => ({}) },
+      js: { parse: () => ({}) },
+    },
+  });
   return { data: data as ParsedFrontmatter, content: content.trim() };
 }
 

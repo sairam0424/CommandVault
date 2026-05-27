@@ -32,12 +32,13 @@ const VALID_SOURCES: ReadonlySet<string> = new Set<EntrySource>([
   'continue',
 ]);
 
-function validateUrl(url: string): void {
+export function validateUrl(url: string): void {
   const parsed = new URL(url);
   if (parsed.protocol !== 'https:') {
     throw new Error('Only HTTPS URLs are supported');
   }
   const hostname = parsed.hostname;
+
   const blockedPatterns = [
     /^localhost$/i,
     /^127\./,
@@ -49,9 +50,23 @@ function validateUrl(url: string): void {
     /^\[::1\]$/,
     /^\[fe80:/i,
   ];
+
   if (blockedPatterns.some((p) => p.test(hostname))) {
     throw new Error(`Blocked: private/internal URL ${hostname}`);
   }
+
+  const ipv4FromMapped = extractIPv4FromMappedIPv6(hostname);
+  if (ipv4FromMapped && blockedPatterns.some((p) => p.test(ipv4FromMapped))) {
+    throw new Error(`Blocked: private/internal URL ${hostname}`);
+  }
+}
+
+function extractIPv4FromMappedIPv6(hostname: string): string | null {
+  const match = hostname.match(/^\[::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})\]$/i);
+  if (!match) return null;
+  const hi = parseInt(match[1], 16);
+  const lo = parseInt(match[2], 16);
+  return `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
 }
 
 export interface VaultExportBundle {
