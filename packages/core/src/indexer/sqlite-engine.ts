@@ -170,6 +170,17 @@ function runAdapterMigrations(conn: DatabaseAdapter): void {
       );
     });
   }
+
+  if (currentVersion < 4) {
+    conn.transaction(() => {
+      conn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_entries_last_modified ON entries(last_modified)',
+      );
+      conn.execute(
+        "INSERT INTO schema_version (version, description) VALUES (4, 'Add last_modified index for date range filters')",
+      );
+    });
+  }
 }
 
 export class SqliteEngine {
@@ -203,8 +214,8 @@ export class SqliteEngine {
     return new SqliteEngine(conn);
   }
 
-  index(entries: readonly VaultEntry[]): void {
-    this.entryStore.index(entries);
+  index(entries: readonly VaultEntry[], changedIds?: ReadonlySet<string>): void {
+    this.entryStore.index(entries, changedIds);
   }
 
   search(options: SearchOptions): SearchResult[] {

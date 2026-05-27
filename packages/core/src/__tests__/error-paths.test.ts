@@ -279,7 +279,7 @@ ${'Lorem ipsum dolor sit amet. '.repeat(5000)}`;
   // =========================================================================
 
   describe('Invalid JSON in settings.json', () => {
-    it('hook parser returns error for completely invalid JSON', async () => {
+    it('hook parser returns structured error for completely invalid JSON', async () => {
       const settingsPath = join(tempDir, 'bad-settings.json');
       await writeFile(settingsPath, 'this is not json {{{[[[');
 
@@ -287,12 +287,11 @@ ${'Lorem ipsum dolor sit amet. '.repeat(5000)}`;
 
       expect(result.entries).toHaveLength(0);
       expect(result.errors).toHaveLength(1);
-      expect(result.errors[0].message).toContain('not found');
+      expect(result.errors[0].message).toContain('Invalid JSON');
     });
 
-    it('hook parser throws on JSON with non-iterable hooks structure', async () => {
+    it('hook parser handles non-iterable hooks structure gracefully', async () => {
       const settingsPath = join(tempDir, 'weird-hooks.json');
-      // Valid JSON but hooks matchers are a string instead of an array
       await writeFile(
         settingsPath,
         JSON.stringify({
@@ -302,9 +301,9 @@ ${'Lorem ipsum dolor sit amet. '.repeat(5000)}`;
         }),
       );
 
-      // The parser iterates over PreToolUse with for..of — a non-iterable string
-      // will iterate char-by-char, then .hooks on each char is undefined, causing TypeError
-      await expect(parseHooks(settingsPath)).rejects.toThrow();
+      const result = await parseHooks(settingsPath);
+      expect(result.entries).toHaveLength(0);
+      expect(result.errors).toHaveLength(0);
     });
 
     it('hook parser handles missing hooks key gracefully', async () => {

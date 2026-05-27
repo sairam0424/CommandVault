@@ -22,6 +22,8 @@ const SUBCOMMANDS = [
   'restore',
   'config',
   'completions',
+  'registry',
+  'audit',
 ] as const;
 
 function generateBash(): string {
@@ -51,7 +53,7 @@ _vault_completions() {
       ;;
     completions)
       if [ "\${COMP_CWORD}" -eq 2 ]; then
-        COMPREPLY=( $(compgen -W "bash zsh fish" -- "\${cur}") )
+        COMPREPLY=( $(compgen -W "bash zsh fish powershell" -- "\${cur}") )
       fi
       ;;
     *)
@@ -105,7 +107,7 @@ ${cmdLines}
           _arguments '1:subcommand:(get set)'
           ;;
         completions)
-          _arguments '1:shell:(bash zsh fish)'
+          _arguments '1:shell:(bash zsh fish powershell)'
           ;;
       esac
       ;;
@@ -136,7 +138,7 @@ function generateFish(): string {
     "complete -c vault -n '__fish_seen_subcommand_from search s' -l limit -d 'Max results' -r",
     '',
     "complete -c vault -n '__fish_seen_subcommand_from config' -a 'get set' -d 'Config subcommand'",
-    "complete -c vault -n '__fish_seen_subcommand_from completions' -a 'bash zsh fish' -d 'Shell type'",
+    "complete -c vault -n '__fish_seen_subcommand_from completions' -a 'bash zsh fish powershell' -d 'Shell type'",
   );
 
   return `# vault shell completions for fish
@@ -145,20 +147,42 @@ ${lines.join('\n')}
 `;
 }
 
+function generatePowershell(): string {
+  const cmds = SUBCOMMANDS.map((c) => `'${c}'`).join(', ');
+  return `# vault shell completions for PowerShell
+# Add to $PROFILE: vault completions powershell | Invoke-Expression
+Register-ArgumentCompleter -Native -CommandName vault -ScriptBlock {
+  param($wordToComplete, $commandAst, $cursorPosition)
+  $commands = @(${cmds})
+
+  $tokens = $commandAst.ToString().Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)
+
+  if ($tokens.Count -eq 1 -or ($tokens.Count -eq 2 -and $wordToComplete)) {
+    $commands | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+      [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+    }
+  }
+}
+`;
+}
+
 const SHELLS: Readonly<Record<string, () => string>> = {
   bash: generateBash,
   zsh: generateZsh,
   fish: generateFish,
+  powershell: generatePowershell,
 };
 
 export function createCompletionsCommand(): Command {
   const cmd = new Command('completions')
     .description('Generate shell completion scripts')
-    .argument('<shell>', 'Shell type (bash|zsh|fish)')
+    .argument('<shell>', 'Shell type (bash|zsh|fish|powershell)')
     .action((shell: string) => {
       const generator = SHELLS[shell];
       if (!generator) {
-        console.error(chalk.red(`Unknown shell: "${shell}". Supported: bash, zsh, fish`));
+        console.error(
+          chalk.red(`Unknown shell: "${shell}". Supported: bash, zsh, fish, powershell`),
+        );
         process.exitCode = 1;
         return;
       }
@@ -168,4 +192,4 @@ export function createCompletionsCommand(): Command {
   return cmd;
 }
 
-export { generateBash, generateZsh, generateFish, SUBCOMMANDS };
+export { generateBash, generateZsh, generateFish, generatePowershell, SUBCOMMANDS };

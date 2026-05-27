@@ -7,3 +7,6 @@ export { parseHooks } from './hook-parser.js';
 export { detectAgentConfigs } from './multi-agent-parser.js';
 export { withRetry } from './retry.js';
 export { parseSingleFile, isSingleFileParseable } from './single-file-parser.js';
+export { parseMarkdownDir, type ParseConfig, type ParseContext } from './base-parser.js';
+export { ParserRegistry, getDefaultRegistry, type ParserPlugin } from './parser-registry.js';
+export { registerBuiltinParsers } from './builtin-registrations.js';

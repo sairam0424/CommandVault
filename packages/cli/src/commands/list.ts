@@ -2,13 +2,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import Table from 'cli-table3';
 import type { VaultEntry, EntryType } from '@commandvault/core';
-import {
-  createVaultInstance,
-  typeEmoji,
-  typeColor,
-  truncate,
-  type CliGlobalOptions,
-} from '../helpers.js';
+import { withVault, typeEmoji, typeColor, truncate, type CliGlobalOptions } from '../helpers.js';
 
 const VALID_TYPES = ['skill', 'agent', 'command', 'plugin', 'rule', 'hook'] as const;
 const TYPE_ORDER: readonly EntryType[] = VALID_TYPES;
@@ -56,9 +50,7 @@ export function createListCommand(): Command {
       const globalOpts = command.optsWithGlobals() as CliGlobalOptions;
       const opts = command.opts();
 
-      const vault = await createVaultInstance(globalOpts);
-
-      try {
+      await withVault(globalOpts, async (vault) => {
         let entries: readonly VaultEntry[] = vault.getAllEntries();
 
         if (opts.type) {
@@ -131,9 +123,7 @@ export function createListCommand(): Command {
         }
 
         console.log(chalk.dim(`\nTotal: ${entries.length} entries\n`));
-      } finally {
-        await vault.dispose();
-      }
+      });
     });
 
   return cmd;

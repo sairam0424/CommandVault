@@ -2,13 +2,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import Table from 'cli-table3';
 import type { SearchResult, EntryType, EntrySource } from '@commandvault/core';
-import {
-  createVaultInstance,
-  typeEmoji,
-  typeColor,
-  truncate,
-  type CliGlobalOptions,
-} from '../helpers.js';
+import { withVault, typeEmoji, typeColor, truncate, type CliGlobalOptions } from '../helpers.js';
 
 function highlightMatch(text: string, query: string): string {
   if (!query || !text) {
@@ -56,9 +50,7 @@ export function createSearchCommand(): Command {
         return;
       }
 
-      const vault = await createVaultInstance(globalOpts);
-
-      try {
+      await withVault(globalOpts, async (vault) => {
         const results: readonly SearchResult[] = vault.search({
           query,
           type: opts.type as EntryType | undefined,
@@ -108,9 +100,7 @@ export function createSearchCommand(): Command {
             `\n${results.length} result${results.length === 1 ? '' : 's'} for "${query}"\n`,
           ),
         );
-      } finally {
-        await vault.dispose();
-      }
+      });
     });
 
   return cmd;

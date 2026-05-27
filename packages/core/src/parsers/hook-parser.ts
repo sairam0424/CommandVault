@@ -35,10 +35,14 @@ export async function parseHooks(settingsPath: string): Promise<ParserResult> {
   try {
     const raw = await readFile(settingsPath, 'utf-8');
     settings = JSON.parse(raw);
-  } catch {
+  } catch (err) {
+    const message =
+      err instanceof SyntaxError
+        ? `Invalid JSON in settings file: ${err.message}`
+        : 'Settings file not found or unreadable';
     return {
       entries: [],
-      errors: [{ filePath: settingsPath, message: 'Settings file not found' }],
+      errors: [{ filePath: settingsPath, message }],
     };
   }
 
@@ -50,12 +54,13 @@ export async function parseHooks(settingsPath: string): Promise<ParserResult> {
 
   for (const event of hookEvents) {
     const matchers = settings.hooks[event];
-    if (!matchers) continue;
+    if (!matchers || !Array.isArray(matchers)) continue;
 
     for (const matcherDef of matchers) {
-      for (const hook of matcherDef.hooks) {
+      if (!matcherDef?.hooks || !Array.isArray(matcherDef.hooks)) continue;
+      for (const hook of matcherDef.hooks as readonly HookDefinition[]) {
         const commandParts = hook.command.split(' ');
-        const scriptPath = commandParts.find((p) => p.endsWith('.js')) ?? hook.command;
+        const scriptPath = commandParts.find((p: string) => p.endsWith('.js')) ?? hook.command;
         const scriptName = basename(scriptPath, '.js');
         const name = `${event}:${matcherDef.matcher}:${scriptName}`;
 

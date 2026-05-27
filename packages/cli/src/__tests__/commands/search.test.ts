@@ -7,10 +7,11 @@ vi.mock('../../helpers.js', async () => {
   return {
     ...actual,
     createVaultInstance: vi.fn(),
+    withVault: vi.fn(),
   };
 });
 
-import { createVaultInstance } from '../../helpers.js';
+import { createVaultInstance, withVault } from '../../helpers.js';
 import { createSearchCommand } from '../../commands/search.js';
 import { Command } from 'commander';
 
@@ -29,6 +30,13 @@ function createMockVault(searchFn?: (opts: SearchOptions) => any[]) {
   };
 }
 
+function setupVaultMock(vault: ReturnType<typeof createMockVault>) {
+  vi.mocked(withVault).mockImplementation(async (_opts, fn) => {
+    return fn(vault as any);
+  });
+  vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
+}
+
 describe('search command', () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
 
@@ -43,7 +51,7 @@ describe('search command', () => {
 
   it('searches by query string and returns matching results', async () => {
     const vault = createMockVault();
-    vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
+    setupVaultMock(vault);
 
     const program = buildProgram();
     await program.parseAsync(['node', 'vault', 'search', 'browse']);
@@ -55,7 +63,7 @@ describe('search command', () => {
 
   it('returns empty results message for no matches', async () => {
     const vault = createMockVault(() => []);
-    vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
+    setupVaultMock(vault);
 
     const program = buildProgram();
     await program.parseAsync(['node', 'vault', 'search', 'zzzznonexistent']);
@@ -70,7 +78,7 @@ describe('search command', () => {
       capturedOpts = opts;
       return mockSearchResults(opts.query);
     });
-    vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
+    setupVaultMock(vault);
 
     const program = buildProgram();
     await program.parseAsync(['node', 'vault', 'search', 'browse', '--type', 'skill']);
@@ -81,7 +89,7 @@ describe('search command', () => {
 
   it('outputs JSON when --json flag is set', async () => {
     const vault = createMockVault();
-    vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
+    setupVaultMock(vault);
 
     const program = buildProgram();
     await program.parseAsync(['node', 'vault', '--json', 'search', 'browse']);
@@ -99,7 +107,7 @@ describe('search command', () => {
       capturedOpts = opts;
       return mockSearchResults(opts.query).slice(0, opts.limit ?? 20);
     });
-    vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
+    setupVaultMock(vault);
 
     const program = buildProgram();
     await program.parseAsync(['node', 'vault', 'search', 'test', '--limit', '3']);
@@ -110,7 +118,7 @@ describe('search command', () => {
 
   it('rejects invalid --limit values', async () => {
     const vault = createMockVault();
-    vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
+    setupVaultMock(vault);
 
     const program = buildProgram();
     await program.parseAsync(['node', 'vault', 'search', 'test', '--limit', '0']);

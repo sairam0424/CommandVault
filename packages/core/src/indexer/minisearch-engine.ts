@@ -44,7 +44,7 @@ export class MiniSearchEngine {
     this.entriesById = new Map();
   }
 
-  index(entries: readonly VaultEntry[]): void {
+  index(entries: readonly VaultEntry[], changedIds?: ReadonlySet<string>): void {
     const newMap = new Map(entries.map((e) => [e.id, e]));
     const isFirstIndex = this.entriesById.size === 0;
 
@@ -70,7 +70,10 @@ export class MiniSearchEngine {
       }
     }
 
-    for (const [id, entry] of newMap) {
+    const idsToCheck = changedIds ?? newIds;
+    for (const id of idsToCheck) {
+      const entry = newMap.get(id);
+      if (!entry) continue;
       const newHash = entryHash(entry);
       const oldHash = this.hashById.get(id);
 

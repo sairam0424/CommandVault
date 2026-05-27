@@ -13,15 +13,8 @@ import type {
   ParserResult,
   ParseError,
 } from './types/index.js';
-import {
-  parseSkills,
-  parseAgents,
-  parseCommands,
-  parsePlugins,
-  parseRules,
-  parseHooks,
-  detectAgentConfigs,
-} from './parsers/index.js';
+import { detectAgentConfigs } from './parsers/index.js';
+import { ParserRegistry, getDefaultRegistry, registerBuiltinParsers } from './parsers/index.js';
 import { parseSingleFile, isSingleFileParseable } from './parsers/single-file-parser.js';
 import { SearchEngine } from './indexer/search-engine.js';
 import { VaultWatcher, type WatcherCallback } from './watcher/index.js';
@@ -37,6 +30,7 @@ export class Vault {
   private readonly config: VaultConfig;
   private searchEngine: SearchEngine | null = null;
   private readonly watcher: VaultWatcher;
+  private readonly registry: ParserRegistry;
   private entries: VaultEntry[] = [];
   private listeners: Map<keyof VaultEventMap, Set<VaultEventHandler<keyof VaultEventMap>>> =
     new Map();
@@ -54,7 +48,13 @@ export class Vault {
       defaultSearchTier: config?.defaultSearchTier ?? 'minisearch',
     };
 
+    this.registry = getDefaultRegistry();
+    registerBuiltinParsers(this.registry);
     this.watcher = new VaultWatcher(this.config.claudeConfigPath);
+  }
+
+  getRegistry(): ParserRegistry {
+    return this.registry;
   }
 
   private getSearchEngine(): SearchEngine {
@@ -95,20 +95,30 @@ export class Vault {
     return this.getStats();
   }
 
+  private getParserPath(type: string): string {
+    const claudePath = this.config.claudeConfigPath;
+    if (type === 'hook') return join(claudePath, 'settings.json');
+    return join(claudePath, `${type}s`);
+  }
+
+  private getParserFn(parserType: ParserType): () => Promise<ParserResult> {
+    const plugin = this.registry.getParser(parserType);
+    if (!plugin) {
+      return () => Promise.resolve({ entries: [], errors: [] });
+    }
+    return () => plugin.parse(this.getParserPath(parserType));
+  }
+
   async scan(): Promise<void> {
     return this.withScanLock(async () => {
-      const claudePath = this.config.claudeConfigPath;
       const oldEntries = [...this.entries];
 
-      const results = await Promise.all([
-        parseSkills(join(claudePath, 'skills')),
-        parseAgents(join(claudePath, 'agents')),
-        parseCommands(join(claudePath, 'commands')),
-        parsePlugins(join(claudePath, 'plugins')),
-        parseRules(join(claudePath, 'rules')),
-        parseHooks(join(claudePath, 'settings.json')),
-        detectAgentConfigs(this.config.projectRoot ?? process.cwd()),
-      ]);
+      const parserPromises = this.registry
+        .getAllPlugins()
+        .map((plugin) => plugin.parse(this.getParserPath(plugin.type)));
+      parserPromises.push(detectAgentConfigs(this.config.projectRoot ?? process.cwd()));
+
+      const results = await Promise.all(parserPromises);
 
       const allEntries: VaultEntry[] = [];
       const allErrors: ParseError[] = [];
@@ -118,12 +128,10 @@ export class Vault {
         allErrors.push(...result.errors);
       }
 
-      // Deterministic ordering: sort by stable ID to avoid non-determinism from Promise.all
       this.entries = [...allEntries].sort((a, b) => a.id.localeCompare(b.id));
       this.scanErrors = allErrors;
       this.getSearchEngine().index(this.entries);
 
-      // Skip per-entry events on first scan (oldEntries empty) to avoid 1000+ individual emissions
       const isFirstScan = oldEntries.length === 0;
       if (!isFirstScan) {
         this.diffAndEmit(oldEntries, this.entries);
@@ -289,18 +297,9 @@ export class Vault {
     this.listeners.clear();
   }
 
-  private readonly parserFns: Readonly<Record<ParserType, () => Promise<ParserResult>>> = {
-    skill: () => parseSkills(join(this.config.claudeConfigPath, 'skills')),
-    agent: () => parseAgents(join(this.config.claudeConfigPath, 'agents')),
-    command: () => parseCommands(join(this.config.claudeConfigPath, 'commands')),
-    plugin: () => parsePlugins(join(this.config.claudeConfigPath, 'plugins')),
-    rule: () => parseRules(join(this.config.claudeConfigPath, 'rules')),
-    hook: () => parseHooks(join(this.config.claudeConfigPath, 'settings.json')),
-  };
-
   async scanSingle(parserType: ParserType): Promise<void> {
     return this.withScanLock(async () => {
-      const result = await this.parserFns[parserType]();
+      const result = await this.getParserFn(parserType)();
 
       const kept = this.entries.filter((e) => e.type !== parserType);
       this.entries = [...kept, ...result.entries];
@@ -385,7 +384,7 @@ export class Vault {
       }
 
       if (fullReparseTypes.length > 0) {
-        const results = await Promise.all(fullReparseTypes.map((pt) => this.parserFns[pt]()));
+        const results = await Promise.all(fullReparseTypes.map((pt) => this.getParserFn(pt)()));
         const typesToReplace = new Set(fullReparseTypes);
         const kept = this.entries.filter((e) => !typesToReplace.has(e.type as ParserType));
         const newEntries: VaultEntry[] = [];
