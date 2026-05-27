@@ -1,13 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import type { EntryType, VaultStats } from '@commandvault/core';
-import {
-  createVaultInstance,
-  typeEmoji,
-  typeColor,
-  formatDate,
-  type CliGlobalOptions,
-} from '../helpers.js';
+import { withVault, typeEmoji, typeColor, formatDate, type CliGlobalOptions } from '../helpers.js';
 
 const TYPE_ORDER: readonly EntryType[] = ['skill', 'agent', 'command', 'plugin', 'rule', 'hook'];
 
@@ -30,9 +24,7 @@ export function createStatsCommand(): Command {
     .action(async (_opts, command) => {
       const globalOpts = command.optsWithGlobals() as CliGlobalOptions;
 
-      const vault = await createVaultInstance(globalOpts);
-
-      try {
+      await withVault(globalOpts, async (vault) => {
         const stats: VaultStats = vault.getStats();
 
         if (globalOpts.json) {
@@ -102,7 +94,9 @@ export function createStatsCommand(): Command {
           .slice(0, 10);
 
         if (topUsed.length === 0) {
-          console.log(chalk.dim('  No usage data yet. Use `vault info <name>` to start tracking.'));
+          console.log(
+            chalk.dim('  No usage data yet. Use `vault info <name>` to start tracking.'),
+          );
         } else {
           for (const [index, entry] of topUsed.entries()) {
             const colorFn = typeColor(entry.type);
@@ -113,9 +107,7 @@ export function createStatsCommand(): Command {
         }
 
         console.log('');
-      } finally {
-        await vault.dispose();
-      }
+      });
     });
 
   return cmd;
