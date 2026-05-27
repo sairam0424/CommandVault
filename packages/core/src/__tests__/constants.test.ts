@@ -1,10 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  TYPE_EMOJIS,
-  TYPE_COLORS,
-  TYPE_LABELS,
-  KNOWN_ENTRY_TYPES,
-} from '../constants.js';
+import { TYPE_EMOJIS, TYPE_COLORS, TYPE_LABELS, KNOWN_ENTRY_TYPES } from '../constants.js';
 
 describe('constants', () => {
   it('KNOWN_ENTRY_TYPES contains all expected types', () => {

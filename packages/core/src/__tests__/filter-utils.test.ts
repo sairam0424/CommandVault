@@ -95,30 +95,30 @@ describe('matchesFilters', () => {
   describe('date filters', () => {
     it('matches when lastModified is after modifiedAfter', () => {
       const entry = makeEntry({ lastModified: new Date('2025-06-01') });
-      expect(
-        matchesFilters(entry, makeOptions({ modifiedAfter: new Date('2025-01-01') })),
-      ).toBe(true);
+      expect(matchesFilters(entry, makeOptions({ modifiedAfter: new Date('2025-01-01') }))).toBe(
+        true,
+      );
     });
 
     it('rejects when lastModified is before modifiedAfter', () => {
       const entry = makeEntry({ lastModified: new Date('2024-01-01') });
-      expect(
-        matchesFilters(entry, makeOptions({ modifiedAfter: new Date('2025-01-01') })),
-      ).toBe(false);
+      expect(matchesFilters(entry, makeOptions({ modifiedAfter: new Date('2025-01-01') }))).toBe(
+        false,
+      );
     });
 
     it('matches when lastModified is before modifiedBefore', () => {
       const entry = makeEntry({ lastModified: new Date('2025-01-01') });
-      expect(
-        matchesFilters(entry, makeOptions({ modifiedBefore: new Date('2025-06-01') })),
-      ).toBe(true);
+      expect(matchesFilters(entry, makeOptions({ modifiedBefore: new Date('2025-06-01') }))).toBe(
+        true,
+      );
     });
 
     it('rejects when lastModified is after modifiedBefore', () => {
       const entry = makeEntry({ lastModified: new Date('2025-12-01') });
-      expect(
-        matchesFilters(entry, makeOptions({ modifiedBefore: new Date('2025-06-01') })),
-      ).toBe(false);
+      expect(matchesFilters(entry, makeOptions({ modifiedBefore: new Date('2025-06-01') }))).toBe(
+        false,
+      );
     });
 
     it('supports combined date range (modifiedAfter + modifiedBefore)', () => {

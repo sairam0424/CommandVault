@@ -12,9 +12,7 @@ import { registerCommands } from './commands/index';
 
 let vault: Vault | undefined;
 
-export async function activate(
-  context: vscode.ExtensionContext
-): Promise<void> {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const config = vscode.workspace.getConfiguration('commandvault');
   const claudeConfigPath = config.get<string>('claudeConfigPath') || '';
   const enableWatcher = config.get<boolean>('enableFileWatcher', true);
@@ -39,19 +37,13 @@ export async function activate(
     showCollapseAll: true,
   });
 
-  const favoritesTreeView = vscode.window.createTreeView(
-    'commandvault.favorites',
-    {
-      treeDataProvider: favoritesProvider,
-    }
-  );
+  const favoritesTreeView = vscode.window.createTreeView('commandvault.favorites', {
+    treeDataProvider: favoritesProvider,
+  });
 
-  const recentTreeView = vscode.window.createTreeView(
-    'commandvault.recent',
-    {
-      treeDataProvider: recentProvider,
-    }
-  );
+  const recentTreeView = vscode.window.createTreeView('commandvault.recent', {
+    treeDataProvider: recentProvider,
+  });
 
   context.subscriptions.push(entriesTreeView, favoritesTreeView, recentTreeView);
 
@@ -93,9 +85,7 @@ export async function activate(
   });
 
   vault.on('error', (error) => {
-    vscode.window.showWarningMessage(
-      `CommandVault: ${error.message} (${error.filePath})`
-    );
+    vscode.window.showWarningMessage(`CommandVault: ${error.message} (${error.filePath})`);
   });
 
   const commandDisposables = registerCommands(
@@ -103,7 +93,7 @@ export async function activate(
     vault,
     entriesProvider,
     favoritesProvider,
-    recentProvider
+    recentProvider,
   );
 
   context.subscriptions.push(...commandDisposables);
@@ -118,17 +108,17 @@ export async function activate(
   const completionDisposable = vscode.languages.registerCompletionItemProvider(
     allLanguagesSelector,
     new CompletionProvider(vaultRef),
-    '/'
+    '/',
   );
 
   const hoverDisposable = vscode.languages.registerHoverProvider(
     documentSelector,
-    new HoverProvider(vaultRef)
+    new HoverProvider(vaultRef),
   );
 
   const linkDisposable = vscode.languages.registerDocumentLinkProvider(
     documentSelector,
-    new LinkProvider(vaultRef)
+    new LinkProvider(vaultRef),
   );
 
   context.subscriptions.push(completionDisposable, hoverDisposable, linkDisposable);
@@ -139,20 +129,16 @@ export async function activate(
       value: stats.totalEntries,
       tooltip: 'Total commands',
     };
-    vscode.window.showInformationMessage(
-      `CommandVault: Loaded ${stats.totalEntries} entries`
-    );
+    vscode.window.showInformationMessage(`CommandVault: Loaded ${stats.totalEntries} entries`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    vscode.window.showErrorMessage(
-      `CommandVault: Failed to initialize vault - ${message}`
-    );
+    vscode.window.showErrorMessage(`CommandVault: Failed to initialize vault - ${message}`);
   }
 
   const configWatcher = vscode.workspace.onDidChangeConfiguration((e) => {
     if (e.affectsConfiguration('commandvault')) {
       vscode.window.showInformationMessage(
-        'CommandVault: Configuration changed. Reload window to apply.'
+        'CommandVault: Configuration changed. Reload window to apply.',
       );
     }
   });

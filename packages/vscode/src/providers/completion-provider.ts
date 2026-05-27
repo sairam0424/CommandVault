@@ -21,7 +21,7 @@ export class CompletionProvider implements vscode.CompletionItemProvider {
     document: vscode.TextDocument,
     position: vscode.Position,
     _token: vscode.CancellationToken,
-    _context: vscode.CompletionContext
+    _context: vscode.CompletionContext,
   ): vscode.CompletionItem[] | undefined {
     const vault = this.vaultRef.current;
     if (!vault) {
@@ -42,7 +42,7 @@ export class CompletionProvider implements vscode.CompletionItemProvider {
       position.line,
       slashPosition,
       position.line,
-      position.character
+      position.character,
     );
 
     const entries = prefix
@@ -50,10 +50,7 @@ export class CompletionProvider implements vscode.CompletionItemProvider {
       : vault.getAllEntries().slice(0, 50);
 
     return entries.map((entry) => {
-      const item = new vscode.CompletionItem(
-        `/${entry.name}`,
-        TYPE_COMPLETION_KINDS[entry.type]
-      );
+      const item = new vscode.CompletionItem(`/${entry.name}`, TYPE_COMPLETION_KINDS[entry.type]);
       item.detail = `${entry.type} — ${entry.source}`;
       item.documentation = entry.description;
       item.insertText = `/${entry.name}`;

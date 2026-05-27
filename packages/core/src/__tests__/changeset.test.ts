@@ -131,9 +131,7 @@ describe('SearchEngine changeset detection', () => {
     engine.index(ENTRIES);
     engine.search({ query: 'gamma', tier: 'fuse' });
 
-    const modified = ENTRIES.map((e) =>
-      e.id === 'e3' ? { ...e, tags: ['new-tag'] } : e,
-    );
+    const modified = ENTRIES.map((e) => (e.id === 'e3' ? { ...e, tags: ['new-tag'] } : e));
     engine.index(modified);
 
     const result = engine.search({ query: 'gamma', tier: 'fuse' });

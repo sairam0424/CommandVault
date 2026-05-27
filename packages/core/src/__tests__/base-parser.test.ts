@@ -132,10 +132,7 @@ describe('parseMarkdownDir', () => {
     });
 
     it('uses filename as name when frontmatter has no name field', async () => {
-      const content = mdWithFrontmatter(
-        { description: 'No name field' },
-        'Body',
-      );
+      const content = mdWithFrontmatter({ description: 'No name field' }, 'Body');
       await writeFile(join(tempDir, 'my-tool.md'), content);
 
       const result = await parseMarkdownDir(tempDir, makeConfig());
@@ -157,10 +154,7 @@ describe('parseMarkdownDir', () => {
     });
 
     it('applies custom extractMetadata when provided', async () => {
-      const content = mdWithFrontmatter(
-        { name: 'meta-test', version: '2.0.0' },
-        'Body',
-      );
+      const content = mdWithFrontmatter({ name: 'meta-test', version: '2.0.0' }, 'Body');
       await writeFile(join(tempDir, 'meta.md'), content);
 
       const config = makeConfig({
@@ -172,10 +166,7 @@ describe('parseMarkdownDir', () => {
     });
 
     it('applies custom filePattern to filter files', async () => {
-      await writeFile(
-        join(tempDir, 'SKILL.md'),
-        mdWithFrontmatter({ name: 'skill-file' }, 'Body'),
-      );
+      await writeFile(join(tempDir, 'SKILL.md'), mdWithFrontmatter({ name: 'skill-file' }, 'Body'));
       await writeFile(
         join(tempDir, 'README.md'),
         mdWithFrontmatter({ name: 'readme-file' }, 'Body'),
@@ -221,10 +212,7 @@ describe('parseMarkdownDir', () => {
       await mkdir(sub1);
       await mkdir(sub2);
 
-      await writeFile(
-        join(sub1, 'SKILL.md'),
-        mdWithFrontmatter({ name: 'found' }, 'Body'),
-      );
+      await writeFile(join(sub1, 'SKILL.md'), mdWithFrontmatter({ name: 'found' }, 'Body'));
       await writeFile(join(sub2, 'README.md'), '# Just a readme');
 
       const config = makeConfig({ scanMode: 'subdirs', filePattern: /^SKILL\.md$/ });
@@ -256,10 +244,7 @@ describe('parseMarkdownDir', () => {
       const nested = join(tempDir, 'level1', 'level2');
       await mkdir(nested, { recursive: true });
 
-      await writeFile(
-        join(tempDir, 'top.md'),
-        mdWithFrontmatter({ name: 'top-file' }, 'Top body'),
-      );
+      await writeFile(join(tempDir, 'top.md'), mdWithFrontmatter({ name: 'top-file' }, 'Top body'));
       await writeFile(
         join(nested, 'deep.md'),
         mdWithFrontmatter({ name: 'deep-file' }, 'Deep body'),
@@ -289,10 +274,7 @@ describe('parseMarkdownDir', () => {
     });
 
     it('skips files not matching the pattern during walk', async () => {
-      await writeFile(
-        join(tempDir, 'match.md'),
-        mdWithFrontmatter({ name: 'matched' }, 'Body'),
-      );
+      await writeFile(join(tempDir, 'match.md'), mdWithFrontmatter({ name: 'matched' }, 'Body'));
       await writeFile(join(tempDir, 'skip.txt'), 'not markdown');
       await writeFile(join(tempDir, 'skip.json'), '{}');
 
@@ -334,10 +316,7 @@ describe('parseMarkdownDir', () => {
     });
 
     it('applies postProcessTags when provided', async () => {
-      const content = mdWithFrontmatter(
-        { name: 'tagged', description: 'A testing tool' },
-        'Body',
-      );
+      const content = mdWithFrontmatter({ name: 'tagged', description: 'A testing tool' }, 'Body');
       await writeFile(join(tempDir, 'tags.md'), content);
 
       const config = makeConfig({

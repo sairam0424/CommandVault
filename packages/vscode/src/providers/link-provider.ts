@@ -9,7 +9,7 @@ export class LinkProvider implements vscode.DocumentLinkProvider {
 
   provideDocumentLinks(
     document: vscode.TextDocument,
-    _token: vscode.CancellationToken
+    _token: vscode.CancellationToken,
   ): vscode.DocumentLink[] {
     const vault = this.vaultRef.current;
     if (!vault) {
@@ -36,13 +36,11 @@ export class LinkProvider implements vscode.DocumentLinkProvider {
           lineIndex,
           match.index,
           lineIndex,
-          match.index + match[0].length
+          match.index + match[0].length,
         );
 
         const args = encodeURIComponent(JSON.stringify(entry));
-        const commandUri = vscode.Uri.parse(
-          `command:commandvault.openFile?${args}`
-        );
+        const commandUri = vscode.Uri.parse(`command:commandvault.openFile?${args}`);
 
         const link = new vscode.DocumentLink(range, commandUri);
         link.tooltip = `Open ${entry.name} source file`;

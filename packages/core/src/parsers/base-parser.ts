@@ -24,7 +24,11 @@ export interface ParseConfig {
     content: string,
     context: ParseContext,
   ) => Record<string, unknown>;
-  readonly nameFromPath?: (folderName: string, data: ParsedFrontmatter, context: ParseContext) => string;
+  readonly nameFromPath?: (
+    folderName: string,
+    data: ParsedFrontmatter,
+    context: ParseContext,
+  ) => string;
   readonly descriptionFromContent?: (
     data: ParsedFrontmatter,
     content: string,
@@ -54,19 +58,17 @@ async function parseFileEntry(
     : (data.name ?? basename(fileName, '.md'));
   const description = config.descriptionFromContent
     ? config.descriptionFromContent(data, content, context)
-    : (typeof data.description === 'string' ? data.description.trim() : '');
+    : typeof data.description === 'string'
+      ? data.description.trim()
+      : '';
   const source = inferSource(name, filePath);
   let tags = extractTags(name, description, data);
   if (config.postProcessTags) {
     tags = config.postProcessTags(tags, data);
   }
   const lastModified = await getLastModified(filePath);
-  const disambiguator = config.idDisambiguator
-    ? config.idDisambiguator(name, filePath)
-    : source;
-  const metadata = config.extractMetadata
-    ? config.extractMetadata(data, content, context)
-    : {};
+  const disambiguator = config.idDisambiguator ? config.idDisambiguator(name, filePath) : source;
+  const metadata = config.extractMetadata ? config.extractMetadata(data, content, context) : {};
 
   return {
     id: generateStableId(config.type, name, disambiguator),
@@ -99,10 +101,7 @@ async function walkDir(dir: string, pattern: RegExp): Promise<string[]> {
   return results;
 }
 
-export async function parseMarkdownDir(
-  dir: string,
-  config: ParseConfig,
-): Promise<ParserResult> {
+export async function parseMarkdownDir(dir: string, config: ParseConfig): Promise<ParserResult> {
   const entries: VaultEntry[] = [];
   const errors: ParseError[] = [];
 
@@ -148,9 +147,7 @@ export async function parseMarkdownDir(
     }
 
     const parsePromises = dirs.map(async (folderName) => {
-      const candidates = await readdir(join(dir, folderName)).catch(
-        () => [] as string[],
-      );
+      const candidates = await readdir(join(dir, folderName)).catch(() => [] as string[]);
       const matchedFile = candidates.find((f) => config.filePattern.test(f));
       if (!matchedFile) return;
 

@@ -10,7 +10,7 @@ export class HoverProvider implements vscode.HoverProvider {
   provideHover(
     document: vscode.TextDocument,
     position: vscode.Position,
-    _token: vscode.CancellationToken
+    _token: vscode.CancellationToken,
   ): vscode.Hover | undefined {
     const vault = this.vaultRef.current;
     if (!vault) {
@@ -35,25 +35,17 @@ export class HoverProvider implements vscode.HoverProvider {
         continue;
       }
 
-      const contentPreview = entry.content
-        .split('\n')
-        .slice(0, 10)
-        .join('\n');
+      const contentPreview = entry.content.split('\n').slice(0, 10).join('\n');
 
       const md = new vscode.MarkdownString();
       md.appendMarkdown(`**${entry.name}** (${entry.type}) — ${entry.description}\n\n`);
       md.appendCodeblock(contentPreview, 'text');
       md.appendMarkdown(
-        `\n\n[Open Source File](command:commandvault.openFile?${encodeURIComponent(JSON.stringify(entry))})`
+        `\n\n[Open Source File](command:commandvault.openFile?${encodeURIComponent(JSON.stringify(entry))})`,
       );
       md.isTrusted = true;
 
-      const range = new vscode.Range(
-        position.line,
-        start,
-        position.line,
-        end
-      );
+      const range = new vscode.Range(position.line, start, position.line, end);
 
       return new vscode.Hover(md, range);
     }

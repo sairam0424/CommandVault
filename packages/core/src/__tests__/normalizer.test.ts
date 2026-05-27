@@ -19,7 +19,9 @@ function makeEntry(overrides: Partial<VaultEntry> = {}): VaultEntry {
   };
 }
 
-function makeResult(overrides: { score?: number; matchedFields?: string[]; entry?: Partial<VaultEntry> } = {}): SearchResult {
+function makeResult(
+  overrides: { score?: number; matchedFields?: string[]; entry?: Partial<VaultEntry> } = {},
+): SearchResult {
   return {
     entry: makeEntry(overrides.entry),
     score: overrides.score ?? 0.5,
@@ -33,9 +35,7 @@ describe('normalizeScore', () => {
   });
 
   it('clamps scores to [0, 1] range', () => {
-    const results = [
-      makeResult({ score: 5.0, entry: { usageCount: 100, favorite: true } }),
-    ];
+    const results = [makeResult({ score: 5.0, entry: { usageCount: 100, favorite: true } })];
     const normalized = normalizeScore(results);
     expect(normalized[0].score).toBeGreaterThanOrEqual(0);
     expect(normalized[0].score).toBeLessThanOrEqual(1);
@@ -193,8 +193,15 @@ describe('normalizeScore', () => {
 
   it('recency decay: entry 14 days old gets exp(-1) ≈ 0.368 recency score', () => {
     const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
-    const results = [makeResult({ score: 0, entry: { lastModified: fourteenDaysAgo, usageCount: 0 } })];
-    const normalized = normalizeScore(results, { textRelevance: 0, recency: 1, usageFrequency: 0, favoriteBoost: 0 });
+    const results = [
+      makeResult({ score: 0, entry: { lastModified: fourteenDaysAgo, usageCount: 0 } }),
+    ];
+    const normalized = normalizeScore(results, {
+      textRelevance: 0,
+      recency: 1,
+      usageFrequency: 0,
+      favoriteBoost: 0,
+    });
     expect(normalized[0].score).toBeCloseTo(Math.exp(-1), 2);
   });
 });

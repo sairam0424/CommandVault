@@ -20,12 +20,7 @@ export type { ParseConfig, ParseContext } from './parsers/base-parser.js';
 export { ParserRegistry, getDefaultRegistry } from './parsers/parser-registry.js';
 export type { ParserPlugin } from './parsers/parser-registry.js';
 export { registerBuiltinParsers } from './parsers/builtin-registrations.js';
-export {
-  TYPE_EMOJIS,
-  TYPE_COLORS,
-  TYPE_LABELS,
-  KNOWN_ENTRY_TYPES,
-} from './constants.js';
+export { TYPE_EMOJIS, TYPE_COLORS, TYPE_LABELS, KNOWN_ENTRY_TYPES } from './constants.js';
 export type {
   VaultEntry,
   VaultStats,

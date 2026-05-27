@@ -14,11 +14,7 @@ import type {
   ParseError,
 } from './types/index.js';
 import { detectAgentConfigs } from './parsers/index.js';
-import {
-  ParserRegistry,
-  getDefaultRegistry,
-  registerBuiltinParsers,
-} from './parsers/index.js';
+import { ParserRegistry, getDefaultRegistry, registerBuiltinParsers } from './parsers/index.js';
 import { parseSingleFile, isSingleFileParseable } from './parsers/single-file-parser.js';
 import { SearchEngine } from './indexer/search-engine.js';
 import { VaultWatcher, type WatcherCallback } from './watcher/index.js';
@@ -117,9 +113,9 @@ export class Vault {
     return this.withScanLock(async () => {
       const oldEntries = [...this.entries];
 
-      const parserPromises = this.registry.getAllPlugins().map((plugin) =>
-        plugin.parse(this.getParserPath(plugin.type)),
-      );
+      const parserPromises = this.registry
+        .getAllPlugins()
+        .map((plugin) => plugin.parse(this.getParserPath(plugin.type)));
       parserPromises.push(detectAgentConfigs(this.config.projectRoot ?? process.cwd()));
 
       const results = await Promise.all(parserPromises);
@@ -388,9 +384,7 @@ export class Vault {
       }
 
       if (fullReparseTypes.length > 0) {
-        const results = await Promise.all(
-          fullReparseTypes.map((pt) => this.getParserFn(pt)()),
-        );
+        const results = await Promise.all(fullReparseTypes.map((pt) => this.getParserFn(pt)()));
         const typesToReplace = new Set(fullReparseTypes);
         const kept = this.entries.filter((e) => !typesToReplace.has(e.type as ParserType));
         const newEntries: VaultEntry[] = [];

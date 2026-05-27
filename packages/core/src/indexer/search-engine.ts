@@ -25,7 +25,9 @@ function canonicalCacheKey(options: SearchOptions): string {
 
 function entryContentHash(entry: VaultEntry): string {
   return createHash('md5')
-    .update(`${entry.name}|${entry.description}|${entry.content}|${entry.tags.join(',')}|${entry.lastModified.getTime()}`)
+    .update(
+      `${entry.name}|${entry.description}|${entry.content}|${entry.tags.join(',')}|${entry.lastModified.getTime()}`,
+    )
     .digest('hex');
 }
 

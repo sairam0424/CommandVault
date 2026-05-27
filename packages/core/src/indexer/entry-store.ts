@@ -106,9 +106,7 @@ export class EntryStore {
     const existingIds = new Set(existingMap.keys());
     const newIds = new Set(entries.map((e) => e.id));
 
-    const entriesToUpsert = changedIds
-      ? entries.filter((e) => changedIds.has(e.id))
-      : entries;
+    const entriesToUpsert = changedIds ? entries.filter((e) => changedIds.has(e.id)) : entries;
 
     this.conn.transaction(() => {
       for (const id of existingIds) {

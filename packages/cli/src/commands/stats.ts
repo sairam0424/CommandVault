@@ -94,9 +94,7 @@ export function createStatsCommand(): Command {
           .slice(0, 10);
 
         if (topUsed.length === 0) {
-          console.log(
-            chalk.dim('  No usage data yet. Use `vault info <name>` to start tracking.'),
-          );
+          console.log(chalk.dim('  No usage data yet. Use `vault info <name>` to start tracking.'));
         } else {
           for (const [index, entry] of topUsed.entries()) {
             const colorFn = typeColor(entry.type);
