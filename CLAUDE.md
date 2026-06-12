@@ -1,6 +1,8 @@
-# CommandVault
+# CLAUDE.md
 
-Universal AI command manager — browse, search, and organize slash commands, skills, agents, plugins, rules, and hooks across all AI coding assistants.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+CommandVault — Universal AI command manager: browse, search, and organize slash commands, skills, agents, plugins, rules, and hooks across all AI coding assistants.
 
 ## Architecture
 
