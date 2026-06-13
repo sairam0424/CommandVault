@@ -49,7 +49,7 @@ jobs:
           echo "| CLI | $(echo $CLI_SIZE | numfmt --to=iec-i 2>/dev/null || echo "${CLI_SIZE} bytes") |" >> $GITHUB_STEP_SUMMARY
 
       - name: Comment PR with sizes
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: bundle-size
           message: |
