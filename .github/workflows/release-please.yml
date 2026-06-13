@@ -17,7 +17,7 @@ jobs:
       cli_release_created: ${{ steps.release.outputs['packages/cli--release_created'] }}
       vscode_release_created: ${{ steps.release.outputs['packages/vscode--release_created'] }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
         id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
