@@ -54,9 +54,9 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "better-sqlite3": "^12.10.0",
+    "better-sqlite3": "^12.11.1",
     "chokidar": "^4.0.0",
-    "fuse.js": "^7.1.0",
+    "fuse.js": "^7.5.0",
     "gray-matter": "^4.0.3",
     "minisearch": "^7.1.0",
     "sql.js": "^1.14.1",
