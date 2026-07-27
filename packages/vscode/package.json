@@ -278,7 +278,7 @@
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "@vitejs/plugin-react": "^4.4.0",
+    "@vitejs/plugin-react": "^6.0.4",
     "esbuild": "^0.28.1",
     "react": "^19.2.6",
     "react-dom": "^19.2.7",
