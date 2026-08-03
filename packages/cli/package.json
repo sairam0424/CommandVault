@@ -59,7 +59,7 @@
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.2",
-    "@types/node": "^22.0.0",
+    "@types/node": "^26.1.2",
     "@types/react": "^19.0.0",
     "ink-testing-library": "^4.0.0",
     "jsdom": "^29.1.1",
