@@ -58,12 +58,50 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      - name: Get package versions
+        id: pkg_versions
+        run: |
+          echo "core=$(node -p "require('./packages/core/package.json').version")" >> "$GITHUB_OUTPUT"
+          echo "cli=$(node -p "require('./packages/cli/package.json').version")" >> "$GITHUB_OUTPUT"
+          echo "vscode=$(node -p "require('./packages/vscode/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      # --------------------------------------------------------------------
+      # IDEMPOTENCY GUARD
+      # This manual workflow is a break-glass duplicate of release-please's
+      # automatic publish path. If release-please already shipped this exact
+      # version, each check below detects that and the corresponding publish
+      # step is SKIPPED (not failed). Each check fails OPEN: if the lookup
+      # itself can't be completed (network hiccup, unexpected API response),
+      # we proceed to attempt the publish, which is the pre-existing
+      # behavior of this workflow.
+      # --------------------------------------------------------------------
+
+      - name: Check if @commandvault/core is already published
+        id: check_core
+        run: |
+          if npm view "@commandvault/core@${{ steps.pkg_versions.outputs.core }}" version >/dev/null 2>&1; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish @commandvault/core to npm
+        if: steps.check_core.outputs.already_published == 'false'
         run: pnpm --filter @commandvault/core publish --access public --no-git-checks --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      - name: Check if @commandvault/cli is already published
+        id: check_cli
+        run: |
+          if npm view "@commandvault/cli@${{ steps.pkg_versions.outputs.cli }}" version >/dev/null 2>&1; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish @commandvault/cli to npm
+        if: steps.check_cli.outputs.already_published == 'false'
         run: pnpm --filter @commandvault/cli publish --access public --no-git-checks --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -85,7 +123,26 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # Best-effort idempotency check against the public, unauthenticated
+      # Marketplace Gallery query API (no VSCE_PAT needed for reads;
+      # filterType 7 = query by extension unique name). If this lookup
+      # fails or returns nothing, published_version stays empty and the
+      # publish step below runs anyway — fail-open, same as the npm checks.
+      - name: Check if VS Code Marketplace version already published
+        id: check_vsce
+        run: |
+          set +e
+          PUBLISHED_VERSION=$(curl -s -X POST "https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json;api-version=3.0-preview.1" \
+            -d '{"filters":[{"criteria":[{"filterType":7,"value":"nothumanslabs.commandvault-ai"}]}],"flags":914}' \
+            | jq -r '.results[0].extensions[0].versions[0].version // ""' 2>/dev/null)
+          set -e
+          echo "published_version=${PUBLISHED_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Marketplace latest published version (best-effort lookup): ${PUBLISHED_VERSION:-unknown}"
+
       - name: Publish VS Code extension
+        if: steps.check_vsce.outputs.published_version != steps.pkg_versions.outputs.vscode
         run: npx @vscode/vsce publish --packagePath packages/vscode/*.vsix
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
