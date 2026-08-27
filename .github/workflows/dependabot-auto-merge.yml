@@ -1,26 +1,91 @@
-name: Dependabot Auto-Merge
+# Dependabot Auto-merge
+#
+# ============================================================================
+# SAFETY CONTEXT — READ BEFORE TOUCHING
+# ============================================================================
+#
+# WHAT THIS DOES
+#   Auto-enqueues merges for ONLY the lowest-risk Dependabot PRs:
+#     1. github-actions ecosystem bumps (any update type) — these are
+#        SHA-pinned and reviewed by the supply-chain security model.
+#     2. npm DEV-dependency PATCH bumps ONLY (direct:development +
+#        version-update:semver-patch). CommandVault's dependabot.yml groups
+#        npm updates into "development-dependencies" (minor+patch) and
+#        "production-dependencies" (minor+patch) — this workflow narrows
+#        that further, since a grouped PR only reports semver-patch here if
+#        every dependency bundled into it is a patch bump.
+#   Everything else — production deps, minor/major bumps, indirect deps,
+#   anything outside these two buckets — is NEVER auto-merged. A human
+#   reviews those.
+#
+# HARD-GATED ON BRANCH PROTECTION (CommandVault protected branches - core)
+#   `gh pr merge --auto` only ENQUEUES the merge; GitHub still waits for the
+#   repository's REQUIRED status checks before completing it. This workflow's
+#   safety therefore depends on required checks actually being enabled via
+#   the "CommandVault protected branches - core" ruleset (id 21664088) on
+#   `develop`.
+#
+#   As of this writing that ruleset only has `deletion`, `non_fast_forward`,
+#   and a `pull_request` rule with required_approving_review_count: 0 — it
+#   has NO required-status-checks rule yet. WITHOUT required checks
+#   configured, `--auto` will merge near-immediately on the next green
+#   event — there is nothing to wait on. In that state this workflow is
+#   effectively "merge as soon as enabled."
+#
+#   ==> This workflow is INERT-BY-DESIGN until the maintainer adds a
+#       required-status-checks rule to that ruleset. Do not treat it as a CI
+#       gate by itself; the gate lives in branch protection, not here.
+#
+# SCOPE DISCIPLINE
+#   The scope is deliberately narrow. Do NOT widen it to production
+#   dependencies, or to minor/major version bumps, without a human in the
+#   loop. If you need broader automation, change branch protection policy and
+#   add explicit human review — do not loosen the `if:` below.
+#
+# WHY `pull_request` (NOT `pull_request_target`)
+#   We only need GITHUB_TOKEN, and we NEVER check out or execute PR code. The
+#   Dependabot context is read via dependabot/fetch-metadata. Using
+#   `pull_request` keeps us off the privileged `pull_request_target` path.
+#   PR_URL is passed through an env var (never interpolated into the shell)
+#   to follow the script-injection safety pattern regardless of field type.
+# ============================================================================
 
-on: pull_request
+name: "Dependabot Auto-merge"
 
-permissions:
-  contents: write
-  pull-requests: write
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# Least privilege at the top level; the job grants only what it needs.
+permissions: {}
 
 jobs:
   auto-merge:
+    # Only ever act on Dependabot's own PRs.
+    if: ${{ github.actor == 'dependabot[bot]' }}
     runs-on: ubuntu-latest
-    if: github.actor == 'dependabot[bot]'
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Fetch Dependabot metadata
-        id: metadata
-        uses: dependabot/fetch-metadata@21025c705c08248db411dc16f3619e6b5f9ea21a # v2
+        id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
 
-      - name: Auto-merge dev dependency updates (minor/patch)
-        if: |
-          steps.metadata.outputs.dependency-type == 'direct:development' &&
-          (steps.metadata.outputs.update-type == 'version-update:semver-minor' ||
-           steps.metadata.outputs.update-type == 'version-update:semver-patch')
-        run: gh pr merge --auto --squash "$PR_URL"
+      - name: Enable auto-merge for low-risk updates
+        # Low-risk = github-actions ecosystem (any bump; SHA-pinned, reviewed
+        # by the security model) OR npm DEV-dependency PATCH bumps only.
+        # Never matches production deps or minor/major bumps.
+        if: >-
+          ${{
+            steps.meta.outputs.package-ecosystem == 'github_actions' ||
+            (steps.meta.outputs.dependency-type == 'direct:development' &&
+             steps.meta.outputs.update-type == 'version-update:semver-patch')
+          }}
+        run: |
+          gh pr review --approve "$PR_URL"
+          gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
