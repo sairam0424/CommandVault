@@ -13,11 +13,11 @@ jobs:
     name: Coverage Report
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: '.nvmrc'
           cache: 'pnpm'
@@ -39,7 +39,7 @@ jobs:
 
       - name: Core coverage report
         if: always()
-        uses: davelosert/vitest-coverage-report-action@v2
+        uses: davelosert/vitest-coverage-report-action@8b157684c6a6b259b97d45e72b44242865c0f6a5 # v2
         with:
           name: 'Core'
           json-summary-path: ./packages/core/coverage/coverage-summary.json
@@ -48,7 +48,7 @@ jobs:
 
       - name: CLI coverage report
         if: always()
-        uses: davelosert/vitest-coverage-report-action@v2
+        uses: davelosert/vitest-coverage-report-action@8b157684c6a6b259b97d45e72b44242865c0f6a5 # v2
         with:
           name: 'CLI'
           json-summary-path: ./packages/cli/coverage/coverage-summary.json
@@ -57,7 +57,7 @@ jobs:
 
       - name: VS Code coverage report
         if: always()
-        uses: davelosert/vitest-coverage-report-action@v2
+        uses: davelosert/vitest-coverage-report-action@8b157684c6a6b259b97d45e72b44242865c0f6a5 # v2
         with:
           name: 'VS Code'
           json-summary-path: ./packages/vscode/coverage/coverage-summary.json
