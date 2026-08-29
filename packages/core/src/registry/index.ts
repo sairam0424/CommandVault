@@ -31,14 +31,12 @@ export class RegistryManager {
 
     const results = await Promise.all(
       [...this.adapters.values()].map((a) =>
-        a.search(query, options).catch(
-          (): RegistrySearchResult => ({
-            entries: [],
-            total: 0,
-            page: 1,
-            pageSize: limit,
-          }),
-        ),
+        a.search(query, options).catch((): RegistrySearchResult => ({
+          entries: [],
+          total: 0,
+          page: 1,
+          pageSize: limit,
+        })),
       ),
     );
 

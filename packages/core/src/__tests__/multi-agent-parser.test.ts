@@ -58,7 +58,9 @@ describe('detectAgentConfigs — Cursor', () => {
 
   it('parses .cursor/rules/*.md files as rule entries', async () => {
     const result = await detectAgentConfigs(projectRoot);
-    const dirRules = result.entries.filter((e) => e.filePath.includes('.cursor/rules'));
+    // filePath is built with node:path join(), so it uses the OS-native separator
+    // (backslash on Windows) — match against a joined segment, not a hardcoded posix path.
+    const dirRules = result.entries.filter((e) => e.filePath.includes(join('.cursor', 'rules')));
 
     expect(dirRules).toHaveLength(2);
     expect(dirRules.every((e) => e.type === 'rule')).toBe(true);
