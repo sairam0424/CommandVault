@@ -72,10 +72,20 @@ function openDatabase(dbPath: string, options?: DatabaseAdapterOptions): Databas
   }
 
   if (existsSync(dbPath)) {
+    let db: Database.Database | undefined;
     try {
-      return configureDatabase(new Database(dbPath, { readonly }), walMode, busyTimeout);
+      db = new Database(dbPath, { readonly });
+      return configureDatabase(db, walMode, busyTimeout);
     } catch {
-      // DB file is corrupt — archive it and start fresh
+      // DB file is corrupt — close the (possibly partially-opened) handle first so the
+      // OS releases its file lock, then archive it and start fresh. On Windows, renaming
+      // or deleting a file with an open handle fails with EBUSY; POSIX allows it, which is
+      // why this only surfaced in CI on windows-latest.
+      try {
+        db?.close();
+      } catch {
+        // db may already be unusable — nothing more we can do to release it cleanly
+      }
       const timestamp = Date.now();
       const corruptPath = `${dbPath}.corrupt.${timestamp}.bak`;
       renameSync(dbPath, corruptPath);
