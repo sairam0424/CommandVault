@@ -14,9 +14,7 @@ interface State {
 }
 
 type Action =
-  | { type: 'up' }
-  | { type: 'down'; itemCount: number; visibleCount: number }
-  | { type: 'reset' };
+  { type: 'up' } | { type: 'down'; itemCount: number; visibleCount: number } | { type: 'reset' };
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
