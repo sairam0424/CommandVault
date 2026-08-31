@@ -276,8 +276,8 @@
   "devDependencies": {
     "@types/vscode": "^1.95.0",
     "@types/node": "^22.0.0",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.2.4",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
     "@vitejs/plugin-react": "^4.4.0",
     "esbuild": "^0.28.2",
     "react": "^19.2.6",
