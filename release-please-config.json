@@ -1,21 +1,35 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "2f302f1efc089fc72809979c8d459826ec5b15f3",
+  "release-type": "node",
+  "include-component-in-tag": true,
+  "include-v-in-tag": true,
+  "bump-minor-pre-major": true,
+  "pull-request-title-pattern": "chore(ci): release${component} ${version}",
+  "group-pull-request-title-pattern": "chore(ci): release ${branch}",
+  "plugins": [
+    "node-workspace",
+    {
+      "type": "linked-versions",
+      "groupName": "commandvault",
+      "components": ["core", "cli", "vscode"]
+    }
+  ],
   "packages": {
     "packages/core": {
+      "component": "core",
       "package-name": "@commandvault/core",
-      "release-type": "node",
       "changelog-path": "CHANGELOG.md"
     },
     "packages/cli": {
+      "component": "cli",
       "package-name": "@commandvault/cli",
-      "release-type": "node",
       "changelog-path": "CHANGELOG.md"
     },
     "packages/vscode": {
+      "component": "vscode",
       "package-name": "commandvault-ai",
-      "release-type": "node",
       "changelog-path": "CHANGELOG.md"
     }
-  },
-  "linked-versions": false
+  }
 }
