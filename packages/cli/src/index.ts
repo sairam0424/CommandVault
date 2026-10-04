@@ -85,20 +85,68 @@ function buildLazyArgv(commandName: string, command: Command): string[] {
   }
 
   // Forward global options from parent program
-  const globalOpts = command.parent?.opts() ?? {};
-  for (const [key, value] of Object.entries(globalOpts)) {
-    if (value === true) {
-      argv.push(`--${camelToKebab(key)}`);
-    } else if (value !== undefined && value !== false) {
-      argv.push(`--${camelToKebab(key)}`, String(value));
-    }
-  }
+  argv.push(...globalOptionArgs(command.parent?.opts() ?? {}));
 
   return argv;
 }
 
+function globalOptionArgs(globalOpts: Record<string, unknown>): string[] {
+  const args: string[] = [];
+  for (const [key, value] of Object.entries(globalOpts)) {
+    if (value === true) {
+      args.push(`--${camelToKebab(key)}`);
+    } else if (value !== undefined && value !== false) {
+      args.push(`--${camelToKebab(key)}`, String(value));
+    }
+  }
+  return args;
+}
+
 function camelToKebab(str: string): string {
   return str.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+}
+
+/**
+ * Commander invokes an action as `fn(...declaredArguments, options, command)`, so how many
+ * parameters precede the Command depends on how many `.argument()`s the shell declares. The
+ * Command is always the LAST argument; never index it by position.
+ */
+function commandFromActionArgs(actionArgs: readonly unknown[]): Command {
+  return actionArgs[actionArgs.length - 1] as Command;
+}
+
+/** Action handler for a shell command whose real implementation is loaded lazily. */
+function lazyAction(
+  commandName: string,
+  importFn: () => Promise<Record<string, unknown>>,
+  factoryName: string,
+): (...actionArgs: unknown[]) => Promise<void> {
+  return async (...actionArgs) => {
+    const command = commandFromActionArgs(actionArgs);
+    await lazyRun(importFn, factoryName, buildLazyArgv(commandName, command));
+  };
+}
+
+/**
+ * Action handler for `config` and `registry`: the real command owns subcommands and their own
+ * options, so every raw argument is forwarded unchanged along with the global options.
+ */
+function subcommandAction(
+  commandName: string,
+  importFn: () => Promise<Record<string, unknown>>,
+  factoryName: string,
+): (...actionArgs: unknown[]) => Promise<void> {
+  return async (...actionArgs) => {
+    const command = commandFromActionArgs(actionArgs);
+    const argv = [
+      'node',
+      'vault',
+      commandName,
+      ...(command.args ?? []),
+      ...globalOptionArgs(command.parent?.opts() ?? {}),
+    ];
+    await lazyRun(importFn, factoryName, argv);
+  };
 }
 
 // --- list ---
@@ -110,13 +158,7 @@ program
   .option('-s, --source <source>', 'Filter by source')
   .option('--tag <tag>', 'Filter by tag')
   .option('-f, --favorites', 'Show only favorites')
-  .action(async (_opts, command) => {
-    await lazyRun(
-      () => import('./commands/list.js'),
-      'createListCommand',
-      buildLazyArgv('list', command),
-    );
-  });
+  .action(lazyAction('list', () => import('./commands/list.js'), 'createListCommand'));
 
 // --- search ---
 program
@@ -128,13 +170,7 @@ program
   .option('-s, --source <source>', 'Filter by source')
   .option('--tag <tag>', 'Filter results by tag')
   .option('-l, --limit <n>', 'Maximum results', '20')
-  .action(async (_opts, command) => {
-    await lazyRun(
-      () => import('./commands/search.js'),
-      'createSearchCommand',
-      buildLazyArgv('search', command),
-    );
-  });
+  .action(lazyAction('search', () => import('./commands/search.js'), 'createSearchCommand'));
 
 // --- info ---
 program
@@ -142,25 +178,13 @@ program
   .alias('nfo')
   .description('Show detailed info about an entry')
   .argument('<name>', 'Entry name (fuzzy matched)')
-  .action(async (_opts, command) => {
-    await lazyRun(
-      () => import('./commands/info.js'),
-      'createInfoCommand',
-      buildLazyArgv('info', command),
-    );
-  });
+  .action(lazyAction('info', () => import('./commands/info.js'), 'createInfoCommand'));
 
 // --- stats ---
 program
   .command('stats')
   .description('Show vault statistics dashboard')
-  .action(async (_opts, command) => {
-    await lazyRun(
-      () => import('./commands/stats.js'),
-      'createStatsCommand',
-      buildLazyArgv('stats', command),
-    );
-  });
+  .action(lazyAction('stats', () => import('./commands/stats.js'), 'createStatsCommand'));
 
 // --- export ---
 program
@@ -170,13 +194,7 @@ program
   .option('-t, --type <type>', 'Filter by entry type')
   .option('-s, --source <source>', 'Filter by source')
   .option('-p, --pretty', 'Pretty-print JSON output')
-  .action(async (_opts, command) => {
-    await lazyRun(
-      () => import('./commands/export-cmd.js'),
-      'createExportCommand',
-      buildLazyArgv('export', command),
-    );
-  });
+  .action(lazyAction('export', () => import('./commands/export-cmd.js'), 'createExportCommand'));
 
 // --- favorite ---
 program
@@ -185,38 +203,20 @@ program
   .description('Toggle favorite status on an entry (or bulk with --type)')
   .argument('[name]', 'Entry name (fuzzy matched)')
   .option('--type <type>', 'Apply to all entries of this type (bulk operation)')
-  .action(async (_opts, command) => {
-    await lazyRun(
-      () => import('./commands/favorite.js'),
-      'createFavoriteCommand',
-      buildLazyArgv('favorite', command),
-    );
-  });
+  .action(lazyAction('favorite', () => import('./commands/favorite.js'), 'createFavoriteCommand'));
 
 // --- init ---
 program
   .command('init')
   .description('Initialize CommandVault configuration')
   .option('--reset', 'Reset existing config to defaults')
-  .action(async (_opts, command) => {
-    await lazyRun(
-      () => import('./commands/init.js'),
-      'createInitCommand',
-      buildLazyArgv('init', command),
-    );
-  });
+  .action(lazyAction('init', () => import('./commands/init.js'), 'createInitCommand'));
 
 // --- doctor ---
 program
   .command('doctor')
   .description('Check system health and diagnose configuration issues')
-  .action(async (_opts, command) => {
-    await lazyRun(
-      () => import('./commands/doctor.js'),
-      'createDoctorCommand',
-      buildLazyArgv('doctor', command),
-    );
-  });
+  .action(lazyAction('doctor', () => import('./commands/doctor.js'), 'createDoctorCommand'));
 
 // --- import ---
 program
@@ -224,13 +224,7 @@ program
   .description('Import commands from a .vault.json file or URL')
   .argument('<source>', 'Path to .vault.json file or URL')
   .option('--dry-run', 'Preview what would be imported without saving')
-  .action(async (_opts, command) => {
-    await lazyRun(
-      () => import('./commands/import-cmd.js'),
-      'createImportCommand',
-      buildLazyArgv('import', command),
-    );
-  });
+  .action(lazyAction('import', () => import('./commands/import-cmd.js'), 'createImportCommand'));
 
 // --- sync ---
 program
@@ -238,13 +232,7 @@ program
   .description('Sync commands from a remote registry URL')
   .argument('<url>', 'URL to a .vault.json registry')
   .option('--dry-run', 'Preview without saving')
-  .action(async (_opts, command) => {
-    await lazyRun(
-      () => import('./commands/sync.js'),
-      'createSyncCommand',
-      buildLazyArgv('sync', command),
-    );
-  });
+  .action(lazyAction('sync', () => import('./commands/sync.js'), 'createSyncCommand'));
 
 // --- tag ---
 program
@@ -254,37 +242,19 @@ program
   .argument('[name]', 'Entry name (fuzzy matched)')
   .argument('[tag]', 'Tag to add or remove')
   .option('--type <type>', 'Apply to all entries of this type (bulk operation)')
-  .action(async (_opts, command) => {
-    await lazyRun(
-      () => import('./commands/tag.js'),
-      'createTagCommand',
-      buildLazyArgv('tag', command),
-    );
-  });
+  .action(lazyAction('tag', () => import('./commands/tag.js'), 'createTagCommand'));
 
 // --- diff ---
 program
   .command('diff')
   .description('Show what changed since the last scan snapshot')
-  .action(async (_opts, command) => {
-    await lazyRun(
-      () => import('./commands/diff.js'),
-      'createDiffCommand',
-      buildLazyArgv('diff', command),
-    );
-  });
+  .action(lazyAction('diff', () => import('./commands/diff.js'), 'createDiffCommand'));
 
 // --- watch ---
 program
   .command('watch')
   .description('Live mode — print file changes as they happen')
-  .action(async (_opts, command) => {
-    await lazyRun(
-      () => import('./commands/watch.js'),
-      'createWatchCommand',
-      buildLazyArgv('watch', command),
-    );
-  });
+  .action(lazyAction('watch', () => import('./commands/watch.js'), 'createWatchCommand'));
 
 // --- interactive ---
 program
@@ -293,7 +263,8 @@ program
   .description('Interactive fuzzy search mode (full TUI in terminal, legacy mode in pipes)')
   .option('--tui', 'Force TUI mode')
   .option('--no-tui', 'Force legacy non-interactive mode')
-  .action(async (_opts, command) => {
+  .action(async (...actionArgs) => {
+    const command = commandFromActionArgs(actionArgs);
     const { createInteractiveCommand } = await import('./commands/interactive.js');
     const realCmd = createInteractiveCommand();
     const args: string[] = [];
@@ -312,13 +283,7 @@ program
   .alias('o')
   .description('Open an entry source file in your editor')
   .argument('<name>', 'Entry name (fuzzy matched)')
-  .action(async (_opts, command) => {
-    await lazyRun(
-      () => import('./commands/open.js'),
-      'createOpenCommand',
-      buildLazyArgv('open', command),
-    );
-  });
+  .action(lazyAction('open', () => import('./commands/open.js'), 'createOpenCommand'));
 
 // --- run ---
 program
@@ -326,110 +291,52 @@ program
   .alias('r')
   .description('Get the slash command for an entry')
   .argument('<name>', 'Entry name (fuzzy matched)')
-  .action(async (_opts, command) => {
-    await lazyRun(
-      () => import('./commands/run.js'),
-      'createRunCommand',
-      buildLazyArgv('run', command),
-    );
-  });
+  .action(lazyAction('run', () => import('./commands/run.js'), 'createRunCommand'));
 
 // --- backup ---
 program
   .command('backup')
   .description('Backup the vault database')
   .option('--list', 'List available backups')
-  .action(async (_opts, command) => {
-    await lazyRun(
-      () => import('./commands/backup.js'),
-      'createBackupCommand',
-      buildLazyArgv('backup', command),
-    );
-  });
+  .action(lazyAction('backup', () => import('./commands/backup.js'), 'createBackupCommand'));
 
 // --- restore ---
 program
   .command('restore')
   .description('Restore the vault database from a backup')
   .argument('<file>', 'Backup filename (from `vault backup --list`)')
-  .action(async (_opts, command) => {
-    await lazyRun(
-      () => import('./commands/restore.js'),
-      'createRestoreCommand',
-      buildLazyArgv('restore', command),
-    );
-  });
+  .action(lazyAction('restore', () => import('./commands/restore.js'), 'createRestoreCommand'));
 
 // --- config ---
 program
   .command('config')
   .description('Manage CommandVault configuration')
   .argument('[args...]', 'Subcommand and arguments (get [key] | set <key> <value>)')
-  .action(async (_opts, command) => {
-    const { createConfigCommand } = await import('./commands/config.js');
-    const cmd = createConfigCommand();
-
-    // Config uses subcommands — forward raw args
-    const globalOpts = command.parent?.opts() ?? {};
-    const wrapper = new Command();
-    wrapper
-      .option('--claude-path <path>', 'Override ~/.claude config location')
-      .option('--tier <tier>', 'Search engine tier (fuse|minisearch|sqlite)')
-      .option('--json', 'Output as JSON (for scripting)');
-    wrapper.addCommand(cmd);
-
-    const argv = ['node', 'vault', 'config', ...(command.args ?? [])];
-    for (const [key, value] of Object.entries(globalOpts)) {
-      if (value === true) {
-        argv.push(`--${camelToKebab(key)}`);
-      } else if (value !== undefined && value !== false) {
-        argv.push(`--${camelToKebab(key)}`, String(value));
-      }
-    }
-    await wrapper.parseAsync(argv);
-  });
+  .allowUnknownOption()
+  .action(subcommandAction('config', () => import('./commands/config.js'), 'createConfigCommand'));
 
 // --- completions ---
 program
   .command('completions')
   .description('Generate shell completion scripts')
   .argument('<shell>', 'Shell type (bash|zsh|fish)')
-  .action(async (_opts, command) => {
-    await lazyRun(
+  .action(
+    lazyAction(
+      'completions',
       () => import('./commands/completions.js'),
       'createCompletionsCommand',
-      buildLazyArgv('completions', command),
-    );
-  });
+    ),
+  );
 
 // --- registry ---
 program
   .command('registry')
   .description('Manage remote skill registries')
   .argument('[args...]', 'Subcommand and arguments')
-  .action(async (_opts, command) => {
-    const { createRegistryCommand } = await import('./commands/registry.js');
-    const cmd = createRegistryCommand();
-
-    // Registry uses subcommands — forward raw args
-    const globalOpts = command.parent?.opts() ?? {};
-    const wrapper = new Command();
-    wrapper
-      .option('--claude-path <path>', 'Override ~/.claude config location')
-      .option('--tier <tier>', 'Search engine tier (fuse|minisearch|sqlite)')
-      .option('--json', 'Output as JSON (for scripting)');
-    wrapper.addCommand(cmd);
-
-    const argv = ['node', 'vault', 'registry', ...(command.args ?? [])];
-    for (const [key, value] of Object.entries(globalOpts)) {
-      if (value === true) {
-        argv.push(`--${camelToKebab(key)}`);
-      } else if (value !== undefined && value !== false) {
-        argv.push(`--${camelToKebab(key)}`, String(value));
-      }
-    }
-    await wrapper.parseAsync(argv);
-  });
+  .allowUnknownOption()
+  .action(
+    subcommandAction('registry', () => import('./commands/registry.js'), 'createRegistryCommand'),
+  );
 
 // --- audit ---
 program
@@ -437,18 +344,13 @@ program
   .description('Detect stale entries and score vault quality')
   .option('--threshold <days>', 'Staleness threshold in days', '30')
   .option('--min-score <score>', 'Minimum quality score threshold', '40')
-  .action(async (_opts, command) => {
-    await lazyRun(
-      () => import('./commands/audit.js'),
-      'createAuditCommand',
-      buildLazyArgv('audit', command),
-    );
-  });
+  .action(lazyAction('audit', () => import('./commands/audit.js'), 'createAuditCommand'));
 
 // Default action: launch interactive mode when no subcommand is given
 program.option('--tui', 'Force TUI mode').option('--no-tui', 'Force legacy non-interactive mode');
 
-program.action(async (_opts, command) => {
+program.action(async (...actionArgs) => {
+  const command = commandFromActionArgs(actionArgs);
   const { createInteractiveCommand } = await import('./commands/interactive.js');
   const realCmd = createInteractiveCommand();
   const globalOpts = command.opts();
