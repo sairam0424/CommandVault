@@ -4,6 +4,7 @@ import { dirname } from 'node:path';
 import { mkdir, readFile, writeFile, access } from 'node:fs/promises';
 import { resolveClaudeDir } from '@commandvault/core';
 import { configFilePath, dbFilePath } from '../config.js';
+import { CommandError, EXIT_RUNTIME_ERROR } from '../errors.js';
 
 interface CommandVaultConfig {
   readonly claudeConfigPath?: string;
@@ -61,10 +62,11 @@ export function createInitCommand(): Command {
         try {
           existingConfig = JSON.parse(raw) as CommandVaultConfig;
         } catch {
-          console.log(chalk.red('  Existing config is invalid JSON.'));
-          console.log(chalk.yellow(`  Run ${chalk.bold('vault init --reset')} to recreate it.`));
-          console.log('');
-          return;
+          throw new CommandError(
+            'existing config is invalid JSON',
+            EXIT_RUNTIME_ERROR,
+            'run `vault init --reset` to recreate it',
+          );
         }
 
         console.log(chalk.cyan('  Config already exists at:'));

@@ -85,11 +85,9 @@ describe('favorite command', () => {
     vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
 
     const program = buildProgram();
-    await program.parseAsync(['node', 'vault', 'favorite', 'nonexistent']);
-
-    const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
-    expect(output).toContain('No entry found');
-    expect(output).toContain('nonexistent');
+    await expect(
+      program.parseAsync(['node', 'vault', 'favorite', 'nonexistent']),
+    ).rejects.toMatchObject({ message: 'no entry found matching "nonexistent"', exitCode: 1 });
     expect(vault.toggleFavorite).not.toHaveBeenCalled();
   });
 
@@ -119,7 +117,9 @@ describe('favorite command', () => {
     vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
 
     const program = buildProgram();
-    await program.parseAsync(['node', 'vault', 'favorite', 'nothing']);
+    await expect(program.parseAsync(['node', 'vault', 'favorite', 'nothing'])).rejects.toThrow(
+      'no entry found',
+    );
 
     expect(vault.dispose).toHaveBeenCalledOnce();
   });

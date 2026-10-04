@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import type { EntryType } from '@commandvault/core';
 import { createVaultInstance, typeEmoji, typeColor, type CliGlobalOptions } from '../helpers.js';
+import { CommandError, invalidChoiceError, usageError } from '../errors.js';
 
 const VALID_TYPES = ['skill', 'agent', 'command', 'plugin', 'rule', 'hook'] as const;
 
@@ -28,29 +29,24 @@ export function createTagCommand(): Command {
           // Bulk mode: apply tag operation to all entries of a given type
           if (opts.type) {
             if (!VALID_TYPES.includes(opts.type as any)) {
-              console.log(chalk.red(`Invalid type: "${opts.type}"`));
-              console.log(chalk.dim(`Valid types: ${VALID_TYPES.join(', ')}`));
-              return;
+              throw invalidChoiceError('--type', opts.type, VALID_TYPES);
             }
 
             if (action !== 'add' && action !== 'remove') {
-              console.log(chalk.red('\nBulk mode only supports "add" and "remove" actions.\n'));
-              return;
+              throw usageError('bulk mode only supports "add" and "remove" actions');
             }
 
             // In bulk mode, if no name is given, the tag is the second positional arg (name position)
             const bulkTag = tag ?? name;
             if (!bulkTag) {
-              console.log(chalk.red(`\nUsage: vault tag ${action} <tag> --type <type>\n`));
-              return;
+              throw usageError(`usage: vault tag ${action} <tag> --type <type>`);
             }
 
             const allEntries = vault.getAllEntries();
             const filtered = allEntries.filter((e) => e.type === (opts.type as EntryType));
 
             if (filtered.length === 0) {
-              console.log(chalk.yellow(`\nNo entries found of type "${opts.type}".\n`));
-              return;
+              throw new CommandError(`no entries found of type "${opts.type}"`);
             }
 
             for (const entry of filtered) {
@@ -73,19 +69,15 @@ export function createTagCommand(): Command {
 
           // Single entry mode requires name
           if (!name) {
-            console.log(
-              chalk.red(
-                '\nUsage: vault tag <action> <name> [tag] or vault tag <action> <tag> --type <type>\n',
-              ),
+            throw usageError(
+              'usage: vault tag <action> <name> [tag] or vault tag <action> <tag> --type <type>',
             );
-            return;
           }
 
           const results = vault.quickSearch(name, 1);
 
           if (results.length === 0) {
-            console.log(chalk.yellow(`\nNo entry found matching "${name}".\n`));
-            return;
+            throw new CommandError(`no entry found matching "${name}"`);
           }
 
           const entry = results[0].entry;
@@ -94,8 +86,7 @@ export function createTagCommand(): Command {
           switch (action) {
             case 'add': {
               if (!tag) {
-                console.log(chalk.red('\nUsage: vault tag add <name> <tag>\n'));
-                return;
+                throw usageError('usage: vault tag add <name> <tag>');
               }
               vault.addTag(entry.id, tag);
               console.log('');
@@ -108,8 +99,7 @@ export function createTagCommand(): Command {
 
             case 'remove': {
               if (!tag) {
-                console.log(chalk.red('\nUsage: vault tag remove <name> <tag>\n'));
-                return;
+                throw usageError('usage: vault tag remove <name> <tag>');
               }
               vault.removeTag(entry.id, tag);
               console.log('');
@@ -145,7 +135,7 @@ export function createTagCommand(): Command {
             }
 
             default: {
-              console.log(chalk.red(`\nUnknown action "${action}". Use: add, remove, or list\n`));
+              throw usageError(`unknown action "${action}" (expected add, remove or list)`);
             }
           }
         } finally {

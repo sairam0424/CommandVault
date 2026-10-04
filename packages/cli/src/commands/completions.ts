@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import chalk from 'chalk';
+import { invalidChoiceError } from '../errors.js';
 
 const SUBCOMMANDS = [
   'list',
@@ -180,11 +180,7 @@ export function createCompletionsCommand(): Command {
     .action((shell: string) => {
       const generator = SHELLS[shell];
       if (!generator) {
-        console.error(
-          chalk.red(`Unknown shell: "${shell}". Supported: bash, zsh, fish, powershell`),
-        );
-        process.exitCode = 1;
-        return;
+        throw invalidChoiceError('shell', shell, Object.keys(SHELLS));
       }
       process.stdout.write(generator());
     });

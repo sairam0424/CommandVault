@@ -114,10 +114,9 @@ describe('tag command', () => {
 
     const program = buildProgram();
     // No tag argument provided
-    await program.parseAsync(['node', 'vault', 'tag', 'add', 'browse']);
-
-    const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
-    expect(output).toContain('Usage: vault tag add <name> <tag>');
+    await expect(
+      program.parseAsync(['node', 'vault', 'tag', 'add', 'browse']),
+    ).rejects.toMatchObject({ message: 'usage: vault tag add <name> <tag>', exitCode: 2 });
     expect(vault.addTag).not.toHaveBeenCalled();
   });
 
@@ -126,10 +125,9 @@ describe('tag command', () => {
     vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
 
     const program = buildProgram();
-    await program.parseAsync(['node', 'vault', 'tag', 'add', 'nonexistent', 'my-tag']);
-
-    const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
-    expect(output).toContain('No entry found');
+    await expect(
+      program.parseAsync(['node', 'vault', 'tag', 'add', 'nonexistent', 'my-tag']),
+    ).rejects.toMatchObject({ message: 'no entry found matching "nonexistent"', exitCode: 1 });
   });
 
   it('rejects unknown action', async () => {
@@ -137,9 +135,11 @@ describe('tag command', () => {
     vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
 
     const program = buildProgram();
-    await program.parseAsync(['node', 'vault', 'tag', 'invalid-action', 'browse', 'tag']);
-
-    const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
-    expect(output).toContain('Unknown action');
+    await expect(
+      program.parseAsync(['node', 'vault', 'tag', 'invalid-action', 'browse', 'tag']),
+    ).rejects.toMatchObject({
+      message: 'unknown action "invalid-action" (expected add, remove or list)',
+      exitCode: 2,
+    });
   });
 });

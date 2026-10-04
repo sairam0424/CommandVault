@@ -2,11 +2,18 @@
 
 import { createRequire } from 'node:module';
 import { Command } from 'commander';
+import { parseTierOption, resolveClaudePath } from './config.js';
+import { installProcessHandlers, runCli } from './errors.js';
+
+installProcessHandlers();
 
 const require = createRequire(import.meta.url);
 const { version } = require('../package.json');
 
 const program = new Command();
+
+// Parse errors and --help/--version surface as CommanderError so `withCommand` maps them to exit codes.
+program.exitOverride();
 
 program
   .name('vault')
@@ -15,6 +22,17 @@ program
   .option('--claude-path <path>', 'Override ~/.claude config location')
   .option('--tier <tier>', 'Search engine tier (fuse|minisearch|sqlite)')
   .option('--json', 'Output as JSON (for scripting)');
+
+// Validate the global options once, before any command runs, and hand commands the resolved path.
+program.hook('preAction', (thisCommand) => {
+  const { tier, claudePath } = thisCommand.opts<{ tier?: string; claudePath?: string }>();
+  if (tier !== undefined) {
+    parseTierOption(tier);
+  }
+  if (claudePath !== undefined) {
+    thisCommand.setOptionValue('claudePath', resolveClaudePath(claudePath));
+  }
+});
 
 program.addHelpText(
   'after',
@@ -28,6 +46,14 @@ Commands grouped:
   Setup:        init, config, doctor, watch, completions
 `,
 );
+
+/** Makes commander throw a CommanderError instead of exiting, for the command and its subcommands. */
+function applyExitOverride(command: Command): void {
+  command.exitOverride();
+  for (const sub of command.commands) {
+    applyExitOverride(sub);
+  }
+}
 
 /**
  * Lazily load a command module and execute it within a parent context
@@ -54,6 +80,7 @@ async function lazyRun(
     .option('--tier <tier>', 'Search engine tier (fuse|minisearch|sqlite)')
     .option('--json', 'Output as JSON (for scripting)');
   wrapper.addCommand(cmd);
+  applyExitOverride(wrapper);
 
   await wrapper.parseAsync(argv as string[]);
 }
@@ -363,7 +390,4 @@ program.action(async (...actionArgs) => {
   await realCmd.parseAsync(args, { from: 'user' });
 });
 
-program.parseAsync(process.argv).catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
-});
+runCli(() => program.parseAsync(process.argv));

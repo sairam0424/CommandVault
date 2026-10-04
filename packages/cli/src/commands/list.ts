@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import Table from 'cli-table3';
 import type { VaultEntry, EntryType } from '@commandvault/core';
 import { withVault, typeEmoji, typeColor, truncate, type CliGlobalOptions } from '../helpers.js';
+import { invalidChoiceError } from '../errors.js';
 
 const VALID_TYPES = ['skill', 'agent', 'command', 'plugin', 'rule', 'hook'] as const;
 const TYPE_ORDER: readonly EntryType[] = VALID_TYPES;
@@ -55,9 +56,7 @@ export function createListCommand(): Command {
 
         if (opts.type) {
           if (!VALID_TYPES.includes(opts.type as any)) {
-            console.log(chalk.red(`Invalid type: "${opts.type}"`));
-            console.log(chalk.dim(`Valid types: ${VALID_TYPES.join(', ')}`));
-            return;
+            throw invalidChoiceError('--type', opts.type, VALID_TYPES);
           }
           entries = entries.filter((e) => e.type === opts.type);
         }

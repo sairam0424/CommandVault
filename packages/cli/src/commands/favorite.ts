@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import type { EntryType } from '@commandvault/core';
 import { createVaultInstance, typeEmoji, typeColor, type CliGlobalOptions } from '../helpers.js';
+import { CommandError, invalidChoiceError, usageError } from '../errors.js';
 
 const VALID_TYPES = ['skill', 'agent', 'command', 'plugin', 'rule', 'hook'] as const;
 
@@ -21,17 +22,14 @@ export function createFavoriteCommand(): Command {
         // Bulk mode: toggle favorites for all entries of a given type
         if (opts.type) {
           if (!VALID_TYPES.includes(opts.type as any)) {
-            console.log(chalk.red(`Invalid type: "${opts.type}"`));
-            console.log(chalk.dim(`Valid types: ${VALID_TYPES.join(', ')}`));
-            return;
+            throw invalidChoiceError('--type', opts.type, VALID_TYPES);
           }
 
           const allEntries = vault.getAllEntries();
           const filtered = allEntries.filter((e) => e.type === (opts.type as EntryType));
 
           if (filtered.length === 0) {
-            console.log(chalk.yellow(`\nNo entries found of type "${opts.type}".\n`));
-            return;
+            throw new CommandError(`no entries found of type "${opts.type}"`);
           }
 
           let favorited = 0;
@@ -55,17 +53,13 @@ export function createFavoriteCommand(): Command {
 
         // Single entry mode
         if (!name) {
-          console.log(
-            chalk.red('\nUsage: vault favorite <name> or vault favorite --type <type>\n'),
-          );
-          return;
+          throw usageError('usage: vault favorite <name> or vault favorite --type <type>');
         }
 
         const results = vault.quickSearch(name, 1);
 
         if (results.length === 0) {
-          console.log(chalk.yellow(`\nNo entry found matching "${name}".\n`));
-          return;
+          throw new CommandError(`no entry found matching "${name}"`);
         }
 
         const entry = results[0].entry;

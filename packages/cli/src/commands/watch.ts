@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import { createVault, type VaultEntry, type SearchTier } from '@commandvault/core';
 import type { CliGlobalOptions } from '../helpers.js';
 import { createSpinner } from '../ui/spinner.js';
+import { onShutdown } from '../errors.js';
 
 function timestamp(): string {
   const now = new Date();
@@ -56,19 +57,10 @@ export function createWatchCommand(): Command {
       console.log(chalk.cyan('Watching for changes... (Ctrl+C to stop)'));
       console.log('');
 
-      const cleanup = async () => {
-        console.log('');
-        console.log(chalk.dim('Stopping watcher...'));
+      // The process-level SIGINT/SIGTERM handler runs this, then exits 130/143.
+      onShutdown(async () => {
+        console.error(chalk.dim('\nStopping watcher...'));
         await vault.dispose();
-        process.exit(0);
-      };
-
-      process.on('SIGINT', () => {
-        cleanup().catch(() => process.exit(1));
-      });
-
-      process.on('SIGTERM', () => {
-        cleanup().catch(() => process.exit(1));
       });
 
       // Keep the process alive

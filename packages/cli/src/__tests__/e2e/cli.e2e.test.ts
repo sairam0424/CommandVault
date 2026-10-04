@@ -200,7 +200,7 @@ describe('built CLI: commands without a positional argument', () => {
 
   it('an unknown command is rejected with a usage error', () => {
     const result = run(['bogus']);
-    expect(result.status, context(result)).not.toBe(0);
+    expect(result.status, context(result)).toBe(2);
     expect(result.stderr, context(result)).toMatch(/too many arguments|unknown command/i);
   });
 });
@@ -303,6 +303,8 @@ describe('built CLI: commands that forward to subcommands', () => {
 });
 
 describe('built CLI: commands that report user errors cleanly instead of crashing', () => {
+  // Exit codes and the full error contract live in exit-codes.e2e.test.ts; this only pins that the
+  // messages survive, on either channel, and that the failure is a plain non-zero exit.
   it.each([
     [
       'import of a missing file',
@@ -319,15 +321,13 @@ describe('built CLI: commands that report user errors cleanly instead of crashin
       ['sync', 'https://127.0.0.1/registry.json', '--dry-run'],
       /private\/internal URL/,
     ],
-    ['restore of a missing backup', ['restore', 'no-such-backup.db'], /Backup file not found/],
+    ['restore of a missing backup', ['restore', 'no-such-backup.db'], /backup file not found/i],
   ])('%s', (_name, args, message) => {
     const result = run(args);
     expectNoDispatchFailure(result);
+    expect(result.status, context(result)).toBe(1);
     expect(`${result.stderr}${result.stdout}`, context(result)).toMatch(message);
   });
-
-  // Today these commands print the error and still exit 0 (CV-G2-018, exit-code framework).
-  it.todo('exits non-zero after reporting a user error');
 });
 
 describe('built CLI: known product gaps the dispatch fix does not cover', () => {

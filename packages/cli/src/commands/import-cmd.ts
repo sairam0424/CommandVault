@@ -4,6 +4,7 @@ import Table from 'cli-table3';
 import { importFromFile, importFromUrl } from '@commandvault/core';
 import { createVaultInstance, typeEmoji, typeColor, type CliGlobalOptions } from '../helpers.js';
 import { createSpinner } from '../ui/spinner.js';
+import { CommandError } from '../errors.js';
 
 export function createImportCommand(): Command {
   const cmd = new Command('import')
@@ -18,15 +19,14 @@ export function createImportCommand(): Command {
       const isUrl = source.startsWith('http://') || source.startsWith('https://');
       const result = isUrl ? await importFromUrl(source) : await importFromFile(source);
 
-      if (result.errors.length > 0) {
-        for (const err of result.errors) {
-          spinner?.warn(chalk.yellow(`Warning: ${err.message}`));
-        }
+      if (result.entries.length === 0) {
+        spinner?.stop();
+        const reason = result.errors[0] ? ` (${result.errors[0].message})` : '';
+        throw new CommandError(`no valid entries found in source${reason}`);
       }
 
-      if (result.entries.length === 0) {
-        spinner?.fail('No valid entries found in source');
-        return;
+      for (const err of result.errors) {
+        spinner?.warn(chalk.yellow(`Warning: ${err.message}`));
       }
 
       spinner?.succeed(`Found ${result.entries.length} entries to import`);
