@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
+import type { Stats } from 'node:fs';
 
 // Mock chokidar before importing VaultWatcher
 const mockWatcher = new EventEmitter() as EventEmitter & { close: ReturnType<typeof vi.fn> };
@@ -14,6 +15,8 @@ import { watch } from 'chokidar';
 import { VaultWatcher, type WatcherCallback } from '../watcher/index.js';
 
 const CLAUDE_PATH = '/home/user/.claude';
+
+const fileStats = (): Stats => ({ isDirectory: () => false, isSymbolicLink: () => false }) as Stats;
 
 describe('VaultWatcher', () => {
   let watcher: VaultWatcher;
@@ -69,27 +72,46 @@ describe('VaultWatcher', () => {
   // -------------------------------------------------------------------------
   // Watch paths configuration
   // -------------------------------------------------------------------------
-  it('watches the correct glob patterns for all entry types', () => {
+  it('watches directories and literal files, never glob patterns', () => {
     watcher.start(callback);
 
-    const watchCall = vi.mocked(watch).mock.calls[0];
-    const watchPaths = watchCall[0] as string[];
+    const watchPaths = vi.mocked(watch).mock.calls[0][0] as string[];
 
-    expect(watchPaths).toContain(join(CLAUDE_PATH, 'skills', '**', 'SKILL.md'));
-    expect(watchPaths).toContain(join(CLAUDE_PATH, 'agents', '*.md'));
-    expect(watchPaths).toContain(join(CLAUDE_PATH, 'commands', '**', '*.md'));
-    expect(watchPaths).toContain(join(CLAUDE_PATH, 'plugins', 'installed_plugins.json'));
-    expect(watchPaths).toContain(join(CLAUDE_PATH, 'rules', '*.md'));
-    expect(watchPaths).toContain(join(CLAUDE_PATH, 'settings.json'));
+    // chokidar 4 treats glob strings as literal, nonexistent paths.
+    expect([...watchPaths].sort()).toEqual(
+      [
+        join(CLAUDE_PATH, 'skills'),
+        join(CLAUDE_PATH, 'agents'),
+        join(CLAUDE_PATH, 'commands'),
+        join(CLAUDE_PATH, 'rules'),
+        join(CLAUDE_PATH, 'plugins', 'installed_plugins.json'),
+        join(CLAUDE_PATH, 'settings.json'),
+      ].sort(),
+    );
+    for (const path of watchPaths) {
+      expect(path).not.toMatch(/[*?{}[\]]/);
+    }
   });
 
-  it('passes followSymlinks: false to chokidar options', () => {
+  it('passes an ignored callback that keeps only vault source files', () => {
+    watcher.start(callback);
+
+    const options = vi.mocked(watch).mock.calls[0][1] as {
+      ignored: (path: string, stats?: Stats) => boolean;
+    };
+
+    expect(typeof options.ignored).toBe('function');
+    expect(options.ignored(join(CLAUDE_PATH, 'rules', 'notes.txt'), fileStats())).toBe(true);
+    expect(options.ignored(join(CLAUDE_PATH, 'rules', 'style.md'), fileStats())).toBe(false);
+  });
+
+  it('passes followSymlinks: true so symlinked skill folders are watched', () => {
     watcher.start(callback);
 
     const watchCall = vi.mocked(watch).mock.calls[0];
     const options = watchCall[1] as Record<string, unknown>;
 
-    expect(options.followSymlinks).toBe(false);
+    expect(options.followSymlinks).toBe(true);
   });
 
   it('passes ignoreInitial: true to chokidar options', () => {
@@ -111,6 +133,21 @@ describe('VaultWatcher', () => {
       stabilityThreshold: 300,
       pollInterval: 100,
     });
+  });
+
+  it('reports a watcher error as a warning instead of crashing the host', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      watcher.start(callback);
+
+      const failure = Object.assign(new Error('too many symbolic links'), { code: 'ELOOP' });
+      expect(() => mockWatcher.emit('error', failure)).not.toThrow();
+
+      expect(warn).toHaveBeenCalledOnce();
+      expect(String(warn.mock.calls[0]?.[0])).toContain('too many symbolic links');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   // -------------------------------------------------------------------------
