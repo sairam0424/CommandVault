@@ -97,7 +97,7 @@ describe('Error Paths', () => {
   // =========================================================================
 
   describe('Malformed YAML Frontmatter', () => {
-    it('parser returns error entry for malformed frontmatter without crashing', async () => {
+    it('parser recovers malformed frontmatter with a warning instead of dropping the file', async () => {
       const skillsDir = join(tempDir, 'skills');
       const malformedDir = join(skillsDir, 'broken-skill');
       await mkdir(malformedDir, { recursive: true });
@@ -115,12 +115,14 @@ description: [unclosed bracket
 
       const result = await parseSkills(skillsDir);
 
-      // gray-matter is lenient with malformed YAML — it may still parse,
-      // but the parser should not throw
-      expect(result).toBeDefined();
-      // Either we get an entry (gray-matter tolerates it) or an error
-      const totalResults = result.entries.length + result.errors.length;
-      expect(totalResults).toBeGreaterThanOrEqual(0);
+      // The broken description cannot be parsed as YAML, so the tolerant
+      // line-based fallback indexes the file from its name line and reports it.
+      expect(result.entries).toHaveLength(1);
+      expect(result.entries[0].name).toBe('broken');
+      expect(result.entries[0].tags).toContain('frontmatter-warning');
+      expect(result.entries[0].metadata.frontmatterRecovery).toBe('line-based');
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].message).toMatch(/^Recovered skill frontmatter/);
     });
 
     it('parser handles file with only frontmatter delimiters', async () => {

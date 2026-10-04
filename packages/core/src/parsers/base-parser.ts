@@ -7,6 +7,7 @@ import {
   getLastModified,
   inferSource,
   extractTags,
+  type FrontmatterRecovery,
 } from './utils.js';
 import { withRetry } from './retry.js';
 
@@ -42,48 +43,100 @@ export interface ParseConfig {
   readonly skipEnoent?: boolean;
 }
 
+interface ParsedFile {
+  readonly entry: VaultEntry;
+  readonly warnings: readonly ParseError[];
+}
+
+// Surfaced as a tag so a lossy frontmatter recovery is visible in search and the UI.
+export const FRONTMATTER_WARNING_TAG = 'frontmatter-warning';
+
+function describeRecoveryWarning(
+  type: string,
+  filePath: string,
+  recovery: FrontmatterRecovery,
+  cause: unknown,
+): ParseError {
+  const reason = (cause as Error | undefined)?.message?.split('\n')[0] ?? 'invalid YAML';
+  return {
+    filePath,
+    message: `Recovered ${type} frontmatter via ${recovery} fallback (name/description only): ${reason}`,
+    cause,
+  };
+}
+
+function readSource(filePath: string, config: ParseConfig): Promise<string> {
+  return config.useRetry
+    ? withRetry(() => readFile(filePath, 'utf-8'))
+    : readFile(filePath, 'utf-8');
+}
+
+function resolveDescription(
+  data: ParsedFrontmatter,
+  content: string,
+  context: ParseContext,
+  config: ParseConfig,
+): string {
+  if (config.descriptionFromContent) return config.descriptionFromContent(data, content, context);
+  return typeof data.description === 'string' ? data.description.trim() : '';
+}
+
+function resolveTags(
+  name: string,
+  description: string,
+  data: ParsedFrontmatter,
+  recovery: FrontmatterRecovery | undefined,
+  config: ParseConfig,
+): string[] {
+  const extracted = extractTags(name, description, data);
+  const tags = config.postProcessTags ? config.postProcessTags(extracted, data) : extracted;
+  return recovery === 'line-based' ? [...tags, FRONTMATTER_WARNING_TAG] : tags;
+}
+
 async function parseFileEntry(
   filePath: string,
   folderName: string,
   fileName: string,
   config: ParseConfig,
-): Promise<VaultEntry> {
-  const raw = config.useRetry
-    ? await withRetry(() => readFile(filePath, 'utf-8'))
-    : await readFile(filePath, 'utf-8');
-  const { data, content } = parseFrontmatter(raw);
+): Promise<ParsedFile> {
+  const raw = await readSource(filePath, config);
+  const { data, content, recovery, recoveryCause } = parseFrontmatter(raw);
   const context: ParseContext = { folderName, fileName, filePath };
   const name = config.nameFromPath
     ? config.nameFromPath(folderName, data, context)
     : (data.name ?? basename(fileName, '.md'));
-  const description = config.descriptionFromContent
-    ? config.descriptionFromContent(data, content, context)
-    : typeof data.description === 'string'
-      ? data.description.trim()
-      : '';
+  const description = resolveDescription(data, content, context, config);
   const source = inferSource(name, filePath);
-  let tags = extractTags(name, description, data);
-  if (config.postProcessTags) {
-    tags = config.postProcessTags(tags, data);
-  }
-  const lastModified = await getLastModified(filePath);
   const disambiguator = config.idDisambiguator ? config.idDisambiguator(name, filePath) : source;
-  const metadata = config.extractMetadata ? config.extractMetadata(data, content, context) : {};
+  const parsedMetadata = config.extractMetadata
+    ? config.extractMetadata(data, content, context)
+    : {};
+  const metadata = recovery ? { ...parsedMetadata, frontmatterRecovery: recovery } : parsedMetadata;
+  const warnings =
+    recovery === 'line-based'
+      ? [describeRecoveryWarning(config.type, filePath, recovery, recoveryCause)]
+      : [];
 
-  return {
+  const entry: VaultEntry = {
     id: generateStableId(config.type, name, disambiguator),
     name,
     type: config.type as VaultEntry['type'],
     source,
     description,
     filePath,
-    tags,
+    tags: resolveTags(name, description, data, recovery, config),
     metadata,
     content,
-    lastModified,
+    lastModified: await getLastModified(filePath),
     favorite: false,
     usageCount: 0,
   };
+  return { entry, warnings };
+}
+
+function collectParsed(parsed: ParsedFile, entries: VaultEntry[], errors: ParseError[]): void {
+  entries.push(parsed.entry);
+  errors.push(...parsed.warnings);
 }
 
 async function walkDir(dir: string, pattern: RegExp): Promise<string[]> {
@@ -120,8 +173,8 @@ export async function parseMarkdownDir(dir: string, config: ParseConfig): Promis
       const fileName = basename(filePath);
       const folderName = basename(dirname(filePath));
       try {
-        const entry = await parseFileEntry(filePath, folderName, fileName, config);
-        entries.push(entry);
+        const parsed = await parseFileEntry(filePath, folderName, fileName, config);
+        collectParsed(parsed, entries, errors);
       } catch (err) {
         errors.push({
           filePath,
@@ -153,8 +206,8 @@ export async function parseMarkdownDir(dir: string, config: ParseConfig): Promis
 
       const filePath = join(dir, folderName, matchedFile);
       try {
-        const entry = await parseFileEntry(filePath, folderName, matchedFile, config);
-        entries.push(entry);
+        const parsed = await parseFileEntry(filePath, folderName, matchedFile, config);
+        collectParsed(parsed, entries, errors);
       } catch (err) {
         const isNotFound = (err as NodeJS.ErrnoException).code === 'ENOENT';
         if (config.skipEnoent && isNotFound) return;
@@ -183,8 +236,8 @@ export async function parseMarkdownDir(dir: string, config: ParseConfig): Promis
     const parsePromises = files.map(async (file) => {
       const filePath = join(dir, file);
       try {
-        const entry = await parseFileEntry(filePath, basename(dir), file, config);
-        entries.push(entry);
+        const parsed = await parseFileEntry(filePath, basename(dir), file, config);
+        collectParsed(parsed, entries, errors);
       } catch (err) {
         errors.push({
           filePath,
