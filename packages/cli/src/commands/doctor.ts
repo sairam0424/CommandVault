@@ -1,10 +1,10 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import ora from 'ora';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { access, readdir, readFile, constants } from 'node:fs/promises';
 import { createVaultInstance, type CliGlobalOptions } from '../helpers.js';
+import { createSpinner } from '../ui/spinner.js';
 
 interface CheckResult {
   readonly label: string;
@@ -235,7 +235,7 @@ export function createDoctorCommand(): Command {
       console.log('');
       const spinner = globalOpts.json
         ? null
-        : ora({ text: 'Testing vault scan pipeline...', indent: 2 }).start();
+        : createSpinner('Testing vault scan pipeline...', { indent: 2 }).start();
 
       let scanResult: CheckResult;
 

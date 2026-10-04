@@ -1,8 +1,8 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import ora from 'ora';
 import { importFromUrl } from '@commandvault/core';
 import { createVaultInstance, type CliGlobalOptions } from '../helpers.js';
+import { createSpinner } from '../ui/spinner.js';
 
 export function createSyncCommand(): Command {
   const cmd = new Command('sync')
@@ -18,7 +18,7 @@ export function createSyncCommand(): Command {
         process.exit(1);
       }
 
-      const spinner = globalOpts.json ? null : ora(`Fetching from ${url}...`).start();
+      const spinner = globalOpts.json ? null : createSpinner(`Fetching from ${url}...`).start();
       const result = await importFromUrl(url);
 
       if (result.errors.length > 0) {
