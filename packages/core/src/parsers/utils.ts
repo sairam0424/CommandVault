@@ -1,8 +1,15 @@
 import { createHash } from 'node:crypto';
 import { stat, realpath } from 'node:fs/promises';
 import { resolve, normalize } from 'node:path';
-import matter from 'gray-matter';
 import type { EntrySource, ParsedFrontmatter } from '../types/index.js';
+import {
+  parseStrict,
+  recoverFrontmatter,
+  type FrontmatterRecovery,
+  type ParsedFrontmatterResult,
+} from './frontmatter-recovery.js';
+
+export type { FrontmatterRecovery, ParsedFrontmatterResult };
 
 export function generateId(identifier: string): string {
   return createHash('sha256').update(identifier).digest('hex').slice(0, 12);
@@ -13,18 +20,14 @@ export function generateStableId(type: string, name: string, disambiguator = '')
   return generateId(key);
 }
 
-export function parseFrontmatter(raw: string): {
-  data: ParsedFrontmatter;
-  content: string;
-} {
-  const { data, content } = matter(raw, {
-    engines: {
-      javascript: { parse: () => ({}) },
-      coffee: { parse: () => ({}) },
-      js: { parse: () => ({}) },
-    },
-  });
-  return { data: data as ParsedFrontmatter, content: content.trim() };
+export function parseFrontmatter(raw: string): ParsedFrontmatterResult {
+  try {
+    return parseStrict(raw);
+  } catch (strictError) {
+    const recovered = recoverFrontmatter(raw);
+    if (!recovered) throw strictError;
+    return { ...recovered, recoveryCause: strictError };
+  }
 }
 
 export async function getLastModified(filePath: string): Promise<Date> {
