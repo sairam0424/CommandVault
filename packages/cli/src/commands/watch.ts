@@ -1,8 +1,8 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import ora from 'ora';
 import { createVault, type VaultEntry, type SearchTier } from '@commandvault/core';
 import type { CliGlobalOptions } from '../helpers.js';
+import { createSpinner } from '../ui/spinner.js';
 
 function timestamp(): string {
   const now = new Date();
@@ -18,7 +18,9 @@ export function createWatchCommand(): Command {
     .action(async (_opts: unknown, command: Command) => {
       const globalOpts = command.optsWithGlobals() as CliGlobalOptions;
 
-      const spinner = globalOpts.json ? null : ora('Initializing vault in watch mode...').start();
+      const spinner = globalOpts.json
+        ? null
+        : createSpinner('Initializing vault in watch mode...').start();
 
       const vault = createVault({
         claudeConfigPath: globalOpts.claudePath,

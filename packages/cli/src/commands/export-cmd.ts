@@ -2,10 +2,10 @@ import { Command } from 'commander';
 import { stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import chalk from 'chalk';
-import ora from 'ora';
 import type { VaultEntry, EntryType, EntrySource } from '@commandvault/core';
 import { exportToFile } from '@commandvault/core';
 import { createVaultInstance, type CliGlobalOptions } from '../helpers.js';
+import { createSpinner } from '../ui/spinner.js';
 
 export function createExportCommand(): Command {
   const cmd = new Command('export')
@@ -32,7 +32,9 @@ export function createExportCommand(): Command {
         }
 
         const resolvedPath = resolve(outputPath);
-        const writeSpinner = globalOpts.json ? null : ora('Writing export file...').start();
+        const writeSpinner = globalOpts.json
+          ? null
+          : createSpinner('Writing export file...').start();
 
         const sourceName = [
           'commandvault-cli',

@@ -1,6 +1,5 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import ora from 'ora';
 import { execFileSync } from 'node:child_process';
 import { accessSync, constants } from 'node:fs';
 import { resolve } from 'node:path';
@@ -14,6 +13,7 @@ import {
   type CliGlobalOptions,
 } from '../helpers.js';
 import { loadConfig } from '../config.js';
+import { createSpinner } from '../ui/spinner.js';
 
 type ActionChoice = 'copy' | 'open' | 'again' | 'exit';
 
@@ -47,7 +47,7 @@ async function runLegacyMode(globalOpts: CliGlobalOptions): Promise<void> {
     defaultSearchTier: globalOpts.tier ?? config.searchTier,
     enableWatcher: false,
   });
-  const spinner = ora('Initializing vault...').start();
+  const spinner = createSpinner('Initializing vault...').start();
   try {
     const stats = await vault.initialize();
     spinner.succeed(`Vault loaded: ${stats.totalEntries} entries indexed`);
@@ -124,7 +124,7 @@ async function runTuiMode(globalOpts: CliGlobalOptions): Promise<void> {
   const { render } = await import('ink');
   const { App } = await import('../tui/App.js');
   const config = await loadConfig();
-  const spinner = ora('Initializing vault...').start();
+  const spinner = createSpinner('Initializing vault...').start();
 
   const vault = createVault({
     claudeConfigPath: globalOpts.claudePath ?? config.claudeConfigPath,

@@ -1,5 +1,4 @@
 import chalk from 'chalk';
-import ora from 'ora';
 import {
   createVault,
   type Vault,
@@ -8,6 +7,7 @@ import {
   type SearchTier,
 } from '@commandvault/core';
 import { loadConfig } from './config.js';
+import { createSpinner } from './ui/spinner.js';
 
 export interface CliGlobalOptions {
   readonly claudePath?: string;
@@ -33,7 +33,7 @@ export function jsonOutput(data: unknown): void {
 
 export async function createVaultInstance(options: CliGlobalOptions) {
   const config = await loadConfig();
-  const spinner = options.json ? null : ora('Initializing vault...').start();
+  const spinner = options.json ? null : createSpinner('Initializing vault...').start();
 
   try {
     const vault = createVault({

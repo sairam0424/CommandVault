@@ -1,9 +1,9 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import ora from 'ora';
 import Table from 'cli-table3';
 import { importFromFile, importFromUrl } from '@commandvault/core';
 import { createVaultInstance, typeEmoji, typeColor, type CliGlobalOptions } from '../helpers.js';
+import { createSpinner } from '../ui/spinner.js';
 
 export function createImportCommand(): Command {
   const cmd = new Command('import')
@@ -13,7 +13,7 @@ export function createImportCommand(): Command {
     .action(async (source: string, opts: { dryRun?: boolean }, command) => {
       const globalOpts = command.optsWithGlobals() as CliGlobalOptions;
 
-      const spinner = globalOpts.json ? null : ora('Importing entries...').start();
+      const spinner = globalOpts.json ? null : createSpinner('Importing entries...').start();
 
       const isUrl = source.startsWith('http://') || source.startsWith('https://');
       const result = isUrl ? await importFromUrl(source) : await importFromFile(source);
