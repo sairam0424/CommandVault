@@ -83,8 +83,9 @@ function writeChildProject(project: string, body: string, pool: string): void {
 }
 
 function runChild(scenario: Scenario): Promise<ChildRun> {
-  // Vite resolves symlinks (/tmp is one on macOS); a canonical root keeps the test file inside it.
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'cv-sentinel-selftest-')));
+  // Vite resolves symlinks (/tmp is one on macOS) and Windows 8.3 short names (RUNNER~1); a canonical
+  // root keeps the test file inside it.
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cv-sentinel-selftest-')));
   const realHome = join(root, 'real-home');
   const project = join(root, 'project');
   const seenHomeFile = join(root, 'seen-home.txt');

@@ -116,7 +116,7 @@ describe.each(RESOLVERS)('$name', ({ resolver, variable, folder }) => {
     vi.stubEnv('HOME', '');
     vi.stubEnv('USERPROFILE', '');
 
-    expect(homedir()).toBe('');
+    if (process.platform !== 'win32') expect(homedir()).toBe('');
     expect(isAbsolute(resolver())).toBe(true);
     expect(resolver()).toBe(join(userInfo().homedir, folder));
     expect(resolver({ [variable]: '~/elsewhere' })).toBe(join(userInfo().homedir, 'elsewhere'));
@@ -146,5 +146,26 @@ describe('the two resolvers are independent', () => {
     expect(resolveDataDir({ CLAUDE_CONFIG_DIR: env.CLAUDE_CONFIG_DIR })).toBe(
       join(homedir(), '.commandvault'),
     );
+  });
+});
+
+describe('when os.homedir() itself throws', () => {
+  afterEach(() => {
+    vi.doUnmock('node:os');
+    vi.resetModules();
+  });
+
+  it('falls back to the account home instead of throwing (Windows without USERPROFILE)', async () => {
+    vi.resetModules();
+    vi.doMock('node:os', async (importOriginal) => ({
+      ...(await importOriginal<typeof import('node:os')>()),
+      homedir: () => {
+        throw new Error('uv_os_homedir returned ENOENT (no such file or directory)');
+      },
+    }));
+    const paths = await import('../paths.js');
+
+    expect(paths.resolveDataDir({})).toBe(join(userInfo().homedir, '.commandvault'));
+    expect(paths.resolveClaudeDir({})).toBe(join(userInfo().homedir, '.claude'));
   });
 });

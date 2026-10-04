@@ -24,7 +24,13 @@ const HOME_SHORTHAND = '~';
  * path relative to the current directory. Treat an empty HOME like an unset one.
  */
 function userHome(): string {
-  return homedir() || userInfo().homedir;
+  try {
+    const home = homedir();
+    if (home) return home;
+  } catch {
+    // Windows throws ENOENT from os.homedir() when USERPROFILE is unset or empty.
+  }
+  return userInfo().homedir;
 }
 
 /** `~` or `~/x` (and `~\x` where the separator is a backslash) refer to the home directory. */
