@@ -1,17 +1,14 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname } from 'node:path';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { RegistryManager } from '@commandvault/core';
 import type { RegistryConfig } from '@commandvault/core';
-
-const CONFIG_DIR = join(homedir(), '.commandvault');
-const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
+import { configFilePath } from '../config.js';
 
 async function loadRegistries(): Promise<readonly RegistryConfig[]> {
   try {
-    const raw = await readFile(CONFIG_PATH, 'utf-8');
+    const raw = await readFile(configFilePath(), 'utf-8');
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     const registries = parsed.registries;
     if (!Array.isArray(registries)) return [];
@@ -22,16 +19,17 @@ async function loadRegistries(): Promise<readonly RegistryConfig[]> {
 }
 
 async function saveRegistries(registries: readonly RegistryConfig[]): Promise<void> {
-  await mkdir(CONFIG_DIR, { recursive: true });
+  const path = configFilePath();
+  await mkdir(dirname(path), { recursive: true });
   let existing: Record<string, unknown> = {};
   try {
-    const raw = await readFile(CONFIG_PATH, 'utf-8');
+    const raw = await readFile(path, 'utf-8');
     existing = JSON.parse(raw) as Record<string, unknown>;
   } catch {
     // file doesn't exist yet
   }
   const updated = { ...existing, registries };
-  await writeFile(CONFIG_PATH, JSON.stringify(updated, null, 2), 'utf-8');
+  await writeFile(path, JSON.stringify(updated, null, 2), 'utf-8');
 }
 
 function buildManager(configs: readonly RegistryConfig[]): RegistryManager {

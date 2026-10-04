@@ -1,28 +1,22 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { writeFile, rm, mkdtemp } from 'node:fs/promises';
+import { mkdir, writeFile, rm, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-
-vi.mock('node:os', async () => {
-  const actual = await vi.importActual<typeof import('node:os')>('node:os');
-  return {
-    ...actual,
-    homedir: () => _testHomeDir,
-  };
-});
-
-let _testHomeDir: string;
 
 describe('loadConfig', () => {
   let tmpDir: string;
 
   beforeEach(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'vault-loadconfig-test-'));
-    _testHomeDir = tmpDir;
+    // The data directory and `~` are resolved when loadConfig runs, so point them at the temp dir.
+    vi.stubEnv('HOME', tmpDir);
+    vi.stubEnv('USERPROFILE', tmpDir);
+    vi.stubEnv('COMMANDVAULT_HOME', '');
     vi.resetModules();
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await rm(tmpDir, { recursive: true, force: true });
     vi.restoreAllMocks();
   });
@@ -34,7 +28,6 @@ describe('loadConfig', () => {
       JSON.stringify({ searchTier: 'sqlite', enableWatcher: false }),
       { recursive: true } as any,
     ).catch(async () => {
-      const { mkdir } = await import('node:fs/promises');
       await mkdir(configDir, { recursive: true });
       await writeFile(
         join(configDir, 'config.json'),
@@ -56,7 +49,6 @@ describe('loadConfig', () => {
 
   it('returns empty config and warns on invalid JSON', async () => {
     const configDir = join(tmpDir, '.commandvault');
-    const { mkdir } = await import('node:fs/promises');
     await mkdir(configDir, { recursive: true });
     await writeFile(join(configDir, 'config.json'), '{not valid json!!!');
 
@@ -71,7 +63,6 @@ describe('loadConfig', () => {
 
   it('ignores unknown config keys', async () => {
     const configDir = join(tmpDir, '.commandvault');
-    const { mkdir } = await import('node:fs/promises');
     await mkdir(configDir, { recursive: true });
     await writeFile(
       join(configDir, 'config.json'),
@@ -86,7 +77,6 @@ describe('loadConfig', () => {
 
   it('expands ~ in claudeConfigPath', async () => {
     const configDir = join(tmpDir, '.commandvault');
-    const { mkdir } = await import('node:fs/promises');
     await mkdir(configDir, { recursive: true });
     await writeFile(
       join(configDir, 'config.json'),
@@ -100,12 +90,45 @@ describe('loadConfig', () => {
 
   it('rejects invalid searchTier values', async () => {
     const configDir = join(tmpDir, '.commandvault');
-    const { mkdir } = await import('node:fs/promises');
     await mkdir(configDir, { recursive: true });
     await writeFile(join(configDir, 'config.json'), JSON.stringify({ searchTier: 'invalid-tier' }));
 
     const { loadConfig } = await import('../config.js');
     const config = await loadConfig();
     expect(config.searchTier).toBeUndefined();
+  });
+  it('reads config.json from COMMANDVAULT_HOME instead of <HOME>/.commandvault', async () => {
+    const dataDir = join(tmpDir, 'elsewhere');
+    await mkdir(dataDir, { recursive: true });
+    await writeFile(join(dataDir, 'config.json'), JSON.stringify({ searchTier: 'sqlite' }));
+    await mkdir(join(tmpDir, '.commandvault'), { recursive: true });
+    await writeFile(
+      join(tmpDir, '.commandvault', 'config.json'),
+      JSON.stringify({ searchTier: 'fuse' }),
+    );
+    vi.stubEnv('COMMANDVAULT_HOME', dataDir);
+
+    const { loadConfig } = await import('../config.js');
+    const config = await loadConfig();
+
+    expect(config.searchTier).toBe('sqlite');
+  });
+
+  it('resolves the data directory on every call, not when the module is imported', async () => {
+    const first = join(tmpDir, 'first');
+    const second = join(tmpDir, 'second');
+    await mkdir(first, { recursive: true });
+    await mkdir(second, { recursive: true });
+    await writeFile(join(first, 'config.json'), JSON.stringify({ searchTier: 'fuse' }));
+    await writeFile(join(second, 'config.json'), JSON.stringify({ searchTier: 'sqlite' }));
+
+    const { loadConfig, configFilePath } = await import('../config.js');
+    vi.stubEnv('COMMANDVAULT_HOME', first);
+    expect((await loadConfig()).searchTier).toBe('fuse');
+    expect(configFilePath()).toBe(join(first, 'config.json'));
+
+    vi.stubEnv('COMMANDVAULT_HOME', second);
+    expect((await loadConfig()).searchTier).toBe('sqlite');
+    expect(configFilePath()).toBe(join(second, 'config.json'));
   });
 });

@@ -48,14 +48,24 @@ export interface JsonEntry {
   readonly type: string;
 }
 
+export interface SandboxOptions {
+  /** Point COMMANDVAULT_HOME at a directory that is NOT under the sandbox HOME. */
+  readonly separateDataDir?: boolean;
+  /** Point CLAUDE_CONFIG_DIR at `altClaudeDir` instead of leaving the default `<home>/.claude`. */
+  readonly claudeConfigDirFromEnv?: boolean;
+}
+
 export interface Sandbox {
   readonly home: string;
+  /** Where the CLI keeps vault.db, config.json and backups for this sandbox. */
+  readonly dataDir: string;
   readonly workDir: string;
   /** A second config directory holding one skill that exists nowhere else. */
   readonly altClaudeDir: string;
   /** Receives the arguments the fake $EDITOR was launched with (POSIX only). */
   readonly editorLog: string;
-  run(args: readonly string[]): RunResult;
+  /** `env` adds to (and overrides) the sandbox environment for this one run. */
+  run(args: readonly string[], env?: Readonly<Record<string, string>>): RunResult;
   /** Starts a long-running command and stops it as soon as `marker` shows up on stdout. */
   runUntil(
     args: readonly string[],
@@ -111,7 +121,11 @@ function writeFixtures(claudeDir: string, altClaudeDir: string): void {
 }
 
 /** `os.homedir()` reads HOME on POSIX and USERPROFILE on Windows; point both at the sandbox. */
-function sandboxEnv(home: string, editorStub: string): NodeJS.ProcessEnv {
+function sandboxEnv(
+  home: string,
+  editorStub: string,
+  extra: Readonly<Record<string, string>>,
+): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     PATH: process.env['PATH'],
     HOME: home,
@@ -119,6 +133,7 @@ function sandboxEnv(home: string, editorStub: string): NodeJS.ProcessEnv {
     EDITOR: editorStub,
     NO_COLOR: '1',
     CI: '1',
+    ...extra,
   };
   for (const key of ['SystemRoot', 'TEMP', 'TMP']) {
     const value = process.env[key];
@@ -182,7 +197,7 @@ function runUntilMarker(
   });
 }
 
-export function createSandbox(): Sandbox {
+export function createSandbox(options: SandboxOptions = {}): Sandbox {
   if (!existsSync(CLI)) {
     throw new Error(`Built CLI not found at ${CLI}. Run \`pnpm build\` before the e2e tests.`);
   }
@@ -199,13 +214,19 @@ export function createSandbox(): Sandbox {
   if (!IS_WINDOWS) chmodSync(editorStub, 0o755);
   writeFixtures(join(home, '.claude'), altClaudeDir);
 
-  const env = sandboxEnv(home, editorStub);
+  const dataDir = options.separateDataDir ? join(root, 'data') : join(home, '.commandvault');
+  const extraEnv: Record<string, string> = {};
+  if (options.separateDataDir) extraEnv['COMMANDVAULT_HOME'] = dataDir;
+  if (options.claudeConfigDirFromEnv) extraEnv['CLAUDE_CONFIG_DIR'] = altClaudeDir;
+
+  const env = sandboxEnv(home, editorStub, extraEnv);
   return {
     home,
+    dataDir,
     workDir,
     altClaudeDir,
     editorLog,
-    run: (args) => runToCompletion(args, workDir, env),
+    run: (args, overrides) => runToCompletion(args, workDir, { ...env, ...overrides }),
     runUntil: (args, marker, timeoutMs) => runUntilMarker(args, marker, timeoutMs, workDir, env),
     dispose: () => rmSync(root, { recursive: true, force: true, maxRetries: 3 }),
   };

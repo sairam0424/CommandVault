@@ -1,5 +1,4 @@
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import type {
   VaultEntry,
@@ -13,6 +12,7 @@ import type {
   ParserResult,
   ParseError,
 } from './types/index.js';
+import { resolveClaudeDir, resolveDataDir } from './paths.js';
 import { detectAgentConfigs } from './parsers/index.js';
 import { ParserRegistry, getDefaultRegistry, registerBuiltinParsers } from './parsers/index.js';
 import { parseSingleFile, isSingleFileParseable } from './parsers/single-file-parser.js';
@@ -26,9 +26,8 @@ import {
   runParserSafely,
 } from './scan-pipeline.js';
 
-const DEFAULT_CLAUDE_PATH = join(homedir(), '.claude');
-const DEFAULT_DB_DIR = join(homedir(), '.commandvault');
-const DEFAULT_DB_PATH = join(DEFAULT_DB_DIR, 'vault.db');
+const DB_FILE_NAME = 'vault.db';
+const PRIVATE_DIR_MODE = 0o700;
 
 const DEBOUNCE_MS = 500;
 const IMPORT_PARSER = 'import';
@@ -50,8 +49,8 @@ export class Vault {
 
   constructor(config?: Partial<VaultConfig>) {
     this.config = {
-      claudeConfigPath: config?.claudeConfigPath ?? DEFAULT_CLAUDE_PATH,
-      dbPath: config?.dbPath ?? DEFAULT_DB_PATH,
+      claudeConfigPath: config?.claudeConfigPath ?? resolveClaudeDir(),
+      dbPath: config?.dbPath ?? join(resolveDataDir(), DB_FILE_NAME),
       enableWatcher: config?.enableWatcher ?? true,
       defaultSearchTier: config?.defaultSearchTier ?? 'minisearch',
     };
@@ -82,7 +81,7 @@ export class Vault {
   }
 
   async initialize(): Promise<VaultStats> {
-    await mkdir(DEFAULT_DB_DIR, { recursive: true, mode: 0o700 });
+    await mkdir(dirname(this.config.dbPath), { recursive: true, mode: PRIVATE_DIR_MODE });
     this.searchEngine = await SearchEngine.create(
       this.config.dbPath,
       this.config.defaultSearchTier,

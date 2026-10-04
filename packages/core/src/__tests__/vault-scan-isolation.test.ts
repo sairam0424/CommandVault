@@ -7,9 +7,9 @@ import type { ParserPlugin } from '../parsers/parser-registry.js';
 import type { ParserResult, VaultEntry } from '../types/index.js';
 
 /**
- * These tests drive a real Vault end to end. Vault captures the home directory in module-level
- * constants and the default parser registry is a process-wide singleton, so every test stubs
- * HOME/USERPROFILE to a temp dir and re-imports a fresh copy of the module.
+ * These tests drive a real Vault end to end. The default parser registry is a process-wide
+ * singleton, so every test re-imports a fresh copy of the module, and HOME/USERPROFILE point at a
+ * temp dir so nothing a test does can resolve to the developer's real home.
  */
 
 interface VaultInternals {

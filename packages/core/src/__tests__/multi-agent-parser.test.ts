@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { join } from 'node:path';
 import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -187,10 +187,13 @@ describe('detectAgentConfigs — Aider', () => {
 // ---------------------------------------------------------------------------
 describe('detectAgentConfigs — Continue', () => {
   let projectRoot: string;
+  let fakeHome: string;
 
   beforeAll(async () => {
     projectRoot = join(tempDir, 'continue-project');
-    const continueDir = join(tempDir, 'fake-home-continue', '.continue');
+    fakeHome = join(tempDir, 'fake-home-continue');
+    const continueDir = join(fakeHome, '.continue');
+    await mkdir(projectRoot, { recursive: true });
     await mkdir(continueDir, { recursive: true });
     await writeFile(
       join(continueDir, 'config.json'),
@@ -206,17 +209,36 @@ describe('detectAgentConfigs — Continue', () => {
     );
   });
 
-  it('parses continue config.json with correct metadata', async () => {
-    // This test verifies parsing of a Continue config when present in the homedir.
-    // Since the parser uses homedir(), we test structure expectations via a real
-    // homedir-based detection attempt. The entry may not exist if ~/.continue/config.json
-    // is absent, so we verify no crash and correct result shape.
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('parses ~/.continue/config.json from the current home directory', async () => {
+    // The parser reads the global config through homedir() when it runs, so pointing HOME at a
+    // fixture is enough; the real home is never consulted.
+    vi.stubEnv('HOME', fakeHome);
+    vi.stubEnv('USERPROFILE', fakeHome);
+
+    const result = await detectAgentConfigs(projectRoot);
+    const entry = result.entries.find((e) => e.source === 'continue');
+
+    expect(result.errors).toHaveLength(0);
+    expect(entry).toBeDefined();
+    expect(entry!.type).toBe('rule');
+    expect(entry!.name).toBe('Continue.dev Config');
+    expect(entry!.filePath).toBe(join(fakeHome, '.continue', 'config.json'));
+    expect(entry!.content).toContain('codellama');
+  });
+
+  it('finds no Continue config when the home directory has none', async () => {
+    const emptyHome = join(tempDir, 'empty-home-continue');
+    await mkdir(emptyHome, { recursive: true });
+    vi.stubEnv('HOME', emptyHome);
+    vi.stubEnv('USERPROFILE', emptyHome);
+
     const result = await detectAgentConfigs(projectRoot);
 
-    expect(result).toHaveProperty('entries');
-    expect(result).toHaveProperty('errors');
-    expect(Array.isArray(result.entries)).toBe(true);
-    expect(Array.isArray(result.errors)).toBe(true);
+    expect(result.entries.filter((e) => e.source === 'continue')).toHaveLength(0);
   });
 });
 

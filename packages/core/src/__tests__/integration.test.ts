@@ -1,37 +1,43 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { Vault, createVault } from '../vault.js';
+import { SYNTHETIC_ENTRY_COUNT, buildSyntheticClaudeDir } from './synthetic-claude-dir.js';
 
-const CLAUDE_DIR = join(homedir(), '.claude');
-const HAS_CLAUDE_DIR = existsSync(CLAUDE_DIR);
-
-describe.skipIf(!HAS_CLAUDE_DIR)('Integration: Vault against real ~/.claude', () => {
+// This suite used to scan the developer's own ~/.claude and assert more than 200 entries, so it
+// failed on any machine (or sandbox) without a large personal configuration and read real data.
+// It now scans a synthetic directory of a comparable size that it builds itself.
+describe('Integration: Vault against a synthetic Claude directory', () => {
   let vault: Vault;
-  let tempDbDir: string;
+  let workDir: string;
 
   beforeAll(async () => {
-    tempDbDir = await mkdtemp(join(tmpdir(), 'commandvault-test-'));
+    workDir = await mkdtemp(join(tmpdir(), 'commandvault-test-'));
+    const claudeDir = join(workDir, 'claude');
+    const projectRoot = join(workDir, 'project');
+    await mkdir(projectRoot, { recursive: true });
+    await buildSyntheticClaudeDir(claudeDir);
+
     vault = createVault({
-      claudeConfigPath: CLAUDE_DIR,
-      dbPath: join(tempDbDir, 'vault.db'),
+      claudeConfigPath: claudeDir,
+      dbPath: join(workDir, 'vault.db'),
       enableWatcher: false,
       defaultSearchTier: 'minisearch',
+      projectRoot,
     });
     await vault.initialize();
   });
 
   afterAll(async () => {
     await vault.dispose();
-    await rm(tempDbDir, { recursive: true, force: true });
+    await rm(workDir, { recursive: true, force: true });
   });
 
   it('indexes a significant number of entries (>200)', () => {
     const entries = vault.getAllEntries();
     expect(entries.length).toBeGreaterThan(200);
+    expect(entries.length).toBe(SYNTHETIC_ENTRY_COUNT);
   });
 
   it('contains entries of common types (skill, command, rule, hook)', () => {
@@ -40,7 +46,7 @@ describe.skipIf(!HAS_CLAUDE_DIR)('Integration: Vault against real ~/.claude', ()
     expect(types.has('command')).toBe(true);
     expect(types.has('rule')).toBe(true);
     expect(types.has('hook')).toBe(true);
-    // agent and plugin may not be present depending on the user's config
+    expect(types.has('agent')).toBe(true);
   });
 
   it('search returns results for "review"', () => {
@@ -81,10 +87,8 @@ describe.skipIf(!HAS_CLAUDE_DIR)('Integration: Vault against real ~/.claude', ()
 
   it('getStats returns valid VaultStats', () => {
     const stats = vault.getStats();
-    expect(stats.totalEntries).toBeGreaterThan(200);
+    expect(stats.totalEntries).toBe(SYNTHETIC_ENTRY_COUNT);
     expect(stats.byType).toBeDefined();
-    // Only assert types that are guaranteed to exist; others may be absent
-    // depending on the user's local ~/.claude configuration
     const typeEntries = Object.entries(stats.byType);
     expect(typeEntries.length).toBeGreaterThan(0);
     for (const [typeName, count] of typeEntries) {

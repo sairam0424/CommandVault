@@ -2,13 +2,12 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, dirname } from 'node:path';
-
-const CONFIG_PATH = join(homedir(), '.commandvault', 'config.json');
+import { dirname } from 'node:path';
+import { configFilePath } from '../config.js';
 
 async function readConfig(): Promise<Record<string, unknown>> {
   try {
-    const raw = await readFile(CONFIG_PATH, 'utf-8');
+    const raw = await readFile(configFilePath(), 'utf-8');
     return JSON.parse(raw) as Record<string, unknown>;
   } catch {
     return {};
@@ -16,8 +15,9 @@ async function readConfig(): Promise<Record<string, unknown>> {
 }
 
 async function writeConfig(config: Record<string, unknown>): Promise<void> {
-  await mkdir(dirname(CONFIG_PATH), { recursive: true });
-  await writeFile(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+  const path = configFilePath();
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, JSON.stringify(config, null, 2) + '\n', 'utf-8');
 }
 
 function parseValue(raw: string): unknown {
@@ -117,4 +117,4 @@ export function createConfigCommand(): Command {
   return cmd;
 }
 
-export { readConfig, writeConfig, parseValue, CONFIG_PATH };
+export { readConfig, writeConfig, parseValue };
