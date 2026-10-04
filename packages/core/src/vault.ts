@@ -19,12 +19,20 @@ import { parseSingleFile, isSingleFileParseable } from './parsers/single-file-pa
 import { SearchEngine } from './indexer/search-engine.js';
 import { VaultWatcher, type WatcherCallback } from './watcher/index.js';
 import { routePathToParser, type ParserType } from './watcher/path-router.js';
+import {
+  dedupeEntriesById,
+  hasDuplicateIdError,
+  partitionValidEntries,
+  runParserSafely,
+} from './scan-pipeline.js';
 
 const DEFAULT_CLAUDE_PATH = join(homedir(), '.claude');
 const DEFAULT_DB_DIR = join(homedir(), '.commandvault');
 const DEFAULT_DB_PATH = join(DEFAULT_DB_DIR, 'vault.db');
 
 const DEBOUNCE_MS = 500;
+const IMPORT_PARSER = 'import';
+const AGENT_CONFIG_PARSER = 'agent-configs';
 
 export class Vault {
   private readonly config: VaultConfig;
@@ -106,29 +114,36 @@ export class Vault {
     if (!plugin) {
       return () => Promise.resolve({ entries: [], errors: [] });
     }
-    return () => plugin.parse(this.getParserPath(parserType));
+    const path = this.getParserPath(parserType);
+    return () => runParserSafely(parserType, path, () => plugin.parse(path));
+  }
+
+  /** The parser an error belongs to: its explicit tag, else the parser that owns its file path. */
+  private errorParser(error: ParseError): string | null {
+    return error.parser ?? routePathToParser(error.filePath, this.config.claudeConfigPath);
   }
 
   async scan(): Promise<void> {
     return this.withScanLock(async () => {
       const oldEntries = [...this.entries];
 
-      const parserPromises = this.registry
-        .getAllPlugins()
-        .map((plugin) => plugin.parse(this.getParserPath(plugin.type)));
-      parserPromises.push(detectAgentConfigs(this.config.projectRoot ?? process.cwd()));
+      const projectRoot = this.config.projectRoot ?? process.cwd();
+      const runs = this.registry.getAllPlugins().map((plugin) => {
+        const path = this.getParserPath(plugin.type);
+        return runParserSafely(plugin.type, path, () => plugin.parse(path));
+      });
+      runs.push(
+        runParserSafely(AGENT_CONFIG_PARSER, projectRoot, () => detectAgentConfigs(projectRoot)),
+      );
 
-      const results = await Promise.all(parserPromises);
+      const results = await Promise.all(runs);
+      const unique = dedupeEntriesById(results.flatMap((result) => result.entries));
+      const allErrors: ParseError[] = [
+        ...results.flatMap((result) => result.errors),
+        ...unique.errors,
+      ];
 
-      const allEntries: VaultEntry[] = [];
-      const allErrors: ParseError[] = [];
-
-      for (const result of results) {
-        allEntries.push(...result.entries);
-        allErrors.push(...result.errors);
-      }
-
-      this.entries = [...allEntries].sort((a, b) => a.id.localeCompare(b.id));
+      this.entries = [...unique.entries].sort((a, b) => a.id.localeCompare(b.id));
       this.scanErrors = allErrors;
       this.getSearchEngine().index(this.entries);
 
@@ -261,14 +276,36 @@ export class Vault {
     }
   }
 
+  /**
+   * Adds imported records to the vault and returns how many of them ended up in it. Records that
+   * fail validation are reported as "import" ParseErrors. Ids stay unique: when an imported record
+   * shares an id with an existing entry, the one whose filePath sorts first wins. An import that
+   * sorts first therefore replaces the existing (e.g. scanned) entry, which is dropped and reported
+   * only as a "duplicate id" ParseError; the return value counts the import, not the replacement.
+   * An import that loses is reported the same way and is not counted.
+   */
   async addEntries(newEntries: readonly VaultEntry[]): Promise<number> {
     return this.withScanLock(async () => {
-      const oldEntries = [...this.entries];
-      this.entries = [...this.entries, ...newEntries];
-      this.getSearchEngine().index(this.entries);
-      this.diffAndEmit(oldEntries, this.entries);
-      this.emit('scan:complete', this.getStats());
-      return newEntries.length;
+      const { valid, errors: rejected } = partitionValidEntries(newEntries, IMPORT_PARSER);
+      const unique = dedupeEntriesById([...this.entries, ...valid]);
+      const survivors = new Set<VaultEntry>(unique.entries);
+      const accepted = valid.filter((entry) => survivors.has(entry)).length;
+
+      const errors = [...rejected, ...unique.errors];
+      this.scanErrors = [...this.scanErrors, ...errors];
+
+      if (accepted > 0) {
+        const oldEntries = [...this.entries];
+        this.entries = unique.entries;
+        this.getSearchEngine().index(this.entries);
+        this.diffAndEmit(oldEntries, this.entries);
+        this.emit('scan:complete', this.getStats());
+      }
+
+      for (const error of errors) {
+        this.emit('error', error);
+      }
+      return accepted;
     });
   }
 
@@ -302,15 +339,14 @@ export class Vault {
       const result = await this.getParserFn(parserType)();
 
       const kept = this.entries.filter((e) => e.type !== parserType);
-      this.entries = [...kept, ...result.entries];
+      const unique = dedupeEntriesById([...kept, ...result.entries]);
+      this.entries = unique.entries;
 
-      const keptErrors = this.scanErrors.filter((e) => {
-        const errorType = routePathToParser(e.filePath, this.config.claudeConfigPath);
-        return errorType !== parserType;
-      });
-      this.scanErrors = [...keptErrors, ...result.errors];
+      const keptErrors = this.scanErrors.filter((e) => this.errorParser(e) !== parserType);
+      const newErrors = [...result.errors, ...unique.errors];
+      this.scanErrors = [...keptErrors, ...newErrors];
 
-      for (const error of result.errors) {
+      for (const error of newErrors) {
         this.emit('error', error);
       }
 
@@ -362,55 +398,64 @@ export class Vault {
       const fullReparseTypes: ParserType[] = [];
 
       for (const [parserType, paths] of snapshot) {
-        if (paths.size === 1 && isSingleFileParseable(parserType)) {
-          singleFileTypes.push(parserType);
-        } else {
-          fullReparseTypes.push(parserType);
-        }
+        // A type with a dropped duplicate must be re-read in full: the loser is no longer in
+        // this.entries, so a single-file update cannot bring it back when the winner goes away.
+        const canUpdateOneFile =
+          paths.size === 1 &&
+          isSingleFileParseable(parserType) &&
+          !hasDuplicateIdError(this.scanErrors, parserType);
+        (canUpdateOneFile ? singleFileTypes : fullReparseTypes).push(parserType);
       }
 
       for (const parserType of singleFileTypes) {
-        const filePath = [...snapshot.get(parserType)!][0];
-        const entry = await parseSingleFile(filePath, parserType);
-        if (entry) {
-          const existed = this.entries.some((e) => e.filePath === filePath);
-          this.entries = existed
-            ? this.entries.map((e) => (e.filePath === filePath ? entry : e))
-            : [...this.entries, entry];
-        } else {
-          this.entries = this.entries.filter((e) => e.filePath !== filePath);
-        }
-        this.scanErrors = this.scanErrors.filter((e) => e.filePath !== filePath);
+        await this.applySingleFileChange([...snapshot.get(parserType)!][0], parserType);
       }
+      const reparseErrors = await this.applyFullReparse(fullReparseTypes);
 
-      if (fullReparseTypes.length > 0) {
-        const results = await Promise.all(fullReparseTypes.map((pt) => this.getParserFn(pt)()));
-        const typesToReplace = new Set(fullReparseTypes);
-        const kept = this.entries.filter((e) => !typesToReplace.has(e.type as ParserType));
-        const newEntries: VaultEntry[] = [];
-        const newErrors: ParseError[] = [];
-
-        for (const result of results) {
-          newEntries.push(...result.entries);
-          newErrors.push(...result.errors);
-        }
-
-        this.entries = [...kept, ...newEntries];
-        const keptErrors = this.scanErrors.filter((e) => {
-          const errorType = routePathToParser(e.filePath, this.config.claudeConfigPath);
-          return !typesToReplace.has(errorType as ParserType);
-        });
-        this.scanErrors = [...keptErrors, ...newErrors];
-
-        for (const error of newErrors) {
-          this.emit('error', error);
-        }
+      const unique = dedupeEntriesById(this.entries);
+      this.entries = unique.entries;
+      this.scanErrors = [...this.scanErrors, ...unique.errors];
+      for (const error of [...reparseErrors, ...unique.errors]) {
+        this.emit('error', error);
       }
 
       this.getSearchEngine().index(this.entries);
       this.diffAndEmit(oldEntries, this.entries);
       this.emit('scan:complete', this.getStats());
     });
+  }
+
+  private async applySingleFileChange(filePath: string, parserType: ParserType): Promise<void> {
+    const entry = await parseSingleFile(filePath, parserType);
+    if (entry) {
+      const existed = this.entries.some((e) => e.filePath === filePath);
+      this.entries = existed
+        ? this.entries.map((e) => (e.filePath === filePath ? entry : e))
+        : [...this.entries, entry];
+    } else {
+      this.entries = this.entries.filter((e) => e.filePath !== filePath);
+    }
+    this.scanErrors = this.scanErrors.filter((e) => e.filePath !== filePath);
+  }
+
+  /** Re-reads whole parser types, replacing their entries and errors. Returns the new errors. */
+  private async applyFullReparse(parserTypes: readonly ParserType[]): Promise<ParseError[]> {
+    if (parserTypes.length === 0) return [];
+
+    const results = await Promise.all(parserTypes.map((pt) => this.getParserFn(pt)()));
+    const typesToReplace = new Set<string>(parserTypes);
+    const newErrors = results.flatMap((result) => result.errors);
+
+    this.entries = [
+      ...this.entries.filter((e) => !typesToReplace.has(e.type)),
+      ...results.flatMap((result) => result.entries),
+    ];
+    const keptErrors = this.scanErrors.filter((e) => {
+      const owner = this.errorParser(e);
+      return owner === null || !typesToReplace.has(owner);
+    });
+    this.scanErrors = [...keptErrors, ...newErrors];
+    return newErrors;
   }
 
   private diffAndEmit(oldEntries: readonly VaultEntry[], newEntries: readonly VaultEntry[]): void {

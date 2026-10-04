@@ -105,12 +105,79 @@ async function resolveManifest(
   return { manifest, resolvedPath: syntheticPath };
 }
 
+/** Epoch, not "now": an unknown date must stay stable across scans so it never looks modified. */
+const UNKNOWN_DATE = new Date(0);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function toValidDate(value: unknown): Date {
+  if (typeof value !== 'string' && typeof value !== 'number') return UNKNOWN_DATE;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? UNKNOWN_DATE : date;
+}
+
+type Installation = InstalledPlugins['plugins'][string][number];
+
+function firstInstallation(key: string, installations: unknown): Installation {
+  if (!Array.isArray(installations)) {
+    throw new Error(`registry entry "${key}" is not an array of installations`);
+  }
+  const install: unknown = installations[0];
+  if (!isRecord(install) || typeof install.installPath !== 'string') {
+    throw new Error(`registry entry "${key}" has no installation with a string installPath`);
+  }
+  return install as unknown as Installation;
+}
+
+async function buildPluginEntry(key: string, install: Installation): Promise<VaultEntry> {
+  const { manifest, resolvedPath } = await resolveManifest(
+    install.installPath,
+    key,
+    install.version,
+  );
+
+  const name = manifest.name ?? key.split('@')[0];
+  const description = manifest.description ?? '';
+  const source = inferSource(name, install.installPath);
+  const tags = extractTags(name, description, {
+    keywords: manifest.keywords,
+  });
+  const authorName = typeof manifest.author === 'string' ? manifest.author : manifest.author?.name;
+
+  return {
+    id: generateStableId('plugin', name, source),
+    name,
+    type: 'plugin',
+    source,
+    description,
+    filePath: resolvedPath,
+    tags,
+    metadata: {
+      version: manifest.version ?? install.version,
+      author: authorName,
+      homepage: manifest.homepage,
+      license: manifest.license,
+      scope: install.scope,
+      installedAt: install.installedAt,
+      registryKey: key,
+      skills: manifest.skills,
+      gitCommitSha: install.gitCommitSha,
+    },
+    content: JSON.stringify(manifest, null, 2),
+    lastModified: toValidDate(install.lastUpdated),
+    favorite: false,
+    usageCount: 0,
+  };
+}
+
 export async function parsePlugins(pluginsDir: string): Promise<ParserResult> {
   const entries: VaultEntry[] = [];
   const errors: ParseError[] = [];
 
   const registryPath = join(pluginsDir, 'installed_plugins.json');
-  let registry: InstalledPlugins;
+  let registry: unknown;
   try {
     const raw = await readFile(registryPath, 'utf-8');
     registry = JSON.parse(raw);
@@ -121,68 +188,37 @@ export async function parsePlugins(pluginsDir: string): Promise<ParserResult> {
     };
   }
 
+  if (!isRecord(registry) || !isRecord(registry.plugins)) {
+    return {
+      entries: [],
+      errors: [{ filePath: registryPath, message: 'Plugin registry has no "plugins" object' }],
+    };
+  }
+
   const parsePromises = Object.entries(registry.plugins).map(async ([key, installations]) => {
-    const install = installations[0];
-    if (!install) return;
-
-    // Path containment: block installPaths that escape the plugins directory
-    const normalizedInstall = normalize(resolve(install.installPath));
-    const normalizedPlugins = normalize(resolve(pluginsDir));
-    if (!normalizedInstall.startsWith(normalizedPlugins)) {
-      errors.push({
-        filePath: install.installPath,
-        message: `Blocked: installPath "${install.installPath}" is outside plugins directory`,
-      });
-      return;
-    }
-
+    // One malformed registry entry must cost only that plugin, never the whole registry.
+    let installPath = registryPath;
     try {
-      const { manifest, resolvedPath } = await resolveManifest(
-        install.installPath,
-        key,
-        install.version,
-      );
+      if (Array.isArray(installations) && installations.length === 0) return;
+      const install = firstInstallation(key, installations);
+      installPath = install.installPath;
 
-      const name = manifest.name ?? key.split('@')[0];
-      const description = manifest.description ?? '';
-      const source = inferSource(name, install.installPath);
-      const tags = extractTags(name, description, {
-        keywords: manifest.keywords,
-      });
-      const lastModified = new Date(install.lastUpdated);
+      // Path containment: block installPaths that escape the plugins directory
+      const normalizedInstall = normalize(resolve(install.installPath));
+      const normalizedPlugins = normalize(resolve(pluginsDir));
+      if (!normalizedInstall.startsWith(normalizedPlugins)) {
+        errors.push({
+          filePath: install.installPath,
+          message: `Blocked: installPath "${install.installPath}" is outside plugins directory`,
+        });
+        return;
+      }
 
-      const authorName =
-        typeof manifest.author === 'string' ? manifest.author : manifest.author?.name;
-
-      const entry: VaultEntry = {
-        id: generateStableId('plugin', name, source),
-        name,
-        type: 'plugin',
-        source,
-        description,
-        filePath: resolvedPath,
-        tags,
-        metadata: {
-          version: manifest.version ?? install.version,
-          author: authorName,
-          homepage: manifest.homepage,
-          license: manifest.license,
-          scope: install.scope,
-          installedAt: install.installedAt,
-          registryKey: key,
-          skills: manifest.skills,
-          gitCommitSha: install.gitCommitSha,
-        },
-        content: JSON.stringify(manifest, null, 2),
-        lastModified,
-        favorite: false,
-        usageCount: 0,
-      };
-      entries.push(entry);
+      entries.push(await buildPluginEntry(key, install));
     } catch (err) {
       errors.push({
-        filePath: install.installPath,
-        message: `Failed to parse plugin: ${(err as Error).message}`,
+        filePath: installPath,
+        message: `Failed to parse plugin "${key}": ${(err as Error).message}`,
         cause: err,
       });
     }

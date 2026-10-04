@@ -98,6 +98,12 @@ export interface ParseError {
   readonly filePath: string;
   readonly message: string;
   readonly cause?: unknown;
+  /**
+   * Parser the error is attributed to, when the path alone cannot say: a registered parser's type
+   * (built-in entry types and plugin parser types), "agent-configs" (project agent-config
+   * detection), or "import" (Vault.addEntries). A duplicate-id error carries the losing entry's type.
+   */
+  readonly parser?: string;
 }
 
 export interface VaultEventMap {

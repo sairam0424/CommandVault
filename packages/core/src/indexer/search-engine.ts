@@ -181,16 +181,21 @@ export class SearchEngine {
 
   private getFuse(): FuseEngine {
     if (!this.fuseEngine) {
-      this.fuseEngine = new FuseEngine();
-      this.fuseEngine.index(this.pendingEntries);
+      // Assign only after index() succeeds: a failed build must not be kept and served half-built.
+      const engine = new FuseEngine();
+      engine.index(this.pendingEntries);
+      this.fuseEngine = engine;
     }
     return this.fuseEngine;
   }
 
   private getMiniSearch(): MiniSearchEngine {
     if (!this.miniSearchEngine) {
-      this.miniSearchEngine = new MiniSearchEngine();
-      this.miniSearchEngine.index(this.pendingEntries);
+      // Assign only after index() succeeds: MiniSearch throws on a duplicate id partway through,
+      // and keeping that engine would silently answer later queries from a partial index.
+      const engine = new MiniSearchEngine();
+      engine.index(this.pendingEntries);
+      this.miniSearchEngine = engine;
     }
     return this.miniSearchEngine;
   }

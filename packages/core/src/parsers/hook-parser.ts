@@ -4,21 +4,83 @@ import type { VaultEntry, ParserResult, ParseError } from '../types/index.js';
 import { generateStableId, getLastModified, safePath } from './utils.js';
 
 interface HookDefinition {
-  readonly type: string;
+  readonly type?: string;
   readonly command: string;
   readonly timeout?: number;
 }
 
-interface HookMatcher {
-  readonly matcher: string;
-  readonly hooks: readonly HookDefinition[];
+/**
+ * Claude Code treats `matcher` as optional and an empty one like a missing one: the hook applies to
+ * every match. Both resolve to this value so they read the same in names, tags and descriptions.
+ */
+const MATCH_ALL_MATCHER = '*';
+
+/** Explicit non-empty matchers are kept verbatim; absent, non-string, empty or blank mean match-all. */
+function resolveMatcher(matcher: unknown): string {
+  return typeof matcher === 'string' && matcher.trim() !== '' ? matcher : MATCH_ALL_MATCHER;
 }
 
-interface SettingsJson {
-  readonly hooks?: {
-    readonly PreToolUse?: readonly HookMatcher[];
-    readonly PostToolUse?: readonly HookMatcher[];
-    readonly Stop?: readonly HookMatcher[];
+const HOOK_EVENTS = ['PreToolUse', 'PostToolUse', 'Stop', 'UserPromptSubmit'] as const;
+type HookEvent = (typeof HOOK_EVENTS)[number];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function toHookDefinition(hook: unknown): HookDefinition {
+  if (!isRecord(hook) || typeof hook.command !== 'string') {
+    throw new Error('hook must be an object with a string "command"');
+  }
+  return hook as unknown as HookDefinition;
+}
+
+async function buildHookEntry(
+  event: HookEvent,
+  matcher: string,
+  hook: HookDefinition,
+  allowedRoots: readonly string[],
+): Promise<VaultEntry> {
+  const commandParts = hook.command.split(' ');
+  const scriptPath = commandParts.find((p: string) => p.endsWith('.js')) ?? hook.command;
+  const scriptName = basename(scriptPath, '.js');
+  const name = `${event}:${matcher}:${scriptName}`;
+
+  let content = '';
+  let lastModified = new Date();
+
+  // Validate script path stays within allowed roots (path containment)
+  const validatedPath = await safePath(scriptPath, allowedRoots);
+  if (validatedPath) {
+    try {
+      content = await readFile(validatedPath, 'utf-8');
+      lastModified = await getLastModified(validatedPath);
+    } catch {
+      content = `// Script at: ${scriptPath}`;
+    }
+  } else {
+    // Path escapes containment or doesn't exist — use command string as content
+    content = `// Command: ${hook.command}`;
+  }
+
+  return {
+    id: generateStableId('hook', name, 'custom'),
+    name,
+    type: 'hook',
+    source: 'custom',
+    description: `${event} hook on [${matcher}] → ${scriptName}`,
+    filePath: scriptPath,
+    tags: ['hook', event.toLowerCase(), matcher.toLowerCase()],
+    metadata: {
+      event,
+      matcher,
+      hookType: hook.type,
+      command: hook.command,
+      timeout: hook.timeout,
+    },
+    content,
+    lastModified,
+    favorite: false,
+    usageCount: 0,
   };
 }
 
@@ -31,7 +93,7 @@ export async function parseHooks(settingsPath: string): Promise<ParserResult> {
   // 2. The current working directory (for project-level hooks)
   const allowedRoots = [dirname(settingsPath), process.cwd()] as const;
 
-  let settings: SettingsJson;
+  let settings: unknown;
   try {
     const raw = await readFile(settingsPath, 'utf-8');
     settings = JSON.parse(raw);
@@ -46,62 +108,36 @@ export async function parseHooks(settingsPath: string): Promise<ParserResult> {
     };
   }
 
-  if (!settings.hooks) {
+  if (!isRecord(settings)) {
+    return {
+      entries: [],
+      errors: [{ filePath: settingsPath, message: 'Settings file must contain a JSON object' }],
+    };
+  }
+
+  const hooksByEvent = settings.hooks;
+  if (!isRecord(hooksByEvent)) {
     return { entries, errors };
   }
 
-  const hookEvents = ['PreToolUse', 'PostToolUse', 'Stop'] as const;
-
-  for (const event of hookEvents) {
-    const matchers = settings.hooks[event];
-    if (!matchers || !Array.isArray(matchers)) continue;
+  for (const event of HOOK_EVENTS) {
+    const matchers = hooksByEvent[event];
+    if (!Array.isArray(matchers)) continue;
 
     for (const matcherDef of matchers) {
-      if (!matcherDef?.hooks || !Array.isArray(matcherDef.hooks)) continue;
-      for (const hook of matcherDef.hooks as readonly HookDefinition[]) {
-        const commandParts = hook.command.split(' ');
-        const scriptPath = commandParts.find((p: string) => p.endsWith('.js')) ?? hook.command;
-        const scriptName = basename(scriptPath, '.js');
-        const name = `${event}:${matcherDef.matcher}:${scriptName}`;
+      if (!isRecord(matcherDef) || !Array.isArray(matcherDef.hooks)) continue;
+      const matcher = resolveMatcher(matcherDef.matcher);
 
-        let content = '';
-        let lastModified = new Date();
-
-        // Validate script path stays within allowed roots (path containment)
-        const validatedPath = await safePath(scriptPath, allowedRoots);
-        if (validatedPath) {
-          try {
-            content = await readFile(validatedPath, 'utf-8');
-            lastModified = await getLastModified(validatedPath);
-          } catch {
-            content = `// Script at: ${scriptPath}`;
-          }
-        } else {
-          // Path escapes containment or doesn't exist — use command string as content
-          content = `// Command: ${hook.command}`;
+      for (const hook of matcherDef.hooks as readonly unknown[]) {
+        try {
+          entries.push(await buildHookEntry(event, matcher, toHookDefinition(hook), allowedRoots));
+        } catch (err) {
+          errors.push({
+            filePath: settingsPath,
+            message: `Invalid ${event} hook on [${matcher}]: ${(err as Error).message}`,
+            cause: err,
+          });
         }
-
-        const entry: VaultEntry = {
-          id: generateStableId('hook', name, 'custom'),
-          name,
-          type: 'hook',
-          source: 'custom',
-          description: `${event} hook on [${matcherDef.matcher}] → ${scriptName}`,
-          filePath: scriptPath,
-          tags: ['hook', event.toLowerCase(), matcherDef.matcher.toLowerCase()],
-          metadata: {
-            event,
-            matcher: matcherDef.matcher,
-            hookType: hook.type,
-            command: hook.command,
-            timeout: hook.timeout,
-          },
-          content,
-          lastModified,
-          favorite: false,
-          usageCount: 0,
-        };
-        entries.push(entry);
       }
     }
   }
