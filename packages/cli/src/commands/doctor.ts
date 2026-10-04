@@ -1,8 +1,9 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { access, readdir, readFile, constants } from 'node:fs/promises';
+import { resolveClaudeDir, resolveDataDir } from '@commandvault/core';
+import { dbFilePath } from '../config.js';
 import { createVaultInstance, type CliGlobalOptions } from '../helpers.js';
 import { createSpinner } from '../ui/spinner.js';
 
@@ -63,7 +64,7 @@ function checkNodeVersion(): CheckResult {
 }
 
 async function checkClaudeDir(): Promise<CheckResult> {
-  const claudePath = join(homedir(), '.claude');
+  const claudePath = resolveClaudeDir();
   const exists = await fileExists(claudePath);
 
   return {
@@ -76,7 +77,7 @@ async function checkClaudeDir(): Promise<CheckResult> {
 }
 
 async function checkSkillsDir(): Promise<CheckResult> {
-  const skillsPath = join(homedir(), '.claude', 'skills');
+  const skillsPath = join(resolveClaudeDir(), 'skills');
   const exists = await fileExists(skillsPath);
 
   if (!exists) {
@@ -96,7 +97,7 @@ async function checkSkillsDir(): Promise<CheckResult> {
 }
 
 async function checkAgentsDir(): Promise<CheckResult> {
-  const agentsPath = join(homedir(), '.claude', 'agents');
+  const agentsPath = join(resolveClaudeDir(), 'agents');
   const exists = await fileExists(agentsPath);
 
   if (!exists) {
@@ -116,7 +117,7 @@ async function checkAgentsDir(): Promise<CheckResult> {
 }
 
 async function checkCommandsDir(): Promise<CheckResult> {
-  const commandsPath = join(homedir(), '.claude', 'commands');
+  const commandsPath = join(resolveClaudeDir(), 'commands');
   const exists = await fileExists(commandsPath);
 
   if (!exists) {
@@ -136,7 +137,7 @@ async function checkCommandsDir(): Promise<CheckResult> {
 }
 
 async function checkInstalledPlugins(): Promise<CheckResult> {
-  const pluginsPath = join(homedir(), '.claude', 'plugins', 'installed_plugins.json');
+  const pluginsPath = join(resolveClaudeDir(), 'plugins', 'installed_plugins.json');
   const exists = await fileExists(pluginsPath);
 
   if (!exists) {
@@ -156,7 +157,7 @@ async function checkInstalledPlugins(): Promise<CheckResult> {
 }
 
 async function checkSettingsJson(): Promise<CheckResult> {
-  const settingsPath = join(homedir(), '.claude', 'settings.json');
+  const settingsPath = join(resolveClaudeDir(), 'settings.json');
   const exists = await fileExists(settingsPath);
 
   if (!exists) {
@@ -176,7 +177,7 @@ async function checkSettingsJson(): Promise<CheckResult> {
 }
 
 async function checkCommandVaultDir(): Promise<CheckResult> {
-  const vaultPath = join(homedir(), '.commandvault');
+  const vaultPath = resolveDataDir();
   const exists = await fileExists(vaultPath);
 
   return {
@@ -187,7 +188,7 @@ async function checkCommandVaultDir(): Promise<CheckResult> {
 }
 
 async function checkVaultDb(): Promise<CheckResult> {
-  const dbPath = join(homedir(), '.commandvault', 'vault.db');
+  const dbPath = dbFilePath();
   const exists = await fileExists(dbPath);
 
   return {

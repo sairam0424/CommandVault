@@ -1,8 +1,10 @@
 import { defineConfig } from 'vitest/config';
 import { resolve } from 'path';
+import { hermeticTestOptions } from '../../test-support/vitest-options.js';
 
 export default defineConfig({
   test: {
+    ...hermeticTestOptions,
     include: ['src/__tests__/**/*.test.ts'],
     globals: true,
     coverage: {

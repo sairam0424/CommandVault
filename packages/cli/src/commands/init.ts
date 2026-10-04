@@ -1,25 +1,34 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname } from 'node:path';
 import { mkdir, readFile, writeFile, access } from 'node:fs/promises';
-
-const COMMANDVAULT_DIR = join(homedir(), '.commandvault');
-const CONFIG_PATH = join(COMMANDVAULT_DIR, 'config.json');
+import { resolveClaudeDir } from '@commandvault/core';
+import { configFilePath, dbFilePath } from '../config.js';
 
 interface CommandVaultConfig {
-  readonly claudeConfigPath: string;
+  readonly claudeConfigPath?: string;
   readonly searchTier: string;
   readonly enableWatcher: boolean;
   readonly projectPaths: readonly string[];
 }
 
-const DEFAULT_CONFIG: CommandVaultConfig = {
-  claudeConfigPath: '~/.claude',
-  searchTier: 'minisearch',
-  enableWatcher: true,
-  projectPaths: [],
-};
+const DEFAULT_CLAUDE_CONFIG_PATH = '~/.claude';
+
+/**
+ * A `claudeConfigPath` in config.json outranks CLAUDE_CONFIG_DIR. Writing the `~/.claude` default
+ * over a redirected Claude directory would ignore the variable, and recording the variable's
+ * current value would freeze it: a later profile switch would never apply. So the key is written
+ * only while the directory in use is the default one, and left out while the variable redirects it.
+ */
+function buildDefaultConfig(): CommandVaultConfig {
+  const isClaudeDirRedirected = resolveClaudeDir() !== resolveClaudeDir({});
+  return {
+    ...(isClaudeDirRedirected ? {} : { claudeConfigPath: DEFAULT_CLAUDE_CONFIG_PATH }),
+    searchTier: 'minisearch',
+    enableWatcher: true,
+    projectPaths: [],
+  };
+}
 
 async function fileExists(filePath: string): Promise<boolean> {
   try {
@@ -42,10 +51,11 @@ export function createInitCommand(): Command {
       console.log(chalk.dim('  ' + '='.repeat(40)));
       console.log('');
 
-      const configExists = await fileExists(CONFIG_PATH);
+      const configPath = configFilePath();
+      const configExists = await fileExists(configPath);
 
       if (configExists && !isReset) {
-        const raw = await readFile(CONFIG_PATH, 'utf-8');
+        const raw = await readFile(configPath, 'utf-8');
         let existingConfig: CommandVaultConfig;
 
         try {
@@ -58,7 +68,7 @@ export function createInitCommand(): Command {
         }
 
         console.log(chalk.cyan('  Config already exists at:'));
-        console.log(chalk.dim(`  ${CONFIG_PATH}`));
+        console.log(chalk.dim(`  ${configPath}`));
         console.log('');
         console.log(chalk.white('  Current configuration:'));
         console.log('');
@@ -82,10 +92,10 @@ export function createInitCommand(): Command {
       }
 
       // Create directory
-      await mkdir(COMMANDVAULT_DIR, { recursive: true });
+      await mkdir(dirname(configPath), { recursive: true });
 
       // Write config
-      await writeFile(CONFIG_PATH, JSON.stringify(DEFAULT_CONFIG, null, 2) + '\n', 'utf-8');
+      await writeFile(configPath, JSON.stringify(buildDefaultConfig(), null, 2) + '\n', 'utf-8');
 
       if (isReset && configExists) {
         console.log(chalk.green('  Config reset to defaults.'));
@@ -94,8 +104,8 @@ export function createInitCommand(): Command {
       }
 
       console.log('');
-      console.log(`  ${chalk.dim('Scanned:')}   ~/.claude/`);
-      console.log(`  ${chalk.dim('Database:')}  ~/.commandvault/vault.db`);
+      console.log(`  ${chalk.dim('Scanned:')}   ${resolveClaudeDir()}`);
+      console.log(`  ${chalk.dim('Database:')}  ${dbFilePath()}`);
       console.log('');
       console.log(chalk.bold.white('  Next steps:'));
       console.log(chalk.dim('  ' + '-'.repeat(40)));

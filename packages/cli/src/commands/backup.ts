@@ -1,11 +1,9 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { copyFile, mkdir, readdir, stat } from 'node:fs/promises';
+import { backupDirPath, dbFilePath } from '../config.js';
 
-const DB_PATH = join(homedir(), '.commandvault', 'vault.db');
-const BACKUP_DIR = join(homedir(), '.commandvault', 'backups');
 const MAX_BACKUPS = 10;
 
 export function createBackupCommand(): Command {
@@ -18,13 +16,14 @@ export function createBackupCommand(): Command {
         return;
       }
 
-      await mkdir(BACKUP_DIR, { recursive: true });
+      const backupDir = backupDirPath();
+      await mkdir(backupDir, { recursive: true });
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const backupPath = join(BACKUP_DIR, `vault-${timestamp}.db`);
+      const backupPath = join(backupDir, `vault-${timestamp}.db`);
 
       try {
-        await copyFile(DB_PATH, backupPath);
+        await copyFile(dbFilePath(), backupPath);
         console.log(chalk.green(`\nBackup created: ${backupPath}\n`));
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -40,8 +39,9 @@ export function createBackupCommand(): Command {
 }
 
 async function listBackups(): Promise<void> {
+  const backupDir = backupDirPath();
   try {
-    const files = await readdir(BACKUP_DIR);
+    const files = await readdir(backupDir);
     const backups = files
       .filter((f) => f.startsWith('vault-') && f.endsWith('.db'))
       .sort()
@@ -54,7 +54,7 @@ async function listBackups(): Promise<void> {
 
     console.log(chalk.bold('\n  Available backups:\n'));
     for (const backup of backups) {
-      const fullPath = join(BACKUP_DIR, backup);
+      const fullPath = join(backupDir, backup);
       const stats = await stat(fullPath);
       const size = (stats.size / 1024).toFixed(1);
       console.log(`  ${chalk.cyan(backup)}  ${chalk.dim(`${size} KB`)}`);
@@ -66,8 +66,9 @@ async function listBackups(): Promise<void> {
 }
 
 async function pruneBackups(): Promise<void> {
+  const backupDir = backupDirPath();
   try {
-    const files = await readdir(BACKUP_DIR);
+    const files = await readdir(backupDir);
     const backups = files.filter((f) => f.startsWith('vault-') && f.endsWith('.db')).sort();
 
     if (backups.length <= MAX_BACKUPS) return;
@@ -75,7 +76,7 @@ async function pruneBackups(): Promise<void> {
     const { unlink } = await import('node:fs/promises');
     const toRemove = backups.slice(0, backups.length - MAX_BACKUPS);
     for (const file of toRemove) {
-      await unlink(join(BACKUP_DIR, file));
+      await unlink(join(backupDir, file));
     }
 
     if (toRemove.length > 0) {

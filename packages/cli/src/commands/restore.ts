@@ -1,11 +1,8 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { homedir } from 'node:os';
 import { join, basename } from 'node:path';
 import { copyFile, access, constants } from 'node:fs/promises';
-
-const DB_PATH = join(homedir(), '.commandvault', 'vault.db');
-const BACKUP_DIR = join(homedir(), '.commandvault', 'backups');
+import { backupDirPath, dbFilePath } from '../config.js';
 
 export function createRestoreCommand(): Command {
   const cmd = new Command('restore')
@@ -18,7 +15,7 @@ export function createRestoreCommand(): Command {
         console.log(chalk.yellow('Run `vault backup --list` to see available backups.\n'));
         return;
       }
-      const backupPath = join(BACKUP_DIR, filename);
+      const backupPath = join(backupDirPath(), filename);
 
       try {
         await access(backupPath, constants.R_OK);
@@ -29,7 +26,7 @@ export function createRestoreCommand(): Command {
       }
 
       try {
-        await copyFile(backupPath, DB_PATH);
+        await copyFile(backupPath, dbFilePath());
         console.log(chalk.green(`\nDatabase restored from: ${backupPath}`));
         console.log(chalk.dim('Run `vault list` to verify.\n'));
       } catch (err) {

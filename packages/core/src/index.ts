@@ -1,4 +1,5 @@
 export { Vault, createVault } from './vault.js';
+export { resolveDataDir, resolveClaudeDir } from './paths.js';
 export { SearchEngine } from './indexer/search-engine.js';
 export { VaultWatcher } from './watcher/index.js';
 export { exportEntries, exportToFile, importFromFile, importFromUrl } from './sync/index.js';
