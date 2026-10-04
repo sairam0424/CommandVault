@@ -35,7 +35,7 @@
     "vault": "dist/index.js"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.13.0"
   },
   "scripts": {
     "build": "tsc",
