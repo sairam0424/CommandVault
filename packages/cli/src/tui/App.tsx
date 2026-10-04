@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Box, Text, useInput, useStdout, useApp } from 'ink';
-import { execFileSync } from 'node:child_process';
-import { resolve } from 'node:path';
 import type { VaultEntry, EntryType, EntrySource } from '@commandvault/core';
 import type { Vault } from '@commandvault/core';
 import { SearchBar } from './SearchBar.js';
@@ -9,6 +7,7 @@ import { ResultsList } from './ResultsList.js';
 import { PreviewPane } from './PreviewPane.js';
 import { ActionBar } from './ActionBar.js';
 import { FilterBar } from './FilterBar.js';
+import { openInEditor } from './openInEditor.js';
 import { useVaultSearch } from './hooks/useVaultSearch.js';
 import { useScroll } from './hooks/useScroll.js';
 import { usePreviewScroll } from './hooks/usePreviewScroll.js';
@@ -53,11 +52,22 @@ export function App({ vault }: Props) {
 
   const results = useVaultSearch(vault, query, filterType, filterSource, handleError);
 
-  const { selectedIndex, scrollTop, moveUp, moveDown, reset: scrollReset } = useScroll(results.length, visibleCount);
+  const {
+    selectedIndex,
+    scrollTop,
+    moveUp,
+    moveDown,
+    reset: scrollReset,
+  } = useScroll(results.length, visibleCount);
   const selectedEntry: VaultEntry | null = results[selectedIndex]?.entry ?? null;
 
   const contentLineCount = selectedEntry ? selectedEntry.content.split('\n').length : 0;
-  const { scrollTop: previewScrollTop, scrollUp: previewScrollUp, scrollDown: previewScrollDown, reset: previewReset } = usePreviewScroll(contentLineCount, bodyHeight);
+  const {
+    scrollTop: previewScrollTop,
+    scrollUp: previewScrollUp,
+    scrollDown: previewScrollDown,
+    reset: previewReset,
+  } = usePreviewScroll(contentLineCount, bodyHeight);
 
   // Reset list scroll when search parameters change
   useEffect(() => {
@@ -77,8 +87,9 @@ export function App({ vault }: Props) {
   }, [errorMessage]);
 
   useInput((input, key) => {
-    // Quit
-    if (input === 'q' || (key.ctrl && input === 'c')) {
+    // Printable keys type into the search box, so actions use Ctrl chords and
+    // non-printable keys only.
+    if (key.ctrl && input === 'c') {
       exit();
       return;
     }
@@ -110,11 +121,11 @@ export function App({ vault }: Props) {
     }
 
     // Preview scroll
-    if (input === '[') {
+    if (key.pageUp) {
       previewScrollUp();
       return;
     }
-    if (input === ']') {
+    if (key.pageDown) {
       previewScrollDown();
       return;
     }
@@ -137,21 +148,24 @@ export function App({ vault }: Props) {
       return;
     }
 
-    // 'o': open file in $EDITOR
-    if (input === 'o' && selectedEntry) {
-      const editor = process.env['EDITOR'] ?? 'vi';
+    // Ctrl+O: open file in $EDITOR
+    if (key.ctrl && input === 'o' && selectedEntry) {
       try {
-        execFileSync(editor, [resolve(selectedEntry.filePath)], { stdio: 'ignore' });
+        openInEditor(selectedEntry.filePath);
       } catch (err) {
         setErrorMessage(`Editor error: ${err instanceof Error ? err.message : String(err)}`);
       }
       return;
     }
 
-    // 'f': toggle favorite
-    if (input === 'f' && selectedEntry) {
+    // Ctrl+F: toggle favorite
+    if (key.ctrl && input === 'f' && selectedEntry) {
       const isFav = vault.toggleFavorite(selectedEntry.id);
-      setErrorMessage(isFav ? `★ Added to favorites: ${selectedEntry.name}` : `☆ Removed from favorites: ${selectedEntry.name}`);
+      setErrorMessage(
+        isFav
+          ? `★ Added to favorites: ${selectedEntry.name}`
+          : `☆ Removed from favorites: ${selectedEntry.name}`,
+      );
       return;
     }
   });
