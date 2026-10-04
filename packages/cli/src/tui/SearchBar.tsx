@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import TextInput from 'ink-text-input';
 import type { EntryType, EntrySource } from '@commandvault/core';
+import { QueryInput } from './QueryInput.js';
 
 interface Props {
   readonly query: string;
@@ -14,16 +14,14 @@ interface Props {
 export function SearchBar({ query, onQueryChange, filterType, filterSource, width }: Props) {
   return (
     <Box borderStyle="single" borderColor="cyan" width={width} paddingX={1}>
-      <Text color="cyan" bold>{'> '}</Text>
+      <Text color="cyan" bold>
+        {'> '}
+      </Text>
       <Box flexGrow={1}>
-        <TextInput value={query} onChange={onQueryChange} placeholder="Search commands..." />
+        <QueryInput value={query} onChange={onQueryChange} placeholder="Search commands..." />
       </Box>
-      {filterType && (
-        <Text color="yellow">{` [${filterType}]`}</Text>
-      )}
-      {filterSource && (
-        <Text color="magenta">{` [${filterSource}]`}</Text>
-      )}
+      {filterType && <Text color="yellow">{` [${filterType}]`}</Text>}
+      {filterSource && <Text color="magenta">{` [${filterSource}]`}</Text>}
     </Box>
   );
 }
