@@ -43,6 +43,31 @@ function stableId(type: string, name: string, source: string): string {
   return createHash('sha256').update(`${type}:${name}:${source}`).digest('hex').slice(0, 12);
 }
 
+function readSchemaVersion(conn: DatabaseAdapter): number {
+  const rows = conn.queryAll<{ v: number | null }>('SELECT MAX(version) as v FROM schema_version');
+  return rows[0]?.v ?? 0;
+}
+
+/**
+ * Databases written by @commandvault/core 0.1.0 carry an external-content FTS5 table
+ * (`entries_fts`) kept in sync by three triggers. Migration 3 replaces it with a standalone table.
+ *
+ * The virtual table is dropped as a whole: its shadow tables go with it, whereas dropping them one
+ * by one is refused under SQLITE_DBCONFIG_DEFENSIVE, which better-sqlite3 >= 12 enables.
+ */
+function dropLegacyFts(conn: DatabaseAdapter): void {
+  conn.transaction(() => {
+    // Re-read the version inside the transaction: another process may have finished migration 3
+    // since the caller looked, and dropping now would destroy the live FTS table it created.
+    if (readSchemaVersion(conn) >= 3) return;
+
+    conn.execute('DROP TRIGGER IF EXISTS entries_ai');
+    conn.execute('DROP TRIGGER IF EXISTS entries_ad');
+    conn.execute('DROP TRIGGER IF EXISTS entries_au');
+    conn.execute('DROP TABLE IF EXISTS entries_fts');
+  });
+}
+
 function runAdapterMigrations(conn: DatabaseAdapter): void {
   // Ensure schema_version table exists
   conn.execute(`
@@ -53,27 +78,11 @@ function runAdapterMigrations(conn: DatabaseAdapter): void {
     );
   `);
 
-  const versionRows = conn.queryAll<{ v: number | null }>(
-    'SELECT MAX(version) as v FROM schema_version',
-  );
-  const currentVersion = versionRows[0]?.v ?? 0;
+  const currentVersion = readSchemaVersion(conn);
 
   // Remove legacy FTS artifacts only if we haven't yet created the new FTS5 table (migration 3)
   if (currentVersion < 3) {
-    conn.execute('DROP TRIGGER IF EXISTS entries_ai');
-    conn.execute('DROP TRIGGER IF EXISTS entries_ad');
-    conn.execute('DROP TRIGGER IF EXISTS entries_au');
-    for (const suffix of ['_data', '_idx', '_docsize', '_config']) {
-      conn.execute(`DROP TABLE IF EXISTS entries_fts${suffix}`);
-    }
-    try {
-      conn.execute('PRAGMA writable_schema = ON');
-      conn.execute("DELETE FROM sqlite_master WHERE name = 'entries_fts' AND type = 'table'");
-      conn.execute('PRAGMA writable_schema = OFF');
-    } catch {
-      // better-sqlite3 may not allow sqlite_master modification — safe to skip
-      // since the FTS shadow tables were already dropped above
-    }
+    dropLegacyFts(conn);
   }
 
   // Migration 1: entry_tags junction table
@@ -201,15 +210,26 @@ export class SqliteEngine {
   static async create(dbPath: string): Promise<SqliteEngine> {
     const conn = await createDatabaseAdapter(dbPath);
 
-    // Initialize base schema
-    for (const statement of SCHEMA.split(';')
-      .map((s) => s.trim())
-      .filter(Boolean)) {
-      conn.execute(statement);
-    }
+    try {
+      // Initialize base schema
+      for (const statement of SCHEMA.split(';')
+        .map((s) => s.trim())
+        .filter(Boolean)) {
+        conn.execute(statement);
+      }
 
-    // Run migrations
-    runAdapterMigrations(conn);
+      // Run migrations
+      runAdapterMigrations(conn);
+    } catch (error) {
+      // Release the file handle: on Windows an open handle blocks deleting or renaming vault.db.
+      try {
+        conn.close();
+      } catch {
+        // close() can fail too (sql.js flushes to disk first); the error that got us here is the
+        // one worth reporting.
+      }
+      throw error;
+    }
 
     return new SqliteEngine(conn);
   }
