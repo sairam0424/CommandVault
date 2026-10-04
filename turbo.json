@@ -3,7 +3,14 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "inputs": ["src/**", "tsconfig.json", "package.json"],
+      "inputs": [
+        "src/**",
+        "webview/**",
+        "tsconfig.json",
+        "vite.config.ts",
+        "package.json",
+        "$TURBO_ROOT$/tsconfig.base.json"
+      ],
       "outputs": ["dist/**", ".tsbuildinfo"]
     },
     "dev": {
@@ -14,10 +21,12 @@
       "dependsOn": ["^build"]
     },
     "test": {
-      "dependsOn": ["build"]
+      "dependsOn": ["build"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/vitest.workspace.ts"]
     },
     "typecheck": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tsconfig.base.json"]
     },
     "clean": {
       "cache": false

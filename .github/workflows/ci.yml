@@ -117,11 +117,8 @@ jobs:
         with:
           node-version: 22
 
-      # Reads pnpm-lock.yaml directly, no install needed. Gated at
-      # `critical` rather than `high` because a pre-existing transitive
-      # dev-only advisory (browserslist, GHSA-c83g-rgw3-j3cx /
-      # GHSA-73wf-gq98-2v4g) is already moderate/high-severity as of this
-      # writing and is tracked via Dependabot rather than blocking every PR.
-      # Tighten to `high` once that's resolved.
+      # Reads pnpm-lock.yaml directly, no install needed. Gated at `high`: the lockfile has no
+      # high or critical advisories after the override floors were raised. Two moderate advisories
+      # (vitest and @vitest/mocker, fixed only in vitest 4) remain and are tracked via Dependabot.
       - name: Audit dependencies
-        run: pnpm audit --audit-level critical
+        run: pnpm audit --audit-level high

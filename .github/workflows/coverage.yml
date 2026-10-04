@@ -27,15 +27,12 @@ jobs:
 
       - name: Core tests with coverage
         run: pnpm --filter @commandvault/core test -- --coverage
-        continue-on-error: true
 
       - name: CLI tests with coverage
         run: pnpm --filter @commandvault/cli test -- --coverage
-        continue-on-error: true
 
       - name: VS Code tests with coverage
         run: pnpm --filter commandvault-ai test -- --coverage
-        continue-on-error: true
 
       - name: Core coverage report
         if: always()
