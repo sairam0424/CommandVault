@@ -72,4 +72,49 @@ describe('createConfiguredVault', () => {
     await expect(createConfiguredVault({}, true)).rejects.toMatchObject({ exitCode: 2 });
     expect(createVault).not.toHaveBeenCalled();
   });
+
+  it('keeps the index in the data directory unless a database path is given', async () => {
+    const { createConfiguredVault } = await import('../helpers.js');
+    await createConfiguredVault({}, false);
+    const config = createVault.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect('dbPath' in config).toBe(false);
+  });
+
+  it('passes a database path override on to the vault', async () => {
+    const { createConfiguredVault } = await import('../helpers.js');
+    await createConfiguredVault({}, false, { dbPath: '/scratch/vault.db' });
+    expect(createVault).toHaveBeenCalledWith(
+      expect.objectContaining({ dbPath: '/scratch/vault.db' }),
+    );
+  });
+
+  it('uses a config the caller already loaded instead of reading config.json again', async () => {
+    await writeConfig({ claudeConfigPath: '/from/file' });
+    const { createConfiguredVault } = await import('../helpers.js');
+    await createConfiguredVault({}, false, { config: { claudeConfigPath: '/preloaded' } });
+    expect(createVault).toHaveBeenCalledWith(
+      expect.objectContaining({ claudeConfigPath: '/preloaded' }),
+    );
+  });
+});
+
+describe('claudeDirFor', () => {
+  it('prefers the flag, then config.json, then the environment default', async () => {
+    const { claudeDirFor } = await import('../helpers.js');
+    vi.stubEnv('CLAUDE_CONFIG_DIR', '/from/env');
+    try {
+      expect(claudeDirFor({ claudePath: '/flag' }, { claudeConfigPath: '/config' })).toBe('/flag');
+      expect(claudeDirFor({}, { claudeConfigPath: '/config' })).toBe('/config');
+      expect(claudeDirFor({}, {})).toBe('/from/env');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('returns an absolute path', async () => {
+    const { claudeDirFor } = await import('../helpers.js');
+    expect(claudeDirFor({ claudePath: 'relative/dir' }, {})).toBe(
+      join(process.cwd(), 'relative', 'dir'),
+    );
+  });
 });

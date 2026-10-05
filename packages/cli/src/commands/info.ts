@@ -33,7 +33,8 @@ function stripAnsi(str: string): string {
 }
 
 function formatMetadata(metadata: Readonly<Record<string, unknown>>): readonly string[] {
-  const entries = Object.entries(metadata);
+  // A parser records every field it looks for, so an absent one arrives as `undefined`.
+  const entries = Object.entries(metadata).filter(([, value]) => value !== undefined);
   if (entries.length === 0) {
     return [chalk.dim('(none)')];
   }
