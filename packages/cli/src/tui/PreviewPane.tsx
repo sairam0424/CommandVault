@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import type { VaultEntry } from '@commandvault/core';
-import { getContentExcerpt } from '@commandvault/core';
+import { previewExcerpt, previewTextRows } from './previewExcerpt.js';
 
 interface Props {
   readonly entry: VaultEntry | null;
@@ -62,9 +62,12 @@ export function PreviewPane({ entry, query, scrollTop, height, width }: Props) {
     );
   }
 
-  const { lines, matchLine } = getContentExcerpt(entry.content, query, height * 2);
-  const clampedScrollTop = Math.min(scrollTop, Math.max(0, lines.length - height));
-  const visible = lines.slice(clampedScrollTop, clampedScrollTop + height);
+  const { lines, matchLine } = previewExcerpt(entry.content, query, height);
+  // Only the rows inside the border show; more Text rows than that get squeezed
+  // by the flex layout, which drops lines from the middle of the preview.
+  const textRows = previewTextRows(height);
+  const clampedScrollTop = Math.min(scrollTop, Math.max(0, lines.length - textRows));
+  const visible = lines.slice(clampedScrollTop, clampedScrollTop + textRows);
 
   return (
     <Box
