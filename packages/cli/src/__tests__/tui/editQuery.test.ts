@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Key } from 'ink';
-import { editQuery } from '../../tui/QueryInput.js';
+import { editQuery } from '../../tui/editQuery.js';
 
 const NO_KEY: Key = {
   upArrow: false,

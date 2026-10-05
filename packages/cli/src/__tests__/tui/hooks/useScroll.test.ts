@@ -76,4 +76,98 @@ describe('useScroll', () => {
     act(() => result.current.moveUp());
     expect(result.current.selectedIndex).toBe(0);
   });
+
+  describe('when the list or the window changes under the selection', () => {
+    it('keeps the selection on the last row when the list shrinks below it', () => {
+      const { result, rerender } = renderHook(({ count }) => useScroll(count, 3), {
+        initialProps: { count: 10 },
+      });
+      for (let i = 0; i < 7; i += 1) act(() => result.current.moveDown());
+      expect(result.current.selectedIndex).toBe(7);
+
+      rerender({ count: 3 });
+
+      expect(result.current.selectedIndex).toBe(2);
+      expect(result.current.scrollTop).toBe(0);
+    });
+
+    it('scrolls the window to keep the selection visible when the window shrinks', () => {
+      const { result, rerender } = renderHook(({ visible }) => useScroll(12, visible), {
+        initialProps: { visible: 12 },
+      });
+      for (let i = 0; i < 11; i += 1) act(() => result.current.moveDown());
+
+      rerender({ visible: 4 });
+
+      expect(result.current.selectedIndex).toBe(11);
+      expect(result.current.scrollTop).toBe(8);
+    });
+
+    it('returns to the top of an emptied list and moves normally once it refills', () => {
+      const { result, rerender } = renderHook(({ count }) => useScroll(count, 3), {
+        initialProps: { count: 5 },
+      });
+      act(() => result.current.moveDown());
+
+      rerender({ count: 0 });
+      expect(result.current.selectedIndex).toBe(0);
+      expect(result.current.scrollTop).toBe(0);
+
+      rerender({ count: 5 });
+      act(() => result.current.moveDown());
+      expect(result.current.selectedIndex).toBe(1);
+    });
+  });
+
+  describe('several moves before the next render', () => {
+    it('applies each move to the result of the previous one', () => {
+      const { result } = renderHook(() => useScroll(10, 3));
+      act(() => {
+        result.current.moveDown();
+        result.current.moveDown();
+        result.current.moveDown();
+        result.current.moveUp();
+      });
+      expect(result.current.selectedIndex).toBe(2);
+    });
+
+    it('reports the selection as it is right now, before any render', () => {
+      const { result } = renderHook(() => useScroll(10, 3));
+      act(() => {
+        result.current.moveDown();
+        result.current.moveDown();
+        expect(result.current.getSelectedIndex()).toBe(2);
+      });
+    });
+  });
+
+  describe('a list length given for a list that has not rendered yet', () => {
+    it('bounds moveDown by the given length, not the rendered one', () => {
+      const { result } = renderHook(() => useScroll(3, 3));
+      act(() => {
+        result.current.moveDown(1);
+        result.current.moveDown(1);
+      });
+      expect(result.current.getSelectedIndex(1)).toBe(0);
+    });
+
+    it('lets moveDown go past the rendered length when the new list is longer', () => {
+      const { result } = renderHook(() => useScroll(1, 3));
+      act(() => {
+        result.current.moveDown(3);
+        result.current.moveDown(3);
+        expect(result.current.getSelectedIndex(3)).toBe(2);
+      });
+    });
+
+    it('fits the reported selection to the given length', () => {
+      const { result } = renderHook(() => useScroll(5, 3));
+      act(() => {
+        result.current.moveDown();
+        result.current.moveDown();
+        result.current.moveDown();
+        expect(result.current.getSelectedIndex(2)).toBe(1);
+      });
+    });
+  });
 });

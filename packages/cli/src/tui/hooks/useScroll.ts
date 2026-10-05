@@ -1,53 +1,98 @@
-import { useReducer, useCallback } from 'react';
+import { useCallback, useReducer, useRef } from 'react';
 
 export interface ScrollState {
   selectedIndex: number;
   scrollTop: number;
-  moveUp: () => void;
-  moveDown: () => void;
+  /**
+   * `listLength` is the length of the list the key acts on. Give it when the
+   * list changed in the same read and has not rendered yet (text typed before
+   * the key); it defaults to the rendered list.
+   */
+  moveUp: (listLength?: number) => void;
+  moveDown: (listLength?: number) => void;
   reset: () => void;
+  /** The selection as of the last key handled, even before it has rendered. */
+  getSelectedIndex: (listLength?: number) => number;
 }
 
-interface State {
-  selectedIndex: number;
-  scrollTop: number;
+interface View {
+  readonly selectedIndex: number;
+  readonly scrollTop: number;
 }
 
-type Action =
-  { type: 'up' } | { type: 'down'; itemCount: number; visibleCount: number } | { type: 'reset' };
+const TOP: View = { selectedIndex: 0, scrollTop: 0 };
 
-function reducer(state: State, action: Action): State {
-  switch (action.type) {
-    case 'reset':
-      return { selectedIndex: 0, scrollTop: 0 };
-    case 'up': {
-      if (state.selectedIndex <= 0) return state;
-      const next = state.selectedIndex - 1;
-      return { selectedIndex: next, scrollTop: Math.min(state.scrollTop, next) };
-    }
-    case 'down': {
-      if (action.itemCount === 0 || state.selectedIndex >= action.itemCount - 1) return state;
-      const next = state.selectedIndex + 1;
-      const maxTop = next - action.visibleCount + 1;
-      return {
-        selectedIndex: next,
-        scrollTop: maxTop > state.scrollTop ? maxTop : state.scrollTop,
-      };
-    }
-    default:
-      return state;
-  }
+/**
+ * Pulls a stored position back inside the list and the window. The list can
+ * shrink (a query returns fewer rows) and the window can shrink (the terminal
+ * is resized) after the position was stored; without this the selection ends
+ * up past the last row or scrolled off screen.
+ */
+function fit(view: View, itemCount: number, visibleCount: number): View {
+  if (itemCount === 0) return TOP;
+  const windowSize = Math.max(1, visibleCount);
+  const selectedIndex = Math.min(Math.max(0, view.selectedIndex), itemCount - 1);
+  let scrollTop = Math.min(view.scrollTop, Math.max(0, itemCount - windowSize));
+  if (selectedIndex < scrollTop) scrollTop = selectedIndex;
+  if (selectedIndex >= scrollTop + windowSize) scrollTop = selectedIndex - windowSize + 1;
+  return { selectedIndex, scrollTop };
 }
 
+/**
+ * Selection and window position of the results list. The position lives in a
+ * ref so several keys delivered in one stdin read each start from the result
+ * of the one before, not from the last rendered position.
+ */
 export function useScroll(itemCount: number, visibleCount: number): ScrollState {
-  const [state, dispatch] = useReducer(reducer, { selectedIndex: 0, scrollTop: 0 });
+  const position = useRef<View>(TOP);
+  // Written during render on purpose: every key handler must see the list and
+  // window size of the latest render, and neither changes within one read.
+  const size = useRef({ itemCount, visibleCount });
+  size.current = { itemCount, visibleCount };
+  const [, rerender] = useReducer((count: number) => count + 1, 0);
 
-  const moveUp = useCallback(() => dispatch({ type: 'up' }), []);
-  const moveDown = useCallback(
-    () => dispatch({ type: 'down', itemCount, visibleCount }),
-    [itemCount, visibleCount],
+  const current = useCallback(
+    (listLength: number = size.current.itemCount) =>
+      fit(position.current, listLength, size.current.visibleCount),
+    [],
   );
-  const reset = useCallback(() => dispatch({ type: 'reset' }), []);
+  const commit = useCallback(
+    (selectedIndex: number, listLength: number = size.current.itemCount) => {
+      const before = current(listLength);
+      const next = fit(
+        { selectedIndex, scrollTop: before.scrollTop },
+        listLength,
+        size.current.visibleCount,
+      );
+      if (next.selectedIndex === before.selectedIndex && next.scrollTop === before.scrollTop) {
+        return;
+      }
+      position.current = next;
+      rerender();
+    },
+    [current],
+  );
 
-  return { ...state, moveUp, moveDown, reset };
+  const moveUp = useCallback(
+    (listLength?: number) => commit(current(listLength).selectedIndex - 1, listLength),
+    [commit, current],
+  );
+  const moveDown = useCallback(
+    (listLength?: number) => commit(current(listLength).selectedIndex + 1, listLength),
+    [commit, current],
+  );
+  const reset = useCallback(() => {
+    position.current = TOP;
+    rerender();
+  }, []);
+  const getSelectedIndex = useCallback(
+    (listLength?: number) => current(listLength).selectedIndex,
+    [current],
+  );
+
+  // Keep the fitted position, so a list that shrank and grows again does not
+  // jump back to a selection the user no longer sees.
+  const view = fit(position.current, itemCount, visibleCount);
+  position.current = view;
+  return { ...view, moveUp, moveDown, reset, getSelectedIndex };
 }

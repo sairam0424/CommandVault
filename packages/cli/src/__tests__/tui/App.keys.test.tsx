@@ -35,10 +35,10 @@ const PREVIEW_LINE_COUNT = 80;
 const POLL_TIMEOUT_MS = 10_000;
 // Each key press is a full Ink render; Windows CI runners are the slow case.
 const TEST_TIMEOUT_MS = 30_000;
-// The harness terminal has 30 rows, so the preview shows 25 lines: the last
-// one is row-25 until the preview scrolls down by one line.
-const LAST_ROW_BEFORE_SCROLL = 'row-25';
-const FIRST_ROW_AFTER_SCROLL = 'row-26';
+// The harness terminal has 30 rows, so the preview box is 25 rows tall and
+// shows 23 lines inside its border: the last one is row-23 until it scrolls.
+const LAST_ROW_BEFORE_SCROLL = 'row-23';
+const FIRST_ROW_AFTER_SCROLL = 'row-24';
 
 const longContent = Array.from(
   { length: PREVIEW_LINE_COUNT },

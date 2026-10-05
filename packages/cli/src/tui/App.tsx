@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Box, Text, useInput, useStdout, useApp } from 'ink';
+import { Box, Text, useApp } from 'ink';
+import type { Key } from 'ink';
 import type { VaultEntry, EntryType, EntrySource } from '@commandvault/core';
 import type { Vault } from '@commandvault/core';
 import { SearchBar } from './SearchBar.js';
@@ -11,6 +12,10 @@ import { openInEditor } from './openInEditor.js';
 import { useVaultSearch } from './hooks/useVaultSearch.js';
 import { useScroll } from './hooks/useScroll.js';
 import { usePreviewScroll } from './hooks/usePreviewScroll.js';
+import { useKeyEvents, STOP_KEYS } from './hooks/useKeyEvents.js';
+import { useQueryEditor } from './hooks/useQueryEditor.js';
+import { useTerminalSize } from './hooks/useTerminalSize.js';
+import { previewLineCount, previewTextRows } from './previewExcerpt.js';
 
 const MIN_PREVIEW_WIDTH = 80;
 const MIN_USABLE_WIDTH = 60;
@@ -26,13 +31,11 @@ interface Props {
 
 export function App({ vault }: Props) {
   const { exit } = useApp();
-  const { stdout } = useStdout();
-
-  const columns = stdout?.columns ?? 100;
-  const rows = stdout?.rows ?? 30;
+  const { columns, rows } = useTerminalSize();
 
   const bodyHeight = rows - SEARCH_BAR_HEIGHT - ACTION_BAR_HEIGHT;
   const visibleCount = Math.max(1, Math.floor(bodyHeight / 2));
+  const previewRows = previewTextRows(bodyHeight);
   const showPreview = columns >= MIN_PREVIEW_WIDTH;
   const isTooNarrow = columns < MIN_USABLE_WIDTH;
   const resultsWidth = showPreview
@@ -40,7 +43,8 @@ export function App({ vault }: Props) {
     : columns;
   const previewWidth = showPreview ? columns - resultsWidth - 1 : 0;
 
-  const [query, setQuery] = useState('');
+  const editor = useQueryEditor();
+  const query = editor.value;
   const [filterType, setFilterType] = useState<EntryType | null>(null);
   const [filterSource, setFilterSource] = useState<EntrySource | null>(null);
   const [mode, setMode] = useState<'search' | 'filter'>('search');
@@ -50,7 +54,13 @@ export function App({ vault }: Props) {
     setErrorMessage(err.message);
   }, []);
 
-  const results = useVaultSearch(vault, query, filterType, filterSource, handleError);
+  const { results, resultsFor } = useVaultSearch(
+    vault,
+    query,
+    filterType,
+    filterSource,
+    handleError,
+  );
 
   const {
     selectedIndex,
@@ -58,26 +68,36 @@ export function App({ vault }: Props) {
     moveUp,
     moveDown,
     reset: scrollReset,
+    getSelectedIndex,
   } = useScroll(results.length, visibleCount);
   const selectedEntry: VaultEntry | null = results[selectedIndex]?.entry ?? null;
 
-  const contentLineCount = selectedEntry ? selectedEntry.content.split('\n').length : 0;
   const {
-    scrollTop: previewScrollTop,
-    scrollUp: previewScrollUp,
-    scrollDown: previewScrollDown,
+    scrollTopFor: previewScrollTopFor,
+    pageUp: previewPageUp,
+    pageDown: previewPageDown,
     reset: previewReset,
-  } = usePreviewScroll(contentLineCount, bodyHeight);
+  } = usePreviewScroll(previewRows, previewRows);
 
-  // Reset list scroll when search parameters change
+  // Key handlers run several times per render when a read holds several keys,
+  // so they look the selection up here rather than in the rendered values. Text
+  // typed earlier in the read has not been searched yet; resultsFor runs that
+  // search, so a key never acts on the list of the previous query.
+  const listNow = () => resultsFor(editor.getValue());
+  const entryAtSelection = (): VaultEntry | null => {
+    const list = listNow();
+    return list[getSelectedIndex(list.length)]?.entry ?? null;
+  };
+  const previewTarget = () => {
+    const entry = entryAtSelection();
+    const lineCount = entry ? previewLineCount(entry.content, editor.getValue(), bodyHeight) : 0;
+    return { id: entry?.id ?? null, lineCount };
+  };
+
+  // Reset list scroll when a filter changes (query edits reset it as they are typed)
   useEffect(() => {
     scrollReset();
-  }, [query, filterType, filterSource, scrollReset]);
-
-  // Reset preview scroll when selected entry changes
-  useEffect(() => {
-    previewReset();
-  }, [selectedIndex, previewReset]);
+  }, [filterType, filterSource, scrollReset]);
 
   // Auto-clear error messages
   useEffect(() => {
@@ -86,95 +106,124 @@ export function App({ vault }: Props) {
     return () => clearTimeout(timer);
   }, [errorMessage]);
 
-  useInput((input, key) => {
-    // Printable keys type into the search box, so actions use Ctrl chords and
-    // non-printable keys only.
-    if (key.ctrl && input === 'c') {
-      exit();
-      return;
-    }
+  const restartList = () => {
+    scrollReset();
+    previewReset();
+  };
 
-    // Escape: clear query or exit
-    if (key.escape) {
-      if (query) {
-        setQuery('');
-      } else {
-        exit();
-      }
-      return;
+  // Moving the selection or page scrolling: returns true when the key was one of those.
+  const handleNavigationKey = (key: Key): boolean => {
+    if (key.upArrow || key.downArrow) {
+      // Bound the move by the list the typed text finds, not the one last rendered.
+      const length = listNow().length;
+      const before = getSelectedIndex(length);
+      if (key.upArrow) moveUp(length);
+      else moveDown(length);
+      // A key that cannot move the selection (first or last row) leaves the preview alone.
+      if (getSelectedIndex(length) !== before) previewReset();
+      return true;
     }
-
-    // Navigation
-    if (key.upArrow) {
-      moveUp();
-      return;
-    }
-    if (key.downArrow) {
-      moveDown();
-      return;
-    }
-
-    // Tab: toggle mode
     if (key.tab) {
       setMode((m) => (m === 'search' ? 'filter' : 'search'));
-      return;
+      return true;
     }
-
-    // Preview scroll
     if (key.pageUp) {
-      previewScrollUp();
-      return;
+      previewPageUp(previewTarget());
+      return true;
     }
     if (key.pageDown) {
-      previewScrollDown();
-      return;
+      previewPageDown(previewTarget());
+      return true;
     }
+    return false;
+  };
+
+  // Enter, Ctrl+O and Ctrl+F act on the selected entry: returns true when one of them did.
+  const handleEntryKey = (input: string, key: Key): boolean => {
+    // Any other key is text for the box; resolving an entry would search before the debounce.
+    const isEntryKey = key.return || (key.ctrl && (input === 'o' || input === 'f'));
+    if (!isEntryKey) return false;
+    const entry = entryAtSelection();
+    if (!entry) return false;
 
     // Enter: copy slash command to clipboard
-    if (key.return && selectedEntry) {
-      const slashCmd = vault.getSlashCommand(selectedEntry);
+    if (key.return) {
+      const slashCmd = vault.getSlashCommand(entry);
       import('clipboardy')
         .then((mod) => {
           const clipboard = mod.default ?? mod;
           return (clipboard as { write: (s: string) => Promise<void> }).write(slashCmd);
         })
         .then(() => {
-          vault.recordUsage(selectedEntry.id);
+          vault.recordUsage(entry.id);
           setErrorMessage(`Copied: ${slashCmd}`);
         })
         .catch((err: unknown) => {
           setErrorMessage(`Clipboard error: ${err instanceof Error ? err.message : String(err)}`);
         });
-      return;
+      return true;
     }
 
     // Ctrl+O: open file in $EDITOR
-    if (key.ctrl && input === 'o' && selectedEntry) {
+    if (key.ctrl && input === 'o') {
       try {
-        openInEditor(selectedEntry.filePath);
+        openInEditor(entry.filePath);
       } catch (err) {
         setErrorMessage(`Editor error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return true;
+    }
+
+    // Ctrl+F: toggle favorite
+    if (key.ctrl && input === 'f') {
+      const isFav = vault.toggleFavorite(entry.id);
+      setErrorMessage(
+        isFav ? `★ Added to favorites: ${entry.name}` : `☆ Removed from favorites: ${entry.name}`,
+      );
+      return true;
+    }
+    return false;
+  };
+
+  useKeyEvents((input, key) => {
+    // Printable keys type into the search box, so actions use Ctrl chords and
+    // non-printable keys only. Ctrl+C always quits and is never typed.
+    if (key.ctrl && input === 'c') {
+      exit();
+      return STOP_KEYS;
+    }
+
+    // Below the minimum width only the banner is drawn, so nothing else may act.
+    if (isTooNarrow) {
+      if (key.escape) {
+        exit();
+        return STOP_KEYS;
       }
       return;
     }
 
-    // Ctrl+F: toggle favorite
-    if (key.ctrl && input === 'f' && selectedEntry) {
-      const isFav = vault.toggleFavorite(selectedEntry.id);
-      setErrorMessage(
-        isFav
-          ? `★ Added to favorites: ${selectedEntry.name}`
-          : `☆ Removed from favorites: ${selectedEntry.name}`,
-      );
+    // Escape: clear query or exit
+    if (key.escape) {
+      if (editor.getValue()) {
+        editor.clear();
+        restartList();
+      } else {
+        exit();
+        return STOP_KEYS;
+      }
       return;
     }
+
+    if (handleNavigationKey(key) || handleEntryKey(input, key)) return;
+
+    if (editor.apply(input, key)) restartList();
   });
 
   if (isTooNarrow) {
     return (
       <Box>
         <Text color="yellow">
-          Terminal too narrow ({columns} cols). Minimum: {MIN_USABLE_WIDTH}.
+          Terminal too narrow ({columns} cols). Minimum: {MIN_USABLE_WIDTH}. Press ^C to quit.
         </Text>
       </Box>
     );
@@ -184,7 +233,7 @@ export function App({ vault }: Props) {
     <Box flexDirection="column" width={columns}>
       <SearchBar
         query={query}
-        onQueryChange={setQuery}
+        cursor={editor.cursor}
         filterType={filterType}
         filterSource={filterSource}
         width={columns}
@@ -212,7 +261,7 @@ export function App({ vault }: Props) {
             <PreviewPane
               entry={selectedEntry}
               query={query}
-              scrollTop={previewScrollTop}
+              scrollTop={previewScrollTopFor(selectedEntry?.id ?? null)}
               height={bodyHeight}
               width={previewWidth}
             />
@@ -224,6 +273,7 @@ export function App({ vault }: Props) {
         width={columns}
         mode={mode}
         hasSelection={selectedEntry !== null}
+        showPreview={showPreview}
       />
     </Box>
   );
