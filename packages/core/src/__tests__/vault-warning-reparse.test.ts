@@ -69,6 +69,7 @@ beforeEach(async () => {
   root = await realpath(await mkdtemp(join(tmpdir(), 'cv-warning-reparse-')));
   claudeDir = join(root, 'claude');
   await mkdir(claudeDir, { recursive: true });
+  await mkdir(join(root, 'project'), { recursive: true });
   vault = null;
 });
 

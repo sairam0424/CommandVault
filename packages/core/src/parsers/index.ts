@@ -3,8 +3,13 @@ export { parseAgents } from './agent-parser.js';
 export { parseCommands } from './command-parser.js';
 export { parsePlugins } from './plugin-parser.js';
 export { parseRules } from './rule-parser.js';
-export { parseHooks } from './hook-parser.js';
-export { detectAgentConfigs } from './multi-agent-parser.js';
+export { parseHooks, type HookParseOptions } from './hook-parser.js';
+export {
+  AGENT_CONFIG_PARSER,
+  detectAgentConfigs,
+  resolveProjectRoot,
+  withAgentConfigs,
+} from './multi-agent-parser.js';
 export { withRetry } from './retry.js';
 export { parseSingleFile, isSingleFileParseable } from './single-file-parser.js';
 export { parseMarkdownDir, type ParseConfig, type ParseContext } from './base-parser.js';

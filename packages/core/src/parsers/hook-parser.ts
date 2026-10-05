@@ -1,4 +1,5 @@
-import { basename, dirname } from 'node:path';
+import { realpath } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import type { VaultEntry, ParserResult, ParseError } from '../types/index.js';
 import { generateStableId, getLastModified, safePath } from './utils.js';
 import { FileTooLargeError, readBoundedText, skippedTooLarge } from './bounded-read.js';
@@ -20,6 +21,17 @@ function resolveMatcher(matcher: unknown): string {
   return typeof matcher === 'string' && matcher.trim() !== '' ? matcher : MATCH_ALL_MATCHER;
 }
 
+/** Where `parseHooks` may look for the scripts a hook command names. */
+export interface HookParseOptions {
+  /**
+   * An absolute project directory the hooks run in, possibly spelled through a symlink. Relative
+   * scripts are looked for here first, and scripts inside it are readable. Omitted (or blank) means
+   * the settings file's own directory is the only root. The current directory is never one: the
+   * entries must not change with the directory a scan happens to run from.
+   */
+  readonly projectRoot?: string;
+}
+
 const HOOK_EVENTS = ['PreToolUse', 'PostToolUse', 'Stop', 'UserPromptSubmit'] as const;
 type HookEvent = (typeof HOOK_EVENTS)[number];
 
@@ -34,11 +46,30 @@ function toHookDefinition(hook: unknown): HookDefinition {
   return hook as unknown as HookDefinition;
 }
 
+/**
+ * The script's real path when it exists inside one of the roots. A relative path is tried against
+ * each root in turn, in order: `realpath` on the bare string would resolve it against the current
+ * directory.
+ */
+async function findContainedScript(
+  scriptPath: string,
+  roots: readonly string[],
+): Promise<string | null> {
+  const candidates = isAbsolute(scriptPath)
+    ? [scriptPath]
+    : roots.map((r) => resolve(r, scriptPath));
+  for (const candidate of candidates) {
+    const validated = await safePath(candidate, roots);
+    if (validated) return validated;
+  }
+  return null;
+}
+
 async function buildHookEntry(
   event: HookEvent,
   matcher: string,
   hook: HookDefinition,
-  allowedRoots: readonly string[],
+  roots: readonly string[],
   warnings: ParseError[],
 ): Promise<VaultEntry> {
   const commandParts = hook.command.split(' ');
@@ -49,8 +80,8 @@ async function buildHookEntry(
   let content = '';
   let lastModified = new Date();
 
-  // Validate script path stays within allowed roots (path containment)
-  const validatedPath = await safePath(scriptPath, allowedRoots);
+  // Validate script path stays within the roots (path containment)
+  const validatedPath = await findContainedScript(scriptPath, roots);
   if (validatedPath) {
     try {
       content = await readBoundedText(validatedPath);
@@ -86,14 +117,33 @@ async function buildHookEntry(
   };
 }
 
-export async function parseHooks(settingsPath: string): Promise<ParserResult> {
+/**
+ * Roots for script lookup and containment, in lookup order: the explicit project directory, when
+ * there is one (hooks run there), then the directory containing the settings file (e.g. ~/.claude/).
+ */
+function scriptRoots(settingsPath: string, options: HookParseOptions): readonly string[] {
+  const settingsDir = dirname(settingsPath);
+  const projectRoot = options.projectRoot?.trim() ? options.projectRoot : null;
+  return projectRoot === null ? [settingsDir] : [projectRoot, settingsDir];
+}
+
+/**
+ * The roots as the file system spells them. `safePath` compares a script's real path with the
+ * root, so a root reached through a symlink (macOS /tmp and /var, a linked workspace or home
+ * directory, an editor folder that is not canonical) would contain no script at all and every hook
+ * would quietly fall back to its command string. A root that cannot be resolved stays as given: it
+ * cannot contain a script either way, which is `safePath`'s own answer for a path it cannot resolve.
+ */
+async function canonicalRoots(roots: readonly string[]): Promise<readonly string[]> {
+  return Promise.all(roots.map((root) => realpath(root).catch(() => root)));
+}
+
+export async function parseHooks(
+  settingsPath: string,
+  options: HookParseOptions = {},
+): Promise<ParserResult> {
   const entries: VaultEntry[] = [];
   const errors: ParseError[] = [];
-
-  // Allowed roots for script path containment:
-  // 1. The directory containing the settings file (e.g., ~/.claude/)
-  // 2. The current working directory (for project-level hooks)
-  const allowedRoots = [dirname(settingsPath), process.cwd()] as const;
 
   let settings: unknown;
   try {
@@ -130,6 +180,8 @@ export async function parseHooks(settingsPath: string): Promise<ParserResult> {
     return { entries, errors };
   }
 
+  const roots = await canonicalRoots(scriptRoots(settingsPath, options));
+
   for (const event of HOOK_EVENTS) {
     const matchers = hooksByEvent[event];
     if (!Array.isArray(matchers)) continue;
@@ -140,9 +192,7 @@ export async function parseHooks(settingsPath: string): Promise<ParserResult> {
 
       for (const hook of matcherDef.hooks as readonly unknown[]) {
         try {
-          entries.push(
-            await buildHookEntry(event, matcher, toHookDefinition(hook), allowedRoots, errors),
-          );
+          entries.push(await buildHookEntry(event, matcher, toHookDefinition(hook), roots, errors));
         } catch (err) {
           errors.push({
             filePath: settingsPath,
