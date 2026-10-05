@@ -85,6 +85,61 @@ describe('detectAgentConfigs — Cursor', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Blank descriptions fall back the same way the rules parser does
+// ---------------------------------------------------------------------------
+describe('detectAgentConfigs — blank description fallback', () => {
+  let projectRoot: string;
+
+  beforeAll(async () => {
+    projectRoot = join(tempDir, 'blank-description-project');
+    const rulesDir = join(projectRoot, '.cursor', 'rules');
+    await mkdir(rulesDir, { recursive: true });
+    await writeFile(
+      join(rulesDir, 'empty-quoted.mdc'),
+      '---\ndescription: ""\n---\n# Heading Here\nbody\n',
+    );
+    await writeFile(
+      join(rulesDir, 'blank-spaces.mdc'),
+      '---\ndescription: "   "\n---\n# Spaced Heading\nbody\n',
+    );
+    await writeFile(join(rulesDir, 'no-heading.mdc'), '---\ndescription: ""\n---\njust prose\n');
+    await writeFile(
+      join(projectRoot, '.cursorrules'),
+      '---\ndescription: ""\n---\n# Root Heading\nbody\n',
+    );
+    await writeFile(
+      join(rulesDir, 'declared.mdc'),
+      '---\ndescription: "  Real text  "\n---\n# Other Heading\nbody\n',
+    );
+  });
+
+  async function descriptionOf(fileName: string): Promise<string | undefined> {
+    const result = await detectAgentConfigs(projectRoot);
+    return result.entries.find((e) => e.filePath.endsWith(fileName))?.description;
+  }
+
+  it('uses the first heading when the description is an empty string', async () => {
+    expect(await descriptionOf('empty-quoted.mdc')).toBe('Heading Here');
+  });
+
+  it('treats a whitespace-only description as missing', async () => {
+    expect(await descriptionOf('blank-spaces.mdc')).toBe('Spaced Heading');
+  });
+
+  it('ends at the per-tool label when there is no heading either', async () => {
+    expect(await descriptionOf('no-heading.mdc')).toBe('Cursor Rules from no-heading.mdc');
+  });
+
+  it('applies the same fallback to a single root config file', async () => {
+    expect(await descriptionOf('.cursorrules')).toBe('Root Heading');
+  });
+
+  it('never overwrites a declared description', async () => {
+    expect(await descriptionOf('declared.mdc')).toBe('Real text');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Copilot Configs
 // ---------------------------------------------------------------------------
 describe('detectAgentConfigs — Copilot', () => {

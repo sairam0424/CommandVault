@@ -94,14 +94,24 @@ export interface ParserResult {
   readonly errors: readonly ParseError[];
 }
 
+/**
+ * - error: the file or record could not be used, or a parser failed.
+ * - warning: something was indexed or skipped on purpose and is worth surfacing, not alarming
+ *   (a frontmatter recovery, a dropped duplicate id, a file over the read limit).
+ */
+export type ParseSeverity = 'error' | 'warning';
+
 export interface ParseError {
   readonly filePath: string;
   readonly message: string;
+  /** Absent means "error"; use `getParseSeverity` to read it. Built-in parsers always set it. */
+  readonly severity?: ParseSeverity;
   readonly cause?: unknown;
   /**
    * Parser the error is attributed to, when the path alone cannot say: a registered parser's type
    * (built-in entry types and plugin parser types), "agent-configs" (project agent-config
    * detection), or "import" (Vault.addEntries). A duplicate-id error carries the losing entry's type.
+   * `runParserSafely` fills it in for any problem a parser reports without one.
    */
   readonly parser?: string;
 }

@@ -154,7 +154,10 @@ describe('parseMarkdownDir', () => {
     });
 
     it('applies custom extractMetadata when provided', async () => {
-      const content = mdWithFrontmatter({ name: 'meta-test', version: '2.0.0' }, 'Body');
+      const content = mdWithFrontmatter(
+        { name: 'meta-test', version: '2.0.0', description: 'Declared' },
+        'Body',
+      );
       await writeFile(join(tempDir, 'meta.md'), content);
 
       const config = makeConfig({

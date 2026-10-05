@@ -1,4 +1,4 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import { join, basename, dirname } from 'node:path';
 import type { VaultEntry, ParserResult, ParseError, ParsedFrontmatter } from '../types/index.js';
 import {
@@ -10,6 +10,12 @@ import {
   type FrontmatterRecovery,
 } from './utils.js';
 import { withRetry } from './retry.js';
+import { describeFileFailure, readBoundedText } from './bounded-read.js';
+import {
+  deriveDescription,
+  descriptionMetadata,
+  type DerivedDescription,
+} from './body-description.js';
 
 export interface ParseContext {
   readonly folderName: string;
@@ -61,14 +67,13 @@ function describeRecoveryWarning(
   return {
     filePath,
     message: `Recovered ${type} frontmatter via ${recovery} fallback (name/description only): ${reason}`,
+    severity: 'warning',
     cause,
   };
 }
 
 function readSource(filePath: string, config: ParseConfig): Promise<string> {
-  return config.useRetry
-    ? withRetry(() => readFile(filePath, 'utf-8'))
-    : readFile(filePath, 'utf-8');
+  return config.useRetry ? withRetry(() => readBoundedText(filePath)) : readBoundedText(filePath);
 }
 
 function resolveDescription(
@@ -76,9 +81,11 @@ function resolveDescription(
   content: string,
   context: ParseContext,
   config: ParseConfig,
-): string {
-  if (config.descriptionFromContent) return config.descriptionFromContent(data, content, context);
-  return typeof data.description === 'string' ? data.description.trim() : '';
+): DerivedDescription {
+  if (config.descriptionFromContent) {
+    return { text: config.descriptionFromContent(data, content, context), fromBody: false };
+  }
+  return deriveDescription(data, content);
 }
 
 function resolveTags(
@@ -90,7 +97,7 @@ function resolveTags(
 ): string[] {
   const extracted = extractTags(name, description, data);
   const tags = config.postProcessTags ? config.postProcessTags(extracted, data) : extracted;
-  return recovery === 'line-based' ? [...tags, FRONTMATTER_WARNING_TAG] : tags;
+  return recovery ? [...tags, FRONTMATTER_WARNING_TAG] : tags;
 }
 
 async function parseFileEntry(
@@ -105,13 +112,18 @@ async function parseFileEntry(
   const name = config.nameFromPath
     ? config.nameFromPath(folderName, data, context)
     : (data.name ?? basename(fileName, '.md'));
-  const description = resolveDescription(data, content, context, config);
+  const derived = resolveDescription(data, content, context, config);
+  const description = derived.text;
   const source = inferSource(name, filePath);
   const disambiguator = config.idDisambiguator ? config.idDisambiguator(name, filePath) : source;
   const parsedMetadata = config.extractMetadata
     ? config.extractMetadata(data, content, context)
     : {};
-  const metadata = recovery ? { ...parsedMetadata, frontmatterRecovery: recovery } : parsedMetadata;
+  const metadata = {
+    ...parsedMetadata,
+    ...(recovery ? { frontmatterRecovery: recovery } : {}),
+    ...descriptionMetadata(derived),
+  };
   const warnings =
     recovery === 'line-based'
       ? [describeRecoveryWarning(config.type, filePath, recovery, recoveryCause)]
@@ -132,6 +144,19 @@ async function parseFileEntry(
     usageCount: 0,
   };
   return { entry, warnings };
+}
+
+function describeParseFailure(err: unknown, filePath: string, config: ParseConfig): ParseError {
+  return describeFileFailure(
+    err,
+    filePath,
+    `Failed to parse ${config.type}`,
+    `${config.type} file`,
+  );
+}
+
+function directoryNotFound(dir: string, config: ParseConfig): ParseError {
+  return { filePath: dir, message: config.dirNotFoundMessage, severity: 'error' };
 }
 
 function collectParsed(parsed: ParsedFile, entries: VaultEntry[], errors: ParseError[]): void {
@@ -165,7 +190,7 @@ export async function parseMarkdownDir(dir: string, config: ParseConfig): Promis
     } catch {
       return {
         entries: [],
-        errors: [{ filePath: dir, message: config.dirNotFoundMessage }],
+        errors: [directoryNotFound(dir, config)],
       };
     }
 
@@ -176,11 +201,7 @@ export async function parseMarkdownDir(dir: string, config: ParseConfig): Promis
         const parsed = await parseFileEntry(filePath, folderName, fileName, config);
         collectParsed(parsed, entries, errors);
       } catch (err) {
-        errors.push({
-          filePath,
-          message: `Failed to parse ${config.type}: ${(err as Error).message}`,
-          cause: err,
-        });
+        errors.push(describeParseFailure(err, filePath, config));
       }
     });
 
@@ -195,7 +216,7 @@ export async function parseMarkdownDir(dir: string, config: ParseConfig): Promis
     } catch {
       return {
         entries: [],
-        errors: [{ filePath: dir, message: config.dirNotFoundMessage }],
+        errors: [directoryNotFound(dir, config)],
       };
     }
 
@@ -212,11 +233,7 @@ export async function parseMarkdownDir(dir: string, config: ParseConfig): Promis
         const isNotFound = (err as NodeJS.ErrnoException).code === 'ENOENT';
         if (config.skipEnoent && isNotFound) return;
         if (!isNotFound) {
-          errors.push({
-            filePath,
-            message: `Failed to parse ${config.type}: ${(err as Error).message}`,
-            cause: err,
-          });
+          errors.push(describeParseFailure(err, filePath, config));
         }
       }
     });
@@ -229,7 +246,7 @@ export async function parseMarkdownDir(dir: string, config: ParseConfig): Promis
     } catch {
       return {
         entries: [],
-        errors: [{ filePath: dir, message: config.dirNotFoundMessage }],
+        errors: [directoryNotFound(dir, config)],
       };
     }
 
@@ -239,11 +256,7 @@ export async function parseMarkdownDir(dir: string, config: ParseConfig): Promis
         const parsed = await parseFileEntry(filePath, basename(dir), file, config);
         collectParsed(parsed, entries, errors);
       } catch (err) {
-        errors.push({
-          filePath,
-          message: `Failed to parse ${config.type}: ${(err as Error).message}`,
-          cause: err,
-        });
+        errors.push(describeParseFailure(err, filePath, config));
       }
     });
 

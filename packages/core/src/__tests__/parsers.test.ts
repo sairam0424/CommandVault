@@ -244,11 +244,13 @@ describe('parsePlugins', () => {
     expect(plugin!.lastModified.toISOString()).toBe('2025-09-20T16:00:00.000Z');
   });
 
-  it('returns all 4 plugins with zero errors', async () => {
+  it('returns all 4 plugins with no errors and one warning for the undescribed one', async () => {
     const result = await parsePlugins(join(FIXTURES, 'plugins'));
 
     expect(result.entries).toHaveLength(4);
-    expect(result.errors).toHaveLength(0);
+    expect(result.errors.filter((e) => e.severity !== 'warning')).toHaveLength(0);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0].message).toContain('no-manifest-test');
   });
 
   it('returns empty entries when registry file is missing', async () => {
