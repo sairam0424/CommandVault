@@ -26,7 +26,7 @@ function makeEntry(overrides: Partial<VaultEntry> = {}): VaultEntry {
 }
 
 describe('runParserSafely', () => {
-  it('passes a healthy result through unchanged', async () => {
+  it('passes a healthy result through, naming the parser on its problems', async () => {
     const entry = makeEntry();
     const result = await runParserSafely('skill', '/claude/skills', async () => ({
       entries: [entry],
@@ -34,7 +34,7 @@ describe('runParserSafely', () => {
     }));
 
     expect(result.entries).toEqual([entry]);
-    expect(result.errors).toEqual([{ filePath: '/x', message: 'warn' }]);
+    expect(result.errors).toEqual([{ filePath: '/x', message: 'warn', parser: 'skill' }]);
   });
 
   it('converts a synchronous throw into a ParseError attributed to the parser', async () => {

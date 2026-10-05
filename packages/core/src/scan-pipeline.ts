@@ -1,4 +1,4 @@
-import type { ParseError, ParserResult, VaultEntry } from './types/index.js';
+import type { ParseError, ParseSeverity, ParserResult, VaultEntry } from './types/index.js';
 import { KNOWN_ENTRY_TYPES } from './constants.js';
 
 /** Prefix of the ParseError raised when two entries would share one id. */
@@ -47,7 +47,14 @@ export function partitionValidEntries(
   if (!Array.isArray(records)) {
     return {
       valid: [],
-      errors: [{ filePath: '', parser, message: `Rejected ${parser} batch: not an array` }],
+      errors: [
+        {
+          filePath: '',
+          parser,
+          message: `Rejected ${parser} batch: not an array`,
+          severity: 'error',
+        },
+      ],
     };
   }
 
@@ -60,9 +67,25 @@ export function partitionValidEntries(
       return;
     }
     const filePath = isRecord(record) && typeof record.filePath === 'string' ? record.filePath : '';
-    errors.push({ filePath, parser, message: `Rejected ${parser} record #${index}: ${reason}` });
+    errors.push({
+      filePath,
+      parser,
+      message: `Rejected ${parser} record #${index}: ${reason}`,
+      severity: 'error',
+    });
   });
   return { valid, errors };
+}
+
+/**
+ * Tags a problem a parser reported with that parser, unless it already names one. Without the tag
+ * the Vault can only route a problem by its file path, and a path outside the Claude config
+ * (a hook script, a plugin install dir) routes to nothing, so a re-run of the parser would never
+ * drop the problem and would add it again.
+ */
+function attributeTo(parser: string, error: ParseError): ParseError {
+  if (!isRecord(error) || error.parser !== undefined) return error;
+  return { ...error, parser };
 }
 
 /**
@@ -86,6 +109,7 @@ export async function runParserSafely(
           filePath,
           parser,
           message: `Parser "${parser}" failed: ${describeFailure(cause)}`,
+          severity: 'error',
           cause,
         },
       ],
@@ -95,13 +119,20 @@ export async function runParserSafely(
   if (!isRecord(result) || !Array.isArray(result.entries)) {
     return {
       entries: [],
-      errors: [{ filePath, parser, message: `Parser "${parser}" returned a malformed result` }],
+      errors: [
+        {
+          filePath,
+          parser,
+          message: `Parser "${parser}" returned a malformed result`,
+          severity: 'error',
+        },
+      ],
     };
   }
 
   const { valid, errors: rejected } = partitionValidEntries(result.entries, parser);
   const reported = Array.isArray(result.errors) ? (result.errors as ParseError[]) : [];
-  return { entries: valid, errors: [...reported, ...rejected] };
+  return { entries: valid, errors: [...reported.map((e) => attributeTo(parser, e)), ...rejected] };
 }
 
 function compareCodeUnits(a: string, b: string): number {
@@ -137,6 +168,7 @@ export function dedupeEntriesById(entries: readonly VaultEntry[]): {
       filePath: entry.filePath,
       parser: entry.type,
       message: `${DUPLICATE_ID_PREFIX}${entry.id}: ${winner.filePath} vs ${entry.filePath}`,
+      severity: 'warning',
     });
   }
 
@@ -146,4 +178,12 @@ export function dedupeEntriesById(entries: readonly VaultEntry[]): {
 /** True when `errors` records a dropped duplicate for `parser`, so its dropped entries are stale. */
 export function hasDuplicateIdError(errors: readonly ParseError[], parser: string): boolean {
   return errors.some((e) => e.parser === parser && e.message.startsWith(DUPLICATE_ID_PREFIX));
+}
+
+/**
+ * How serious a parse problem is. A problem that carries no severity (one built by code outside the
+ * built-in parsers) is an error, so nothing is ever downgraded by accident.
+ */
+export function getParseSeverity(error: ParseError): ParseSeverity {
+  return error.severity ?? 'error';
 }

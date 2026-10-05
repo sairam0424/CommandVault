@@ -1,8 +1,10 @@
-import { readFile, readdir, access } from 'node:fs/promises';
+import { readdir, access } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
 import type { VaultEntry, ParserResult, ParseError, EntrySource } from '../types/index.js';
 import { generateStableId, parseFrontmatter, getLastModified, extractTags } from './utils.js';
+import { describeFileFailure, readBoundedText } from './bounded-read.js';
+import { deriveRuleDescription } from './rule-parser.js';
 
 interface AgentConfigSpec {
   readonly source: EntrySource;
@@ -58,18 +60,14 @@ async function readMarkdownDir(
   const parsePromises = files.map(async (file) => {
     const filePath = join(dirPath, file);
     try {
-      const raw = await readFile(filePath, 'utf-8');
+      const raw = await readBoundedText(filePath);
       const { data, content } = parseFrontmatter(raw);
       const name =
         data.name ??
         `${spec.label} - ${basename(file, '.md')
           .replace(/\.\w+$/, '')
           .replace(/[-_]/g, ' ')}`;
-      const firstLine = content.split('\n').find((l) => l.startsWith('# '));
-      const description =
-        typeof data.description === 'string'
-          ? data.description.trim()
-          : (firstLine?.replace(/^#\s+/, '') ?? `${spec.label} from ${file}`);
+      const description = deriveRuleDescription(data, content, file, `${spec.label} from ${file}`);
       const tags = extractTags(name, description, data);
       tags.push(spec.tag, 'ai-agent-config');
       const lastModified = await getLastModified(filePath);
@@ -90,11 +88,9 @@ async function readMarkdownDir(
       };
       entries.push(entry);
     } catch (err) {
-      errors.push({
-        filePath,
-        message: `Failed to parse ${spec.label} file: ${(err as Error).message}`,
-        cause: err,
-      });
+      errors.push(
+        describeFileFailure(err, filePath, `Failed to parse ${spec.label} file`, spec.label),
+      );
     }
   });
 
@@ -113,7 +109,7 @@ async function readSingleFile(
   }
 
   try {
-    const raw = await readFile(filePath, 'utf-8');
+    const raw = await readBoundedText(filePath);
     const isJson = filePath.endsWith('.json');
     const isYaml = filePath.endsWith('.yml') || filePath.endsWith('.yaml');
 
@@ -138,11 +134,7 @@ async function readSingleFile(
     } else {
       const { data, content: mdContent } = parseFrontmatter(raw);
       content = mdContent;
-      const firstLine = mdContent.split('\n').find((l) => l.startsWith('# '));
-      description =
-        typeof data.description === 'string'
-          ? data.description.trim()
-          : (firstLine?.replace(/^#\s+/, '') ?? `${name}`);
+      description = deriveRuleDescription(data, mdContent, basename(filePath), name);
       const fmTags = extractTags(name, description, data);
       metadata = { ...metadata, frontmatter: data, extractedTags: fmTags };
     }
@@ -166,11 +158,7 @@ async function readSingleFile(
     };
     entries.push(entry);
   } catch (err) {
-    errors.push({
-      filePath,
-      message: `Failed to parse ${name}: ${(err as Error).message}`,
-      cause: err,
-    });
+    errors.push(describeFileFailure(err, filePath, `Failed to parse ${name}`, name));
   }
 }
 

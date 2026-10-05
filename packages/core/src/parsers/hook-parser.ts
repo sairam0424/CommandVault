@@ -1,7 +1,7 @@
-import { readFile } from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
 import type { VaultEntry, ParserResult, ParseError } from '../types/index.js';
 import { generateStableId, getLastModified, safePath } from './utils.js';
+import { FileTooLargeError, readBoundedText, skippedTooLarge } from './bounded-read.js';
 
 interface HookDefinition {
   readonly type?: string;
@@ -39,6 +39,7 @@ async function buildHookEntry(
   matcher: string,
   hook: HookDefinition,
   allowedRoots: readonly string[],
+  warnings: ParseError[],
 ): Promise<VaultEntry> {
   const commandParts = hook.command.split(' ');
   const scriptPath = commandParts.find((p: string) => p.endsWith('.js')) ?? hook.command;
@@ -52,9 +53,10 @@ async function buildHookEntry(
   const validatedPath = await safePath(scriptPath, allowedRoots);
   if (validatedPath) {
     try {
-      content = await readFile(validatedPath, 'utf-8');
+      content = await readBoundedText(validatedPath);
       lastModified = await getLastModified(validatedPath);
-    } catch {
+    } catch (err) {
+      if (err instanceof FileTooLargeError) warnings.push(skippedTooLarge(err, 'hook script'));
       content = `// Script at: ${scriptPath}`;
     }
   } else {
@@ -95,23 +97,31 @@ export async function parseHooks(settingsPath: string): Promise<ParserResult> {
 
   let settings: unknown;
   try {
-    const raw = await readFile(settingsPath, 'utf-8');
-    settings = JSON.parse(raw);
+    settings = JSON.parse(await readBoundedText(settingsPath));
   } catch (err) {
+    if (err instanceof FileTooLargeError) {
+      return { entries: [], errors: [skippedTooLarge(err, 'settings file')] };
+    }
     const message =
       err instanceof SyntaxError
         ? `Invalid JSON in settings file: ${err.message}`
         : 'Settings file not found or unreadable';
     return {
       entries: [],
-      errors: [{ filePath: settingsPath, message }],
+      errors: [{ filePath: settingsPath, message, severity: 'error' }],
     };
   }
 
   if (!isRecord(settings)) {
     return {
       entries: [],
-      errors: [{ filePath: settingsPath, message: 'Settings file must contain a JSON object' }],
+      errors: [
+        {
+          filePath: settingsPath,
+          message: 'Settings file must contain a JSON object',
+          severity: 'error',
+        },
+      ],
     };
   }
 
@@ -130,11 +140,14 @@ export async function parseHooks(settingsPath: string): Promise<ParserResult> {
 
       for (const hook of matcherDef.hooks as readonly unknown[]) {
         try {
-          entries.push(await buildHookEntry(event, matcher, toHookDefinition(hook), allowedRoots));
+          entries.push(
+            await buildHookEntry(event, matcher, toHookDefinition(hook), allowedRoots, errors),
+          );
         } catch (err) {
           errors.push({
             filePath: settingsPath,
             message: `Invalid ${event} hook on [${matcher}]: ${(err as Error).message}`,
+            severity: 'error',
             cause: err,
           });
         }

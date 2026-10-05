@@ -33,3 +33,14 @@ export const KNOWN_ENTRY_TYPES: readonly string[] = [
   'rule',
   'hook',
 ];
+
+export const BYTES_PER_MIB = 1024 * 1024;
+
+/**
+ * Largest file a parser will read. Bigger files are skipped with a warning instead of being loaded
+ * whole, which bounds the memory one stray or generated file can cost a scan.
+ */
+export const MAX_PARSE_FILE_BYTES = 32 * BYTES_PER_MIB;
+
+/** Longest description derived from a document body, ellipsis included. */
+export const MAX_DESCRIPTION_LENGTH = 200;

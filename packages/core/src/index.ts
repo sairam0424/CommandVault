@@ -16,12 +16,19 @@ export {
   parseSingleFile,
   isSingleFileParseable,
 } from './parsers/index.js';
-export { parseMarkdownDir } from './parsers/base-parser.js';
+export { parseMarkdownDir, FRONTMATTER_WARNING_TAG } from './parsers/base-parser.js';
 export type { ParseConfig, ParseContext } from './parsers/base-parser.js';
 export { ParserRegistry, getDefaultRegistry } from './parsers/parser-registry.js';
 export type { ParserPlugin } from './parsers/parser-registry.js';
 export { registerBuiltinParsers } from './parsers/builtin-registrations.js';
-export { TYPE_EMOJIS, TYPE_COLORS, TYPE_LABELS, KNOWN_ENTRY_TYPES } from './constants.js';
+export {
+  TYPE_EMOJIS,
+  TYPE_COLORS,
+  TYPE_LABELS,
+  KNOWN_ENTRY_TYPES,
+  MAX_PARSE_FILE_BYTES,
+  MAX_DESCRIPTION_LENGTH,
+} from './constants.js';
 export type {
   VaultEntry,
   VaultStats,
@@ -34,10 +41,12 @@ export type {
   ParsedFrontmatter,
   ParserResult,
   ParseError,
+  ParseSeverity,
   RankingWeights,
   VaultEventMap,
   VaultEventHandler,
 } from './types/index.js';
+export { getParseSeverity } from './scan-pipeline.js';
 export { getContentExcerpt } from './utils/excerpt.js';
 export type { ContentExcerpt } from './utils/excerpt.js';
 export { RegistryManager, JsonRegistryAdapter } from './registry/index.js';

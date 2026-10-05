@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
 import type { VaultEntry, EntryType } from '../types/index.js';
 import {
@@ -9,6 +8,9 @@ import {
   extractTags,
 } from './utils.js';
 import { withRetry } from './retry.js';
+import { readBoundedText } from './bounded-read.js';
+import { deriveDescription, descriptionMetadata } from './body-description.js';
+import { deriveRuleDescription } from './rule-parser.js';
 
 const MARKDOWN_PARSEABLE_TYPES = new Set<EntryType>(['skill', 'agent', 'rule', 'command']);
 
@@ -25,7 +27,7 @@ export async function parseSingleFile(
   }
 
   try {
-    const raw = await withRetry(() => readFile(filePath, 'utf-8'));
+    const raw = await withRetry(() => readBoundedText(filePath));
     const lastModified = await getLastModified(filePath);
     const { data, content } = parseFrontmatter(raw);
 
@@ -54,7 +56,8 @@ function parseSkillFile(
 ): VaultEntry {
   const folderName = basename(dirname(filePath));
   const name = (data.name as string) ?? folderName;
-  const description = typeof data.description === 'string' ? data.description.trim() : '';
+  const derived = deriveDescription(data, content);
+  const description = derived.text;
   const source = inferSource(name, filePath);
   const tags = extractTags(name, description, data);
 
@@ -72,6 +75,7 @@ function parseSkillFile(
       triggers: data.triggers,
       allowedTools: data.allowedTools ?? data['allowed-tools'],
       folderName,
+      ...descriptionMetadata(derived),
     },
     content,
     lastModified,
@@ -88,7 +92,8 @@ function parseAgentFile(
 ): VaultEntry {
   const file = basename(filePath);
   const name = (data.name as string) ?? basename(file, '.md');
-  const description = typeof data.description === 'string' ? data.description.trim() : '';
+  const derived = deriveDescription(data, content);
+  const description = derived.text;
   const source = inferSource(name, filePath);
   const tags = extractTags(name, description, data);
 
@@ -105,6 +110,7 @@ function parseAgentFile(
       emoji: data.emoji,
       vibe: data.vibe,
       fileName: file,
+      ...descriptionMetadata(derived),
     },
     content,
     lastModified,
@@ -121,11 +127,7 @@ function parseRuleFile(
 ): VaultEntry {
   const file = basename(filePath);
   const name = (data.name as string) ?? basename(file, '.md').replace(/-/g, ' ');
-  const firstLine = content.split('\n').find((l) => l.startsWith('# '));
-  const description =
-    typeof data.description === 'string'
-      ? data.description.trim()
-      : (firstLine?.replace(/^#\s+/, '') ?? `Rule: ${name}`);
+  const description = deriveRuleDescription(data, content, file);
   const tags = extractTags(name, description, data);
   tags.push('rule');
 
@@ -157,7 +159,8 @@ function parseCommandFile(
   const fileName = basename(filePath, '.md');
   const commandName = parentDir !== 'commands' ? `${parentDir}:${fileName}` : fileName;
   const name = (data.name as string) ?? commandName;
-  const description = typeof data.description === 'string' ? data.description.trim() : '';
+  const derived = deriveDescription(data, content);
+  const description = derived.text;
   const source = inferSource(name, filePath);
   const tags = extractTags(name, description, data);
 
@@ -172,6 +175,7 @@ function parseCommandFile(
     metadata: {
       namespace: parentDir !== 'commands' ? parentDir : undefined,
       fileName: basename(filePath),
+      ...descriptionMetadata(derived),
     },
     content,
     lastModified,

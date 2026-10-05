@@ -157,7 +157,7 @@ describe('parser integration with recovered frontmatter', () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it('indexes a command with flow-looking values and flags the recovery', async () => {
+  it('indexes a command with flow-looking values and tags the recovery', async () => {
     const commandsDir = join(tempDir, 'commands');
     await mkdir(commandsDir, { recursive: true });
     await writeFile(join(commandsDir, 'plan.md'), COMMAND_WITH_FLOW_LOOKING_VALUES);
@@ -169,7 +169,7 @@ describe('parser integration with recovered frontmatter', () => {
     expect(result.entries[0].name).toBe('plan');
     expect(result.entries[0].description).toBe('Plan a phase. Usage: run [N] times');
     expect(result.entries[0].metadata.frontmatterRecovery).toBe('quoted');
-    expect(result.entries[0].tags).not.toContain('frontmatter-warning');
+    expect(result.entries[0].tags).toContain('frontmatter-warning');
   });
 
   it('indexes an agent with a column-0 hooks body with a warning tag and a ParseError', async () => {
