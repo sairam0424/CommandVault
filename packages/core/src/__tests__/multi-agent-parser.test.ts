@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { join } from 'node:path';
-import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { detectAgentConfigs } from '../parsers/multi-agent-parser.js';
 
@@ -301,6 +301,10 @@ describe('detectAgentConfigs — Continue', () => {
 // Edge Cases
 // ---------------------------------------------------------------------------
 describe('detectAgentConfigs — edge cases', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('returns empty results for a directory with no agent configs', async () => {
     const emptyRoot = join(tempDir, 'empty-project');
     await mkdir(emptyRoot, { recursive: true });
@@ -311,12 +315,82 @@ describe('detectAgentConfigs — edge cases', () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  it('does not crash on a nonexistent project root', async () => {
-    const result = await detectAgentConfigs(join(tempDir, 'does-not-exist'));
+  it('reports a nonexistent project root as an error instead of scanning nothing', async () => {
+    const missing = join(tempDir, 'does-not-exist');
+
+    const result = await detectAgentConfigs(missing);
 
     expect(result.entries).toHaveLength(0);
-    expect(result.errors).toHaveLength(0);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0].severity).toBe('error');
+    expect(result.errors[0].filePath).toBe(missing);
+    expect(result.errors[0].message).toContain('does not exist');
   });
+
+  it('reports a project root that is a file instead of a directory', async () => {
+    const filePath = join(tempDir, 'a-file-not-a-directory');
+    await writeFile(filePath, 'plain file');
+
+    const result = await detectAgentConfigs(filePath);
+
+    expect(result.entries).toHaveLength(0);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0].severity).toBe('error');
+    expect(result.errors[0].message).toContain('not a directory');
+  });
+
+  it('reads no project directory when none is given, only the home-level configs', async () => {
+    const home = join(tempDir, 'home-without-project');
+    const cwdProject = join(tempDir, 'cwd-project');
+    await mkdir(home, { recursive: true });
+    await mkdir(cwdProject, { recursive: true });
+    await writeFile(join(home, '.aider.conf.yml'), '# global aider\nmodel: sonnet\n');
+    await writeFile(join(cwdProject, 'CLAUDE.md'), '# must not be read\n');
+    await writeFile(join(cwdProject, '.aider.conf.yml'), '# must not be read either\n');
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('USERPROFILE', home);
+    const previousCwd = process.cwd();
+    process.chdir(cwdProject);
+
+    try {
+      const result = await detectAgentConfigs();
+
+      expect(result.errors).toHaveLength(0);
+      expect(result.entries.map((e) => e.filePath)).toEqual([join(home, '.aider.conf.yml')]);
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
+
+  // A denied directory stats fine, so it has to be probed: the readers below treat any failure to
+  // reach a file as "not there", and the scan would come back empty with no error.
+  describe.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'a project root the account cannot search',
+    () => {
+      it.each([
+        ['no permissions', '000', 0o000],
+        ['no search permission', '644', 0o644],
+      ])('reports a directory with %s (mode %s) as an error', async (_label, name, mode) => {
+        const denied = join(tempDir, `denied-${name}`);
+        await mkdir(denied, { recursive: true });
+        await writeFile(join(denied, 'CLAUDE.md'), '# unreachable\n');
+        vi.stubEnv('HOME', join(tempDir, 'no-home-configs'));
+        vi.stubEnv('USERPROFILE', join(tempDir, 'no-home-configs'));
+        await chmod(denied, mode);
+
+        try {
+          const result = await detectAgentConfigs(denied);
+
+          expect(result.entries).toEqual([]);
+          expect(result.errors).toHaveLength(1);
+          expect(result.errors[0]).toMatchObject({ severity: 'error', filePath: denied });
+          expect(result.errors[0]?.message).toContain('Cannot read project directory');
+        } finally {
+          await chmod(denied, 0o755);
+        }
+      });
+    },
+  );
 
   it('handles malformed JSON gracefully with errors array', async () => {
     const malformedRoot = join(tempDir, 'malformed-project');

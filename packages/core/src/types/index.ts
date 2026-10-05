@@ -71,6 +71,19 @@ export interface VaultConfig {
   readonly dbPath: string;
   readonly enableWatcher: boolean;
   readonly defaultSearchTier: SearchTier;
+  /**
+   * A project directory whose agent configs (CLAUDE.md, .claude/, .cursor/rules, .cursorrules,
+   * .github/copilot-instructions.md, .windsurfrules, .windsurf/rules, .aider.conf.yml) are indexed
+   * next to the Claude config directory. Omitted means no project scan at all: nothing is read
+   * from the current directory. The account-level configs under the home directory
+   * (~/.aider.conf.yml, ~/.continue/config.json) are indexed either way.
+   *
+   * It is also where a relative script named by a hook in settings.json is looked for, before the
+   * directory holding settings.json. Without it only that directory is: never the current one.
+   *
+   * A relative path is resolved when the vault is created. A path that is empty, missing or not a
+   * directory is reported by every scan as an "agent-configs" ParseError with severity "error".
+   */
   readonly projectRoot?: string;
 }
 
@@ -109,8 +122,9 @@ export interface ParseError {
   readonly cause?: unknown;
   /**
    * Parser the error is attributed to, when the path alone cannot say: a registered parser's type
-   * (built-in entry types and plugin parser types), "agent-configs" (project agent-config
-   * detection), or "import" (Vault.addEntries). A duplicate-id error carries the losing entry's type.
+   * (built-in entry types and plugin parser types), "agent-configs" (agent-config detection: the
+   * project directory, when one is set, and the home-level configs), or "import"
+   * (Vault.addEntries). A duplicate-id error carries the losing entry's type.
    * `runParserSafely` fills it in for any problem a parser reports without one.
    */
   readonly parser?: string;

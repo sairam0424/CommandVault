@@ -18,10 +18,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const enableWatcher = config.get<boolean>('enableFileWatcher', true);
   const searchTier = config.get<SearchTier>('searchTier', 'minisearch');
 
+  // The core indexes a project directory only when given one. The workspace folder is the project;
+  // with no folder open there is none, and nothing is read from the extension host's directory.
+  const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+
   const vaultConfig: Partial<VaultConfig> = {
     enableWatcher,
     defaultSearchTier: searchTier,
     ...(claudeConfigPath ? { claudeConfigPath } : {}),
+    ...(projectRoot ? { projectRoot } : {}),
   };
 
   vault = createVault(vaultConfig);

@@ -13,7 +13,12 @@ import type {
   ParseError,
 } from './types/index.js';
 import { resolveClaudeDir, resolveDataDir } from './paths.js';
-import { detectAgentConfigs } from './parsers/index.js';
+import {
+  AGENT_CONFIG_PARSER,
+  parseHooks,
+  resolveProjectRoot,
+  withAgentConfigs,
+} from './parsers/index.js';
 import { ParserRegistry, getDefaultRegistry, registerBuiltinParsers } from './parsers/index.js';
 import { parseSingleFile, isSingleFileParseable } from './parsers/single-file-parser.js';
 import { SearchEngine } from './indexer/search-engine.js';
@@ -31,7 +36,6 @@ const PRIVATE_DIR_MODE = 0o700;
 
 const DEBOUNCE_MS = 500;
 const IMPORT_PARSER = 'import';
-const AGENT_CONFIG_PARSER = 'agent-configs';
 
 export class Vault {
   private readonly config: VaultConfig;
@@ -53,6 +57,7 @@ export class Vault {
       dbPath: config?.dbPath ?? join(resolveDataDir(), DB_FILE_NAME),
       enableWatcher: config?.enableWatcher ?? true,
       defaultSearchTier: config?.defaultSearchTier ?? 'minisearch',
+      projectRoot: config?.projectRoot && resolveProjectRoot(config.projectRoot),
     };
 
     this.registry = getDefaultRegistry();
@@ -108,34 +113,37 @@ export class Vault {
     return join(claudePath, `${type}s`);
   }
 
-  private getParserFn(parserType: ParserType): () => Promise<ParserResult> {
+  /** Reads one entry type. Rules are read together with the agent configs, which are rules too. */
+  private getParserFn(parserType: string): () => Promise<ParserResult> {
     const plugin = this.registry.getParser(parserType);
     if (!plugin) {
       return () => Promise.resolve({ entries: [], errors: [] });
     }
     const path = this.getParserPath(parserType);
-    return () => runParserSafely(parserType, path, () => plugin.parse(path));
+    // The built-in hook parser reads the scripts hooks name, relative to the project directory
+    // when one is given. Any other parser, including a replacement for it, is called as registered.
+    const parsePath =
+      plugin.parse === parseHooks
+        ? (settingsPath: string) =>
+            parseHooks(settingsPath, { projectRoot: this.config.projectRoot })
+        : plugin.parse;
+    const parse = () => runParserSafely(parserType, path, () => parsePath(path));
+    return parserType === 'rule' ? () => withAgentConfigs(parse, this.config.projectRoot) : parse;
   }
 
   /** The parser an error belongs to: its explicit tag, else the parser that owns its file path. */
   private errorParser(error: ParseError): string | null {
-    return error.parser ?? routePathToParser(error.filePath, this.config.claudeConfigPath);
+    const parser = error.parser ?? routePathToParser(error.filePath, this.config.claudeConfigPath);
+    return parser === AGENT_CONFIG_PARSER ? 'rule' : parser;
   }
 
   async scan(): Promise<void> {
     return this.withScanLock(async () => {
       const oldEntries = [...this.entries];
 
-      const projectRoot = this.config.projectRoot ?? process.cwd();
-      const runs = this.registry.getAllPlugins().map((plugin) => {
-        const path = this.getParserPath(plugin.type);
-        return runParserSafely(plugin.type, path, () => plugin.parse(path));
-      });
-      runs.push(
-        runParserSafely(AGENT_CONFIG_PARSER, projectRoot, () => detectAgentConfigs(projectRoot)),
+      const results = await Promise.all(
+        this.registry.getAllTypes().map((type) => this.getParserFn(type)()),
       );
-
-      const results = await Promise.all(runs);
       const unique = dedupeEntriesById(results.flatMap((result) => result.entries));
       const allErrors: ParseError[] = [
         ...results.flatMap((result) => result.errors),

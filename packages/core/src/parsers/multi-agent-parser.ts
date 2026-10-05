@@ -1,10 +1,12 @@
-import { readdir, access } from 'node:fs/promises';
-import { join, basename } from 'node:path';
-import { homedir } from 'node:os';
+import { constants } from 'node:fs';
+import { readdir, access, stat } from 'node:fs/promises';
+import { join, basename, resolve } from 'node:path';
+import { homedir, userInfo } from 'node:os';
 import type { VaultEntry, ParserResult, ParseError, EntrySource } from '../types/index.js';
 import { generateStableId, parseFrontmatter, getLastModified, extractTags } from './utils.js';
 import { describeFileFailure, readBoundedText } from './bounded-read.js';
 import { deriveRuleDescription } from './rule-parser.js';
+import { runParserSafely } from '../scan-pipeline.js';
 
 interface AgentConfigSpec {
   readonly source: EntrySource;
@@ -205,23 +207,29 @@ async function detectWindsurfConfigs(
   ]);
 }
 
-async function detectAiderConfigs(
+async function detectProjectAiderConfig(
   projectRoot: string,
   entries: VaultEntry[],
   errors: ParseError[],
 ): Promise<void> {
-  const home = homedir();
   const projectConfig = join(projectRoot, '.aider.conf.yml');
-  const homeConfig = join(home, '.aider.conf.yml');
-
-  await Promise.all([
-    readSingleFile(projectConfig, 'Aider Config (project)', AIDER_SPEC, entries, errors),
-    readSingleFile(homeConfig, 'Aider Config (global)', AIDER_SPEC, entries, errors),
-  ]);
+  await readSingleFile(projectConfig, 'Aider Config (project)', AIDER_SPEC, entries, errors);
 }
 
-async function detectContinueConfigs(entries: VaultEntry[], errors: ParseError[]): Promise<void> {
-  const home = homedir();
+async function detectHomeAiderConfig(
+  home: string,
+  entries: VaultEntry[],
+  errors: ParseError[],
+): Promise<void> {
+  const homeConfig = join(home, '.aider.conf.yml');
+  await readSingleFile(homeConfig, 'Aider Config (global)', AIDER_SPEC, entries, errors);
+}
+
+async function detectContinueConfigs(
+  home: string,
+  entries: VaultEntry[],
+  errors: ParseError[],
+): Promise<void> {
   const continueConfig = join(home, '.continue', 'config.json');
   await readSingleFile(continueConfig, 'Continue.dev Config', CONTINUE_SPEC, entries, errors);
 }
@@ -240,7 +248,7 @@ async function detectProjectClaudeConfigs(
   ]);
 }
 
-export async function detectAgentConfigs(projectRoot: string): Promise<ParserResult> {
+async function detectProjectConfigs(projectRoot: string): Promise<ParserResult> {
   const entries: VaultEntry[] = [];
   const errors: ParseError[] = [];
 
@@ -248,10 +256,151 @@ export async function detectAgentConfigs(projectRoot: string): Promise<ParserRes
     detectCursorConfigs(projectRoot, entries, errors),
     detectCopilotConfigs(projectRoot, entries, errors),
     detectWindsurfConfigs(projectRoot, entries, errors),
-    detectAiderConfigs(projectRoot, entries, errors),
-    detectContinueConfigs(entries, errors),
+    detectProjectAiderConfig(projectRoot, entries, errors),
     detectProjectClaudeConfigs(projectRoot, entries, errors),
   ]);
 
   return { entries, errors };
+}
+
+/**
+ * The account's home directory, resolved the way `paths.ts` resolves it for the Claude directory:
+ * `os.homedir()`, with the passwd entry standing in when that is empty (HOME set and empty, which
+ * would make every path below relative to the current directory) or throws (Windows without
+ * USERPROFILE). Throws when neither knows the home.
+ */
+function accountHome(): string {
+  try {
+    const home = homedir();
+    if (home) return home;
+  } catch {
+    // Fall through to the passwd entry.
+  }
+  const home = userInfo().homedir;
+  if (!home) throw new Error('the account has an empty home directory');
+  return home;
+}
+
+function homeUnavailable(cause: unknown): ParseError {
+  const reason = cause instanceof Error ? cause.message : String(cause);
+  return {
+    filePath: '',
+    message: `Cannot determine the home directory, so ~/.aider.conf.yml and ~/.continue/config.json were not read: ${reason}`,
+    severity: 'error',
+    cause,
+  };
+}
+
+/** Never rejects: not knowing the home costs this part only, never the project part beside it. */
+async function detectHomeConfigs(): Promise<ParserResult> {
+  const entries: VaultEntry[] = [];
+  const errors: ParseError[] = [];
+
+  let home: string;
+  try {
+    home = accountHome();
+  } catch (err) {
+    return { entries, errors: [homeUnavailable(err)] };
+  }
+
+  await Promise.all([
+    detectHomeAiderConfig(home, entries, errors),
+    detectContinueConfigs(home, entries, errors),
+  ]);
+
+  return { entries, errors };
+}
+
+/**
+ * The absolute form of an explicit project directory. A blank value stays blank, because
+ * `resolve('')` is the current directory and a scan must never land there by accident.
+ */
+export function resolveProjectRoot(projectRoot: string): string {
+  return projectRoot.trim() === '' ? '' : resolve(projectRoot);
+}
+
+/** Why `projectRoot` cannot be scanned, or null when it is an existing directory. */
+async function describeProjectRootProblem(projectRoot: string): Promise<ParseError | null> {
+  if (projectRoot === '') {
+    return {
+      filePath: '',
+      message:
+        'Cannot scan a project directory: the path is empty. Pass the directory to scan, or omit it to skip the project scan',
+      severity: 'error',
+    };
+  }
+
+  try {
+    if (!(await stat(projectRoot)).isDirectory()) {
+      return {
+        filePath: projectRoot,
+        message: `Project path is not a directory: ${projectRoot}`,
+        severity: 'error',
+      };
+    }
+    // A directory can stat fine and still be closed to this account (mode bits, macOS privacy
+    // protection). The readers below treat any failure to reach a file as "not there", so without
+    // this probe the scan would come back empty, with no error.
+    await access(projectRoot, constants.R_OK | constants.X_OK);
+    return null;
+  } catch (err) {
+    const isMissing = (err as NodeJS.ErrnoException).code === 'ENOENT';
+    const reason = err instanceof Error ? err.message : String(err);
+    return {
+      filePath: projectRoot,
+      message: isMissing
+        ? `Project directory does not exist: ${projectRoot}`
+        : `Cannot read project directory ${projectRoot}: ${reason}`,
+      severity: 'error',
+      cause: err,
+    };
+  }
+}
+
+async function scanProjectRoot(projectRoot: string): Promise<ParserResult> {
+  const root = resolveProjectRoot(projectRoot);
+  const problem = await describeProjectRootProblem(root);
+  if (problem) return { entries: [], errors: [problem] };
+  return detectProjectConfigs(root);
+}
+
+function mergeResults(results: readonly ParserResult[]): ParserResult {
+  return {
+    entries: results.flatMap((result) => result.entries),
+    errors: results.flatMap((result) => result.errors),
+  };
+}
+
+/**
+ * Agent configs that live outside the Claude config directory. The account-level ones under the
+ * home directory (`~/.aider.conf.yml`, `~/.continue/config.json`) are always read, from the home
+ * directory as it is when this runs. A project directory is read only when one is given, and
+ * never implied from the current directory: the result must not depend on where the caller runs.
+ * A given directory that is empty, missing or not a directory is an error in the result, and so
+ * is a home directory that cannot be determined. The two parts are independent: either failing
+ * leaves the other's entries in the result.
+ */
+export async function detectAgentConfigs(projectRoot?: string): Promise<ParserResult> {
+  return mergeResults(
+    await Promise.all([
+      detectHomeConfigs(),
+      projectRoot === undefined ? { entries: [], errors: [] } : scanProjectRoot(projectRoot),
+    ]),
+  );
+}
+
+/** The parser name a problem found while reading agent configs is attributed to. */
+export const AGENT_CONFIG_PARSER = 'agent-configs';
+
+/**
+ * A rules run plus the agent configs, which are indexed as rules too. The detection cannot
+ * reject: its failure becomes an "agent-configs" problem and the rules result is kept.
+ */
+export async function withAgentConfigs(
+  parseRules: () => Promise<ParserResult>,
+  projectRoot?: string,
+): Promise<ParserResult> {
+  const detect = () =>
+    runParserSafely(AGENT_CONFIG_PARSER, projectRoot ?? '', () => detectAgentConfigs(projectRoot));
+  return mergeResults(await Promise.all([parseRules(), detect()]));
 }

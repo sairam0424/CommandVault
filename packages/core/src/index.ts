@@ -26,6 +26,7 @@ export {
 } from './parsers/index.js';
 export { parseMarkdownDir, FRONTMATTER_WARNING_TAG } from './parsers/base-parser.js';
 export type { ParseConfig, ParseContext } from './parsers/base-parser.js';
+export type { HookParseOptions } from './parsers/hook-parser.js';
 export { ParserRegistry, getDefaultRegistry } from './parsers/parser-registry.js';
 export type { ParserPlugin } from './parsers/parser-registry.js';
 export { registerBuiltinParsers } from './parsers/builtin-registrations.js';
