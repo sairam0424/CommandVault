@@ -11,17 +11,29 @@ interface Props {
   readonly width: number;
 }
 
+// The box border and its padding take two columns on each side.
+const BOX_CHROME_COLUMNS = 4;
+const PROMPT = '> ';
+
 export function SearchBar({ query, cursor, filterType, filterSource, width }: Props) {
+  const typeTag = filterType ? ` [${filterType}]` : '';
+  const sourceTag = filterSource ? ` [${filterSource}]` : '';
+  const capacity = width - BOX_CHROME_COLUMNS - PROMPT.length - typeTag.length - sourceTag.length;
   return (
     <Box borderStyle="single" borderColor="cyan" width={width} paddingX={1}>
       <Text color="cyan" bold>
-        {'> '}
+        {PROMPT}
       </Text>
       <Box flexGrow={1}>
-        <QueryInput value={query} cursor={cursor} placeholder="Search commands..." />
+        <QueryInput
+          value={query}
+          cursor={cursor}
+          placeholder="Search commands..."
+          capacity={capacity}
+        />
       </Box>
-      {filterType && <Text color="yellow">{` [${filterType}]`}</Text>}
-      {filterSource && <Text color="magenta">{` [${filterSource}]`}</Text>}
+      {filterType && <Text color="yellow">{typeTag}</Text>}
+      {filterSource && <Text color="magenta">{sourceTag}</Text>}
     </Box>
   );
 }

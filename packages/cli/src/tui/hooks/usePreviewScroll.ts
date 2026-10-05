@@ -4,11 +4,16 @@ import { useCallback, useReducer } from 'react';
 export interface PreviewTarget {
   readonly id: string | null;
   readonly lineCount: number;
+  /** Where the entry shows before the user scrolls it; the top when left out. */
+  readonly initialTop?: number;
 }
 
 export interface PreviewScrollState {
-  /** Scroll offset of the preview for this entry; any other entry starts at the top. */
-  scrollTopFor: (id: string | null) => number;
+  /**
+   * Scroll offset of the preview for this entry; an entry the user has not scrolled shows from
+   * `initialTop` (the top when left out).
+   */
+  scrollTopFor: (id: string | null, initialTop?: number) => number;
   pageUp: (target: PreviewTarget) => void;
   pageDown: (target: PreviewTarget) => void;
   reset: () => void;
@@ -22,6 +27,7 @@ interface State {
 interface PageAction {
   readonly id: string | null;
   readonly lineCount: number;
+  readonly initialTop: number;
   readonly visibleLines: number;
   readonly pageSize: number;
 }
@@ -30,8 +36,8 @@ type Action = ({ type: 'up' } & PageAction) | ({ type: 'down' } & PageAction) | 
 
 const START: State = { id: null, top: 0 };
 
-function topFor(state: State, id: string | null): number {
-  return state.id === id ? state.top : 0;
+function topFor(state: State, id: string | null, initialTop: number): number {
+  return state.id === id ? state.top : initialTop;
 }
 
 /** The furthest the pane can scroll: the last line sits on its last text row. */
@@ -45,12 +51,15 @@ function reducer(state: State, action: Action): State {
       return START;
     case 'up': {
       // The pane draws an offset past its end at the end, so page up from there.
-      const shown = Math.min(topFor(state, action.id), maxTopOf(action));
+      const shown = Math.min(topFor(state, action.id, action.initialTop), maxTopOf(action));
       return { id: action.id, top: Math.max(0, shown - action.pageSize) };
     }
     case 'down': {
       if (action.visibleLines <= 0) return state;
-      const top = Math.min(topFor(state, action.id) + action.pageSize, maxTopOf(action));
+      const top = Math.min(
+        topFor(state, action.id, action.initialTop) + action.pageSize,
+        maxTopOf(action),
+      );
       return { id: action.id, top };
     }
     default:
@@ -66,13 +75,17 @@ function reducer(state: State, action: Action): State {
 export function usePreviewScroll(visibleLines: number, pageSize: number): PreviewScrollState {
   const [state, dispatch] = useReducer(reducer, START);
 
-  const scrollTopFor = useCallback((id: string | null) => topFor(state, id), [state]);
+  const scrollTopFor = useCallback(
+    (id: string | null, initialTop = 0) => topFor(state, id, initialTop),
+    [state],
+  );
   const pageUp = useCallback(
     (target: PreviewTarget) =>
       dispatch({
         type: 'up',
         id: target.id,
         lineCount: target.lineCount,
+        initialTop: target.initialTop ?? 0,
         visibleLines,
         pageSize,
       }),
@@ -84,6 +97,7 @@ export function usePreviewScroll(visibleLines: number, pageSize: number): Previe
         type: 'down',
         id: target.id,
         lineCount: target.lineCount,
+        initialTop: target.initialTop ?? 0,
         visibleLines,
         pageSize,
       }),

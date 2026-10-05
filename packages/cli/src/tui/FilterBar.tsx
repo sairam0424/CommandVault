@@ -2,6 +2,10 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import type { EntryType, EntrySource } from '@commandvault/core';
 
+// NOT MOUNTED. The Tab filter mode was descoped (CV-G1-007): no key ever selected a type or a
+// source, so the bar was cosmetic. To bring it back, render it from App under a mode toggle on
+// Tab, give App the filterType/filterSource state again (useVaultSearch and SearchBar still take
+// both), handle the keys that pick a value, and restore the "Tab Filter" hint in ActionBar.
 const TYPES: EntryType[] = ['skill', 'agent', 'command', 'plugin', 'rule', 'hook'];
 const SOURCES: EntrySource[] = ['official', 'community', 'gstack', 'bmad', 'superpowers', 'custom'];
 
@@ -13,7 +17,13 @@ interface Props {
   readonly width: number;
 }
 
-export function FilterBar({ activeType, activeSource, onSelectType, onSelectSource, width }: Props) {
+export function FilterBar({
+  activeType,
+  activeSource,
+  onSelectType,
+  onSelectSource,
+  width,
+}: Props) {
   return (
     <Box flexDirection="column" width={width} paddingX={1}>
       <Box gap={1} flexWrap="wrap">

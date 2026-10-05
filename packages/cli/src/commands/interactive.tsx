@@ -1,6 +1,5 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { execFileSync } from 'node:child_process';
 import { accessSync, constants } from 'node:fs';
 import { resolve } from 'node:path';
 import { search, select } from '@inquirer/prompts';
@@ -14,6 +13,8 @@ import {
   type CliGlobalOptions,
 } from '../helpers.js';
 import { createSpinner } from '../ui/spinner.js';
+import { openInEditor } from '../editor.js';
+import { CommandError } from '../errors.js';
 
 type ActionChoice = 'copy' | 'open' | 'again' | 'exit';
 
@@ -90,7 +91,6 @@ async function runLegacyMode(globalOpts: CliGlobalOptions): Promise<void> {
             break;
           }
           case 'open': {
-            const editor = process.env.EDITOR || 'code';
             const resolvedPath = resolve(selectedEntry.filePath);
             try {
               accessSync(resolvedPath, constants.R_OK);
@@ -99,9 +99,10 @@ async function runLegacyMode(globalOpts: CliGlobalOptions): Promise<void> {
               break;
             }
             try {
-              execFileSync(editor, [resolvedPath], { stdio: 'inherit' });
-            } catch {
-              console.error(chalk.red(`Failed to open editor (${editor}). Set $EDITOR to override.`));
+              openInEditor(resolvedPath);
+            } catch (err) {
+              if (!(err instanceof CommandError)) throw err;
+              console.error(chalk.red(err.message));
             }
             break;
           }

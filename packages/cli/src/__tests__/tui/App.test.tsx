@@ -27,10 +27,11 @@ function makeEntry(name: string, overrides: Partial<VaultEntry> = {}): VaultEntr
 
 function makeVault(entries: VaultEntry[]): Vault {
   return {
-    search: vi.fn().mockReturnValue(
-      entries.map((e) => ({ entry: e, score: 1, matchedFields: [] as string[] })),
-    ),
+    search: vi
+      .fn()
+      .mockReturnValue(entries.map((e) => ({ entry: e, score: 1, matchedFields: [] as string[] }))),
     getAllEntries: vi.fn().mockReturnValue(entries),
+    getEntry: vi.fn().mockImplementation((id: string) => entries.find((e) => e.id === id)),
     recordUsage: vi.fn(),
     toggleFavorite: vi.fn().mockReturnValue(true),
     getSlashCommand: vi.fn().mockImplementation((e: VaultEntry) => `/${e.name}`),

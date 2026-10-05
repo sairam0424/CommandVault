@@ -1,23 +1,45 @@
 import { getContentExcerpt } from '@commandvault/core';
-import type { ContentExcerpt } from '@commandvault/core';
+import { printable } from './text.js';
 
-// The preview pane is a bordered box, so its text starts one row down and ends one row early.
-const PREVIEW_BORDER_ROWS = 2;
-// The pane keeps this many screens of content around the first match.
-const EXCERPT_SCREENS = 2;
+// The box border takes the top and bottom rows and a header line sits under the top one.
+const PREVIEW_CHROME_ROWS = 3;
 
-/** Text rows inside a preview pane that is `paneHeight` rows tall, border included. */
+/** Text rows inside a preview pane that is `paneHeight` rows tall, border and header included. */
 export function previewTextRows(paneHeight: number): number {
-  return Math.max(1, paneHeight - PREVIEW_BORDER_ROWS);
+  return Math.max(1, paneHeight - PREVIEW_CHROME_ROWS);
 }
 
-/** The lines the pane can scroll through for this entry, as it draws them. */
-export function previewExcerpt(content: string, query: string, paneHeight: number): ContentExcerpt {
-  return getContentExcerpt(content, query, paneHeight * EXCERPT_SCREENS);
+export interface PreviewContent {
+  /** Every line of the entry, ready to draw one per row. */
+  readonly lines: readonly string[];
+  /** The first line that holds a word of the query, or null. */
+  readonly matchLine: number | null;
+}
+
+const WHOLE_CONTENT = Number.MAX_SAFE_INTEGER;
+
+/** All the lines the pane can scroll through for this entry, with the first match marked. */
+export function previewContent(content: string, query: string): PreviewContent {
+  const { lines, matchLine } = getContentExcerpt(content, query, WHOLE_CONTENT);
+  return { lines: lines.map(printable), matchLine };
+}
+
+/** The first line that holds a word of the query, or null. */
+export function previewMatchLine(content: string, query: string): number | null {
+  return getContentExcerpt(content, query, WHOLE_CONTENT).matchLine;
+}
+
+/**
+ * Where the pane starts for an entry the user has not scrolled yet: the top, unless the first
+ * match lies below the first page, in which case it sits in the middle of the pane.
+ */
+export function previewInitialTop(matchLine: number | null, textRows: number): number {
+  if (matchLine === null || matchLine < textRows) return 0;
+  return matchLine - Math.floor(textRows / 2);
 }
 
 /** How many lines the pane can scroll through: none when it falls back to metadata. */
-export function previewLineCount(content: string, query: string, paneHeight: number): number {
+export function previewLineCount(content: string): number {
   if (!content.trim()) return 0;
-  return previewExcerpt(content, query, paneHeight).lines.length;
+  return content.split('\n').length;
 }

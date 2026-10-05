@@ -104,4 +104,30 @@ describe('usePreviewScroll', () => {
     act(() => result.current.reset());
     expect(result.current.scrollTopFor('alpha')).toBe(0);
   });
+
+  describe('an entry that starts below its first line (the first match of the query)', () => {
+    it('shows the entry from that line until the user pages', () => {
+      const { result } = renderHook(() => usePreviewScroll(5, 3));
+      expect(result.current.scrollTopFor('alpha', 12)).toBe(12);
+    });
+
+    it('pages from that line, not from the top', () => {
+      const { result } = renderHook(() => usePreviewScroll(5, 3));
+      const target = { ...ENTRY, lineCount: 40, initialTop: 12 };
+      act(() => result.current.pageDown(target));
+      expect(result.current.scrollTopFor('alpha', 12)).toBe(15);
+      act(() => result.current.pageUp(target));
+      act(() => result.current.pageUp(target));
+      expect(result.current.scrollTopFor('alpha', 12)).toBe(9);
+    });
+
+    it('returns to that line on reset and gives another entry its own line', () => {
+      const { result } = renderHook(() => usePreviewScroll(5, 3));
+      const target = { ...ENTRY, lineCount: 40, initialTop: 12 };
+      act(() => result.current.pageDown(target));
+      expect(result.current.scrollTopFor('beta', 4)).toBe(4);
+      act(() => result.current.reset());
+      expect(result.current.scrollTopFor('alpha', 12)).toBe(12);
+    });
+  });
 });

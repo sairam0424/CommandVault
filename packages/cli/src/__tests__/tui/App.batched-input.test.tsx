@@ -29,12 +29,14 @@ vi.mock('clipboardy', () => ({ default: { write: clipboardWrite } }));
 
 const WIDE_COLUMNS = 100;
 const PREVIEW_LINES = 80;
-// 19 rows leave a 14-row body: 12 preview rows inside the border, 7 result rows.
+// 19 rows leave a 13-row body (two 3-row bars): 10 preview rows under the border and the header
+// line, 6 result rows.
 const SHORT_TERMINAL_ROWS = 19;
-// More PgDn presses than the 28-line excerpt has pages, so the last ones hit the bottom.
-const PAGES_PAST_THE_END = 6;
-const PREVIEW_TEXT_ROWS = 12;
-const EXCERPT_LAST_ROW = 28;
+const PREVIEW_TEXT_ROWS = 10;
+// More PgDn presses than the 80-line entry has pages, so the last ones hit the bottom.
+const PAGES_PAST_THE_END = 10;
+const LAST_ROW = PREVIEW_LINES;
+const LAST_PAGE_FIRST_ROW = PREVIEW_LINES - PREVIEW_TEXT_ROWS + 1;
 
 const previewContent = Array.from(
   { length: PREVIEW_LINES },
@@ -319,15 +321,15 @@ describe('App paging', { timeout: TEST_TIMEOUT_MS }, () => {
     const vault = makeVault([makeEntry('alpha', { content: previewContent })]);
     const { write, waitForFrame, resize } = await mountApp(vault);
     await resize(WIDE_COLUMNS, SHORT_TERMINAL_ROWS);
-    // The 12 rows inside the border show the start of the content.
-    await waitForFrame((f) => shownRows(f).length > 0 && Math.max(...shownRows(f)) <= 14);
+    // The 10 rows under the header show the start of the content.
+    await waitForFrame((f) => shownRows(f).length > 0 && Math.max(...shownRows(f)) <= 10);
 
     await write(KEYS.pageDown);
     // One page down: the pane now starts where the first page ended.
-    await waitForFrame((f) => shownRows(f).length > 0 && Math.min(...shownRows(f)) >= 13);
+    await waitForFrame((f) => shownRows(f).length > 0 && Math.min(...shownRows(f)) >= 11);
 
     await write(KEYS.pageUp);
-    await waitForFrame((f) => shownRows(f).length > 0 && Math.max(...shownRows(f)) <= 14);
+    await waitForFrame((f) => shownRows(f).length > 0 && Math.max(...shownRows(f)) <= 10);
   });
 
   it('draws every line of a page, without dropping any from the middle', async () => {
@@ -345,32 +347,38 @@ describe('App paging', { timeout: TEST_TIMEOUT_MS }, () => {
 
   it('PgUp moves the preview right after PgDn hit the bottom of a long entry', async () => {
     const vault = makeVault([makeEntry('alpha', { content: previewContent })]);
-    const { write, waitForFrame, resize } = await mountApp(vault);
+    const { write, waitForFrame, resize, frame } = await mountApp(vault);
     await resize(WIDE_COLUMNS, SHORT_TERMINAL_ROWS);
 
-    // The pane holds an excerpt of 2 x 14 lines; the bottom page ends on its last line.
+    // The pane scrolls through the whole entry; the bottom page ends on its last line.
     for (let press = 0; press < PAGES_PAST_THE_END; press += 1) await write(KEYS.pageDown);
-    await waitForFrame((f) => shownRows(f).includes(EXCERPT_LAST_ROW));
+    await waitForFrame((f) => shownRows(f).includes(LAST_ROW));
+    expect(Math.min(...shownRows(frame()))).toBe(LAST_PAGE_FIRST_ROW);
 
     await write(KEYS.pageUp);
-    await waitForFrame((f) => shownRows(f).length > 0 && Math.max(...shownRows(f)) < 17);
+    await waitForFrame(
+      (f) => shownRows(f).length > 0 && Math.max(...shownRows(f)) < LAST_PAGE_FIRST_ROW,
+    );
   });
 
-  it('pages inside the excerpt around the match when a query is active', async () => {
+  it('starts at the first match when a query is active, and pages through the whole entry', async () => {
     const lines = previewContent.split('\n');
     lines[59] = 'row-60 needle';
     const vault = makeVault([makeEntry('alpha', { content: lines.join('\n') })]);
-    const { write, waitForFrame, resize } = await mountApp(vault);
+    const { write, waitForFrame, resize, frame } = await mountApp(vault);
     await resize(WIDE_COLUMNS, SHORT_TERMINAL_ROWS);
     await write('needle');
-    // The excerpt is rows 46-73; its first page starts at row 46.
-    await waitForFrame((f) => Math.min(...shownRows(f)) === 46);
+    // The match (row 60) sits in the middle of the pane: rows 55-64.
+    await waitForFrame((f) => Math.min(...shownRows(f)) === 55);
+    expect(frame()).toContain('row-60 needle');
 
     for (let press = 0; press < PAGES_PAST_THE_END; press += 1) await write(KEYS.pageDown);
-    await waitForFrame((f) => shownRows(f).includes(73));
+    await waitForFrame((f) => shownRows(f).includes(LAST_ROW));
 
     await write(KEYS.pageUp);
-    await waitForFrame((f) => shownRows(f).length > 0 && Math.max(...shownRows(f)) < 62);
+    await waitForFrame(
+      (f) => shownRows(f).length > 0 && Math.max(...shownRows(f)) < LAST_PAGE_FIRST_ROW,
+    );
   });
 
   it('starts an entry from its first line again after the selection left it and came back', async () => {
@@ -378,11 +386,11 @@ describe('App paging', { timeout: TEST_TIMEOUT_MS }, () => {
     const { write, waitForFrame, resize } = await mountApp(makeVault(entries));
     await resize(WIDE_COLUMNS, SHORT_TERMINAL_ROWS);
     await write(KEYS.pageDown);
-    await waitForFrame((f) => shownRows(f).length > 0 && Math.min(...shownRows(f)) >= 13);
+    await waitForFrame((f) => shownRows(f).length > 0 && Math.min(...shownRows(f)) >= 11);
 
     await write(`${KEYS.down}${KEYS.up}`);
 
-    await waitForFrame((f) => shownRows(f).length > 0 && Math.max(...shownRows(f)) <= 14);
+    await waitForFrame((f) => shownRows(f).length > 0 && Math.max(...shownRows(f)) <= 10);
   });
 
   it('keeps the preview where it is when an arrow key cannot move the selection', async () => {
@@ -390,12 +398,12 @@ describe('App paging', { timeout: TEST_TIMEOUT_MS }, () => {
     const { write, waitForFrame, resize } = await mountApp(vault);
     await resize(WIDE_COLUMNS, SHORT_TERMINAL_ROWS);
     await write(KEYS.pageDown);
-    await waitForFrame((f) => shownRows(f).length > 0 && Math.min(...shownRows(f)) >= 13);
+    await waitForFrame((f) => shownRows(f).length > 0 && Math.min(...shownRows(f)) >= 11);
 
     await write(`${KEYS.down}${KEYS.up}${KEYS.up}`);
     await new Promise((done) => setTimeout(done, 50));
 
-    await waitForFrame((f) => shownRows(f).length > 0 && Math.min(...shownRows(f)) >= 13);
+    await waitForFrame((f) => shownRows(f).length > 0 && Math.min(...shownRows(f)) >= 11);
   });
 
   it('restarts the preview at the top when a new query selects another entry', async () => {
@@ -407,7 +415,7 @@ describe('App paging', { timeout: TEST_TIMEOUT_MS }, () => {
     const { write, waitForFrame, resize } = await mountApp(vault);
     await resize(WIDE_COLUMNS, SHORT_TERMINAL_ROWS);
     await write(KEYS.pageDown);
-    await waitForFrame((f) => shownRows(f).length > 0 && Math.min(...shownRows(f)) >= 13);
+    await waitForFrame((f) => shownRows(f).length > 0 && Math.min(...shownRows(f)) >= 11);
 
     await write('b');
 
