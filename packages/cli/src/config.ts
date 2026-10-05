@@ -1,8 +1,10 @@
 import { readFile } from 'node:fs/promises';
+import { statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import chalk from 'chalk';
 import { resolveDataDir, type SearchTier } from '@commandvault/core';
+import { invalidChoiceError, usageError } from './errors.js';
 
 const CONFIG_FILE_NAME = 'config.json';
 const DB_FILE_NAME = 'vault.db';
@@ -21,12 +23,74 @@ export function backupDirPath(): string {
   return join(resolveDataDir(), BACKUP_DIR_NAME);
 }
 
-const VALID_TIERS: ReadonlySet<string> = new Set(['fuse', 'minisearch', 'sqlite']);
+/** Every search tier the vault supports, in the order error messages list them. */
+export const SEARCH_TIERS = [
+  'sqlite',
+  'minisearch',
+  'fuse',
+] as const satisfies readonly SearchTier[];
+
+/**
+ * Fails to compile when core adds a tier that is missing from {@link SEARCH_TIERS}
+ * (core exports the `SearchTier` type only, not a runtime list).
+ */
+export type AssertAllTiersListed<
+  Missing extends never = Exclude<SearchTier, (typeof SEARCH_TIERS)[number]>,
+> = Missing;
 
 export interface CliConfig {
   readonly claudeConfigPath?: string;
   readonly searchTier?: SearchTier;
   readonly enableWatcher?: boolean;
+}
+
+function isSearchTier(value: unknown): value is SearchTier {
+  return typeof value === 'string' && (SEARCH_TIERS as readonly string[]).includes(value);
+}
+
+/** Validates a `--tier` value. */
+export function parseTierOption(value: string): SearchTier {
+  if (!isSearchTier(value)) {
+    throw invalidChoiceError('--tier', value, SEARCH_TIERS);
+  }
+  return value;
+}
+
+function expandHome(path: string): string {
+  if (path === '~') {
+    return homedir();
+  }
+  return /^~[\\/]/.test(path) ? join(homedir(), path.slice(2)) : path;
+}
+
+/**
+ * Resolves a `--claude-path` value (leading `~` expanded, made absolute) and checks that it is an
+ * existing directory. Never creates it.
+ */
+export function resolveClaudePath(input: string): string {
+  if (input.trim() === '') {
+    // resolve('') is the current directory, which would silently index whatever the shell is in.
+    throw usageError('--claude-path must not be empty');
+  }
+  const absolute = resolve(expandHome(input));
+  let isDirectory: boolean;
+  try {
+    isDirectory = statSync(absolute).isDirectory();
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    const reason =
+      code === 'ENOENT' || code === 'ENOTDIR' ? 'does not exist' : `is unreadable (${code})`;
+    throw usageError(`--claude-path "${input}" ${reason}`);
+  }
+  if (!isDirectory) {
+    throw usageError(`--claude-path "${input}" is not a directory`);
+  }
+  return absolute;
+}
+
+/** Config warnings are diagnostics, so they go to stderr and never pollute `--json` output. */
+function warn(message: string): void {
+  console.error(chalk.yellow(message));
 }
 
 export async function loadConfig(): Promise<CliConfig> {
@@ -37,7 +101,7 @@ export async function loadConfig(): Promise<CliConfig> {
   } catch (err: unknown) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code !== 'ENOENT') {
-      console.log(chalk.yellow(`Warning: Could not read config file: ${configPath} (${code})`));
+      warn(`Warning: Could not read config file: ${configPath} (${code})`);
     }
     return {};
   }
@@ -46,13 +110,13 @@ export async function loadConfig(): Promise<CliConfig> {
   try {
     parsed = JSON.parse(raw) as Record<string, unknown>;
   } catch {
-    console.log(chalk.yellow(`Warning: Malformed JSON in config file: ${configPath}`));
-    console.log(
-      chalk.yellow(
-        'Using default configuration. Fix the file or delete it to silence this warning.',
-      ),
-    );
+    warn(`Warning: Malformed JSON in config file: ${configPath}`);
+    warn('Using default configuration. Fix the file or delete it to silence this warning.');
     return {};
+  }
+
+  if (parsed.searchTier !== undefined && !isSearchTier(parsed.searchTier)) {
+    throw invalidChoiceError('searchTier', parsed.searchTier, SEARCH_TIERS, configPath);
   }
 
   return {
@@ -62,10 +126,7 @@ export async function loadConfig(): Promise<CliConfig> {
           ? join(homedir(), parsed.claudeConfigPath.slice(2))
           : parsed.claudeConfigPath
         : undefined,
-    searchTier:
-      typeof parsed.searchTier === 'string' && VALID_TIERS.has(parsed.searchTier)
-        ? (parsed.searchTier as SearchTier)
-        : undefined,
+    searchTier: parsed.searchTier,
     enableWatcher: typeof parsed.enableWatcher === 'boolean' ? parsed.enableWatcher : undefined,
   };
 }

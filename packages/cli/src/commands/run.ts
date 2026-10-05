@@ -1,6 +1,6 @@
 import { Command } from 'commander';
-import chalk from 'chalk';
 import { createVaultInstance, type CliGlobalOptions } from '../helpers.js';
+import { CommandError } from '../errors.js';
 
 export function createRunCommand(): Command {
   const cmd = new Command('run')
@@ -15,8 +15,7 @@ export function createRunCommand(): Command {
         const results = vault.quickSearch(name, 1);
 
         if (results.length === 0) {
-          console.log(chalk.yellow(`\nNo entry found matching "${name}".\n`));
-          return;
+          throw new CommandError(`no entry found matching "${name}"`);
         }
 
         const entry = results[0].entry;

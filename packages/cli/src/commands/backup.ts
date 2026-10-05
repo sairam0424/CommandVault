@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import { join } from 'node:path';
 import { copyFile, mkdir, readdir, stat } from 'node:fs/promises';
 import { backupDirPath, dbFilePath } from '../config.js';
+import { CommandError, EXIT_RUNTIME_ERROR } from '../errors.js';
 
 const MAX_BACKUPS = 10;
 
@@ -27,9 +28,11 @@ export function createBackupCommand(): Command {
         console.log(chalk.green(`\nBackup created: ${backupPath}\n`));
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        console.log(chalk.red(`\nBackup failed: ${message}`));
-        console.log(chalk.yellow('Run `vault list` first to create the database.\n'));
-        return;
+        throw new CommandError(
+          `backup failed: ${message}`,
+          EXIT_RUNTIME_ERROR,
+          'run `vault list` first to create the database',
+        );
       }
 
       await pruneBackups();

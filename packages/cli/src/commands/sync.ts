@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import { importFromUrl } from '@commandvault/core';
 import { createVaultInstance, type CliGlobalOptions } from '../helpers.js';
 import { createSpinner } from '../ui/spinner.js';
+import { usageError, CommandError } from '../errors.js';
 
 export function createSyncCommand(): Command {
   const cmd = new Command('sync')
@@ -13,17 +14,18 @@ export function createSyncCommand(): Command {
       const globalOpts = command.optsWithGlobals() as CliGlobalOptions;
 
       if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        console.error(chalk.red('Error: URL must start with http:// or https://'));
-        console.log(chalk.gray('For local files, use: vault import <file>'));
-        process.exit(1);
+        throw usageError(
+          'URL must start with http:// or https://',
+          'for local files, use: vault import <file>',
+        );
       }
 
       const spinner = globalOpts.json ? null : createSpinner(`Fetching from ${url}...`).start();
       const result = await importFromUrl(url);
 
       if (result.errors.length > 0) {
-        spinner?.fail(chalk.red(result.errors[0].message));
-        return;
+        spinner?.stop();
+        throw new CommandError(result.errors[0].message);
       }
 
       spinner?.succeed(`Fetched ${result.entries.length} entries from remote`);

@@ -8,6 +8,7 @@ import {
   formatDate,
   type CliGlobalOptions,
 } from '../helpers.js';
+import { CommandError } from '../errors.js';
 
 function drawBox(title: string, lines: readonly string[]): string {
   const maxLen = Math.max(title.length + 4, ...lines.map((l) => stripAnsi(l).length + 4));
@@ -59,10 +60,8 @@ export function createInfoCommand(): Command {
         if (results.length === 0) {
           if (globalOpts.json) {
             console.log(JSON.stringify({ entry: null }, null, 2));
-          } else {
-            console.log(chalk.yellow(`\nNo entry found matching "${name}".\n`));
           }
-          return;
+          throw new CommandError(`no entry found matching "${name}"`);
         }
 
         const entry: VaultEntry = results[0].entry;

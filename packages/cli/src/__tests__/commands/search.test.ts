@@ -121,9 +121,11 @@ describe('search command', () => {
     setupVaultMock(vault);
 
     const program = buildProgram();
-    await program.parseAsync(['node', 'vault', 'search', 'test', '--limit', '0']);
-
-    const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
-    expect(output).toContain('--limit must be a number between 1 and 1000');
+    await expect(
+      program.parseAsync(['node', 'vault', 'search', 'test', '--limit', '0']),
+    ).rejects.toMatchObject({
+      message: '--limit must be a number between 1 and 1000',
+      exitCode: 2,
+    });
   });
 });

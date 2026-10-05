@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { accessSync, constants } from 'node:fs';
 import { resolve } from 'node:path';
 import { createVaultInstance, type CliGlobalOptions } from '../helpers.js';
+import { CommandError, EXIT_RUNTIME_ERROR } from '../errors.js';
 
 export function createOpenCommand(): Command {
   const cmd = new Command('open')
@@ -18,8 +19,7 @@ export function createOpenCommand(): Command {
         const results = vault.quickSearch(name, 1);
 
         if (results.length === 0) {
-          console.log(chalk.yellow(`\nNo entry found matching "${name}".\n`));
-          return;
+          throw new CommandError(`no entry found matching "${name}"`);
         }
 
         const entry = results[0].entry;
@@ -29,8 +29,7 @@ export function createOpenCommand(): Command {
         try {
           accessSync(resolvedPath, constants.R_OK);
         } catch {
-          console.log(chalk.red(`\nFile not found or not readable: ${entry.filePath}`));
-          return;
+          throw new CommandError(`file not found or not readable: ${entry.filePath}`);
         }
 
         console.log(chalk.dim(`\nOpening ${entry.name} in ${editor}...`));
@@ -38,7 +37,11 @@ export function createOpenCommand(): Command {
         try {
           execFileSync(editor, [resolvedPath], { stdio: 'inherit' });
         } catch {
-          console.log(chalk.red(`Failed to open editor (${editor}). Set $EDITOR to override.`));
+          throw new CommandError(
+            `failed to open editor (${editor})`,
+            EXIT_RUNTIME_ERROR,
+            'set $EDITOR to override',
+          );
         }
 
         vault.recordUsage(entry.id);

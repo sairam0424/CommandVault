@@ -112,11 +112,12 @@ describe('list command', () => {
     setupVaultMock(vault);
 
     const program = buildProgram();
-    await program.parseAsync(['node', 'vault', 'list', '--type', 'invalid']);
-
-    const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
-    expect(output).toContain('Invalid type');
-    expect(output).toContain('Valid types');
+    await expect(
+      program.parseAsync(['node', 'vault', 'list', '--type', 'invalid']),
+    ).rejects.toMatchObject({
+      message: 'invalid --type "invalid" (expected skill, agent, command, plugin, rule or hook)',
+      exitCode: 2,
+    });
   });
 
   it('filters by favorites (--favorites)', async () => {

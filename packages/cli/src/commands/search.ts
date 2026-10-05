@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import Table from 'cli-table3';
 import type { SearchResult, EntryType, EntrySource } from '@commandvault/core';
 import { withVault, typeEmoji, typeColor, truncate, type CliGlobalOptions } from '../helpers.js';
+import { usageError } from '../errors.js';
 
 function highlightMatch(text: string, query: string): string {
   if (!query || !text) {
@@ -46,8 +47,7 @@ export function createSearchCommand(): Command {
 
       const limit = parseInt(opts.limit, 10);
       if (isNaN(limit) || limit < 1 || limit > 1000) {
-        console.log(chalk.red('--limit must be a number between 1 and 1000'));
-        return;
+        throw usageError('--limit must be a number between 1 and 1000');
       }
 
       await withVault(globalOpts, async (vault) => {

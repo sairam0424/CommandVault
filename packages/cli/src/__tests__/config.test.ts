@@ -52,13 +52,14 @@ describe('loadConfig', () => {
     await mkdir(configDir, { recursive: true });
     await writeFile(join(configDir, 'config.json'), '{not valid json!!!');
 
-    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { loadConfig } = await import('../config.js');
     const config = await loadConfig();
 
     expect(config).toEqual({});
-    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Malformed JSON'));
-    consoleSpy.mockRestore();
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Malformed JSON'));
+    expect(logSpy, 'warnings must not reach stdout').not.toHaveBeenCalled();
   });
 
   it('ignores unknown config keys', async () => {
@@ -88,15 +89,27 @@ describe('loadConfig', () => {
     expect(config.claudeConfigPath).toBe(join(tmpDir, '.claude'));
   });
 
-  it('rejects invalid searchTier values', async () => {
-    const configDir = join(tmpDir, '.commandvault');
-    await mkdir(configDir, { recursive: true });
-    await writeFile(join(configDir, 'config.json'), JSON.stringify({ searchTier: 'invalid-tier' }));
+  it.each([['invalid-tier'], [5], [null]])(
+    'rejects the invalid searchTier %j with a usage error',
+    async (searchTier) => {
+      const configDir = join(tmpDir, '.commandvault');
+      await mkdir(configDir, { recursive: true });
+      await writeFile(join(configDir, 'config.json'), JSON.stringify({ searchTier }));
 
-    const { loadConfig } = await import('../config.js');
-    const config = await loadConfig();
-    expect(config.searchTier).toBeUndefined();
-  });
+      const { loadConfig } = await import('../config.js');
+      const { CommandError, EXIT_USAGE_ERROR } = await import('../errors.js');
+      const error = await loadConfig().then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(CommandError);
+      expect((error as InstanceType<typeof CommandError>).exitCode).toBe(EXIT_USAGE_ERROR);
+      expect((error as Error).message).toBe(
+        `invalid searchTier "${searchTier}" in ${join(configDir, 'config.json')} (expected sqlite, minisearch or fuse)`,
+      );
+    },
+  );
+
   it('reads config.json from COMMANDVAULT_HOME instead of <HOME>/.commandvault', async () => {
     const dataDir = join(tmpDir, 'elsewhere');
     await mkdir(dataDir, { recursive: true });
@@ -130,5 +143,85 @@ describe('loadConfig', () => {
     vi.stubEnv('COMMANDVAULT_HOME', second);
     expect((await loadConfig()).searchTier).toBe('sqlite');
     expect(configFilePath()).toBe(join(second, 'config.json'));
+  });
+});
+
+describe('parseTierOption', () => {
+  it.each(['sqlite', 'minisearch', 'fuse'])('accepts %s', async (tier) => {
+    const { parseTierOption } = await import('../config.js');
+    expect(parseTierOption(tier)).toBe(tier);
+  });
+
+  it.each(['bogus', 'SQLITE', '', 'fuse '])('rejects %j with the expected list', async (tier) => {
+    const { parseTierOption } = await import('../config.js');
+    const { EXIT_USAGE_ERROR } = await import('../errors.js');
+    expect(() => parseTierOption(tier)).toThrow(
+      expect.objectContaining({
+        message: `invalid --tier "${tier}" (expected sqlite, minisearch or fuse)`,
+        exitCode: EXIT_USAGE_ERROR,
+      }),
+    );
+  });
+});
+
+describe('resolveClaudePath', () => {
+  let home: string;
+
+  beforeEach(async () => {
+    home = await mkdtemp(join(tmpdir(), 'vault-claudepath-test-'));
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('USERPROFILE', home);
+    vi.resetModules();
+  });
+
+  afterEach(async () => {
+    await rm(home, { recursive: true, force: true });
+  });
+
+  it('returns an existing directory as an absolute path', async () => {
+    const { resolveClaudePath } = await import('../config.js');
+    expect(resolveClaudePath(home)).toBe(home);
+  });
+
+  it('expands a leading ~ against the home directory', async () => {
+    await mkdir(join(home, '.claude'));
+    const { resolveClaudePath } = await import('../config.js');
+    expect(resolveClaudePath('~/.claude')).toBe(join(home, '.claude'));
+    expect(resolveClaudePath('~')).toBe(home);
+  });
+
+  it.each([
+    ['an empty', ''],
+    ['a blank', '  '],
+  ])('rejects %s value', async (_name, value) => {
+    const { resolveClaudePath } = await import('../config.js');
+    expect(() => resolveClaudePath(value)).toThrow(
+      expect.objectContaining({ message: '--claude-path must not be empty', exitCode: 2 }),
+    );
+  });
+
+  it('rejects a missing path without creating it', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolveClaudePath } = await import('../config.js');
+    const missing = join(home, 'missing');
+    expect(() => resolveClaudePath(missing)).toThrow(
+      expect.objectContaining({
+        message: `--claude-path "${missing}" does not exist`,
+        exitCode: 2,
+      }),
+    );
+    expect(existsSync(missing)).toBe(false);
+  });
+
+  it('rejects a file', async () => {
+    const file = join(home, 'file.txt');
+    await writeFile(file, 'x');
+    const { resolveClaudePath } = await import('../config.js');
+    expect(() => resolveClaudePath(file)).toThrow(
+      expect.objectContaining({
+        message: `--claude-path "${file}" is not a directory`,
+        exitCode: 2,
+      }),
+    );
   });
 });

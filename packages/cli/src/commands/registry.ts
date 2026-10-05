@@ -3,6 +3,7 @@ import { dirname } from 'node:path';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { RegistryManager } from '@commandvault/core';
+import { CommandError, EXIT_RUNTIME_ERROR, usageError } from '../errors.js';
 import type { RegistryConfig } from '@commandvault/core';
 import { configFilePath } from '../config.js';
 
@@ -51,14 +52,16 @@ export function createRegistryCommand(): Command {
       try {
         new URL(url);
       } catch {
-        console.error(chalk.red(`Invalid URL: ${url}`));
-        process.exit(1);
+        throw usageError(`invalid URL "${url}"`);
       }
       const type = opts.type === 'api' ? 'api' : 'json';
       const registries = [...(await loadRegistries())];
       if (registries.some((r) => r.name === name)) {
-        console.error(chalk.red(`Registry "${name}" already exists. Remove it first.`));
-        process.exit(1);
+        throw new CommandError(
+          `registry "${name}" already exists`,
+          EXIT_RUNTIME_ERROR,
+          `remove it first with \`vault registry remove ${name}\``,
+        );
       }
       const config: RegistryConfig = { name, url, type };
       registries.push(config);
@@ -73,8 +76,7 @@ export function createRegistryCommand(): Command {
       const registries = await loadRegistries();
       const filtered = registries.filter((r) => r.name !== name);
       if (filtered.length === registries.length) {
-        console.error(chalk.red(`Registry "${name}" not found.`));
-        process.exit(1);
+        throw new CommandError(`registry "${name}" not found`);
       }
       await saveRegistries(filtered);
       console.log(chalk.green(`Removed registry "${name}"`));

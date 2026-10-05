@@ -66,12 +66,21 @@ export interface Sandbox {
   readonly editorLog: string;
   /** `env` adds to (and overrides) the sandbox environment for this one run. */
   run(args: readonly string[], env?: Readonly<Record<string, string>>): RunResult;
-  /** Starts a long-running command and stops it as soon as `marker` shows up on stdout. */
+  /**
+   * Starts a long-running command and sends `signal` (SIGTERM by default) as soon as `marker`
+   * shows up on stdout.
+   */
   runUntil(
     args: readonly string[],
     marker: RegExp,
     timeoutMs: number,
+    signal?: NodeJS.Signals,
   ): Promise<RunResult & { readonly matched: boolean }>;
+  /**
+   * Runs a command whose stdout reader has gone away before it writes anything, like
+   * `vault completions bash | head -0` after the reader exited.
+   */
+  runWithClosedStdout(args: readonly string[]): Promise<RunResult>;
   dispose(): void;
 }
 
@@ -142,13 +151,18 @@ function sandboxEnv(
   return env;
 }
 
-function runToCompletion(args: readonly string[], cwd: string, env: NodeJS.ProcessEnv): RunResult {
+function runToCompletion(
+  args: readonly string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  extraEnv: NodeJS.ProcessEnv = {},
+): RunResult {
   const result = spawnSync(process.execPath, [CLI, ...args], {
     cwd,
     input: '',
     encoding: 'utf8',
     timeout: 30_000,
-    env,
+    env: { ...env, ...extraEnv },
   });
   return {
     args,
@@ -163,6 +177,7 @@ function runUntilMarker(
   args: readonly string[],
   marker: RegExp,
   timeoutMs: number,
+  signal: NodeJS.Signals,
   cwd: string,
   env: NodeJS.ProcessEnv,
 ): Promise<RunResult & { readonly matched: boolean }> {
@@ -179,7 +194,7 @@ function runUntilMarker(
       stdout += chunk;
       if (!matched && marker.test(stdout)) {
         matched = true;
-        child.kill('SIGTERM');
+        child.kill(signal);
       }
     });
     child.stderr.on('data', (chunk: string) => {
@@ -193,6 +208,31 @@ function runUntilMarker(
     child.on('close', (status) => {
       clearTimeout(timer);
       resolve({ args, status, stdout, stderr, matched });
+    });
+  });
+}
+
+function runClosedStdout(
+  args: readonly string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+): Promise<RunResult> {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [CLI, ...args], { cwd, env });
+    child.stdout.destroy(); // the reader is gone before the child has even started up
+    child.stderr.setEncoding('utf8');
+    let stderr = '';
+    const timer = setTimeout(() => child.kill('SIGKILL'), 30_000);
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      resolve({ args, status: null, stdout: '', stderr, error: error.message });
+    });
+    child.on('close', (status) => {
+      clearTimeout(timer);
+      resolve({ args, status, stdout: '', stderr });
     });
   });
 }
@@ -226,10 +266,21 @@ export function createSandbox(options: SandboxOptions = {}): Sandbox {
     workDir,
     altClaudeDir,
     editorLog,
-    run: (args, overrides) => runToCompletion(args, workDir, { ...env, ...overrides }),
-    runUntil: (args, marker, timeoutMs) => runUntilMarker(args, marker, timeoutMs, workDir, env),
+    run: (args, overrides) => runToCompletion(args, workDir, env, overrides),
+    runUntil: (args, marker, timeoutMs, signal = 'SIGTERM') =>
+      runUntilMarker(args, marker, timeoutMs, signal, workDir, env),
+    runWithClosedStdout: (args) => runClosedStdout(args, workDir, env),
     dispose: () => rmSync(root, { recursive: true, force: true, maxRetries: 3 }),
   };
+}
+
+/** Writes `~/.commandvault/config.json` inside the sandbox; a string is written verbatim. */
+export function writeConfigFile(box: Sandbox, config: unknown): void {
+  putFile(
+    join(box.home, '.commandvault'),
+    'config.json',
+    typeof config === 'string' ? config : JSON.stringify(config),
+  );
 }
 
 export function context(result: RunResult): string {

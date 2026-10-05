@@ -100,13 +100,13 @@ async function runLegacyMode(globalOpts: CliGlobalOptions): Promise<void> {
             try {
               accessSync(resolvedPath, constants.R_OK);
             } catch {
-              console.log(chalk.red(`\nFile not found: ${selectedEntry.filePath}`));
+              console.error(chalk.red(`\nFile not found: ${selectedEntry.filePath}`));
               break;
             }
             try {
               execFileSync(editor, [resolvedPath], { stdio: 'inherit' });
             } catch {
-              console.log(chalk.red(`Failed to open editor (${editor}). Set $EDITOR to override.`));
+              console.error(chalk.red(`Failed to open editor (${editor}). Set $EDITOR to override.`));
             }
             break;
           }
