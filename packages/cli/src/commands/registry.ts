@@ -1,36 +1,31 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { RegistryManager } from '@commandvault/core';
-import { CommandError, EXIT_RUNTIME_ERROR, usageError } from '../errors.js';
+import { CommandError, EXIT_RUNTIME_ERROR, invalidChoiceError, usageError } from '../errors.js';
 import type { RegistryConfig } from '@commandvault/core';
-import { configFilePath } from '../config.js';
+import { readConfigDocument, writeConfigDocument } from '../config.js';
 
-async function loadRegistries(): Promise<readonly RegistryConfig[]> {
-  try {
-    const raw = await readFile(configFilePath(), 'utf-8');
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const registries = parsed.registries;
-    if (!Array.isArray(registries)) return [];
-    return registries as RegistryConfig[];
-  } catch {
-    return [];
-  }
+/** Every registry type the vault can read, in the order error messages list them. */
+const REGISTRY_TYPES = ['json', 'api'] as const satisfies readonly RegistryConfig['type'][];
+
+/** Fails to compile when core adds a registry type that is missing from {@link REGISTRY_TYPES}. */
+export type AssertAllRegistryTypesListed<
+  Missing extends never = Exclude<RegistryConfig['type'], (typeof REGISTRY_TYPES)[number]>,
+> = Missing;
+
+function isRegistryType(value: string): value is RegistryConfig['type'] {
+  return (REGISTRY_TYPES as readonly string[]).includes(value);
 }
 
+async function loadRegistries(): Promise<readonly RegistryConfig[]> {
+  const { registries } = await readConfigDocument();
+  return Array.isArray(registries) ? (registries as RegistryConfig[]) : [];
+}
+
+/** Rewrites only the `registries` key; refuses (and leaves the file alone) if config.json is unreadable. */
 async function saveRegistries(registries: readonly RegistryConfig[]): Promise<void> {
-  const path = configFilePath();
-  await mkdir(dirname(path), { recursive: true });
-  let existing: Record<string, unknown> = {};
-  try {
-    const raw = await readFile(path, 'utf-8');
-    existing = JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    // file doesn't exist yet
-  }
-  const updated = { ...existing, registries };
-  await writeFile(path, JSON.stringify(updated, null, 2), 'utf-8');
+  const existing = await readConfigDocument();
+  await writeConfigDocument({ ...existing, registries });
 }
 
 function buildManager(configs: readonly RegistryConfig[]): RegistryManager {
@@ -49,12 +44,15 @@ export function createRegistryCommand(): Command {
     .option('--type <type>', 'Registry type (json|api)', 'json')
     .description('Add a remote registry')
     .action(async (name: string, url: string, opts: { type: string }) => {
+      if (!isRegistryType(opts.type)) {
+        throw invalidChoiceError('--type', opts.type, REGISTRY_TYPES);
+      }
+      const type = opts.type;
       try {
         new URL(url);
       } catch {
         throw usageError(`invalid URL "${url}"`);
       }
-      const type = opts.type === 'api' ? 'api' : 'json';
       const registries = [...(await loadRegistries())];
       if (registries.some((r) => r.name === name)) {
         throw new CommandError(

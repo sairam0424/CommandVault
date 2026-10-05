@@ -1,121 +1,97 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { readFile, writeFile, rm, mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-
-const CONFIG_MODULE = '../../commands/config.js';
-
-async function loadConfigModule(configPath: string) {
-  vi.doUnmock(CONFIG_MODULE);
-
-  const mod = await import(CONFIG_MODULE);
-
-  const originalReadConfig = mod.readConfig;
-  const originalWriteConfig = mod.writeConfig;
-
-  return {
-    readConfig: async () => {
-      try {
-        const raw = await readFile(configPath, 'utf-8');
-        return JSON.parse(raw) as Record<string, unknown>;
-      } catch {
-        return {};
-      }
-    },
-    writeConfig: async (config: Record<string, unknown>) => {
-      await writeFile(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
-    },
-    parseValue: mod.parseValue as (raw: string) => unknown,
-    _originalReadConfig: originalReadConfig,
-    _originalWriteConfig: originalWriteConfig,
-  };
-}
+import type { Command } from 'commander';
 
 describe('config command', () => {
-  let tmpDir: string;
+  let home: string;
   let configPath: string;
+  let out: string[];
 
   beforeEach(async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), 'vault-config-test-'));
-    configPath = join(tmpDir, 'config.json');
+    home = await mkdtemp(join(tmpdir(), 'vault-config-cmd-test-'));
+    configPath = join(home, 'data', 'config.json');
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('USERPROFILE', home);
+    vi.stubEnv('COMMANDVAULT_HOME', join(home, 'data'));
+    vi.resetModules();
+    out = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      out.push(args.join(' '));
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true });
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    await rm(home, { recursive: true, force: true });
   });
 
-  describe('config get', () => {
-    it('reads full config from file', async () => {
-      const testConfig = { searchTier: 'fuse', enableWatcher: true };
-      await writeFile(configPath, JSON.stringify(testConfig));
-      const { readConfig } = await loadConfigModule(configPath);
+  async function run(...args: string[]): Promise<void> {
+    const { createConfigCommand } = await import('../../commands/config.js');
+    const command: Command = createConfigCommand().exitOverride();
+    await command.parseAsync(args, { from: 'user' });
+  }
 
-      const config = await readConfig();
-      expect(config).toEqual(testConfig);
+  async function seed(content: string): Promise<void> {
+    await mkdir(join(home, 'data'), { recursive: true });
+    await writeFile(configPath, content);
+  }
+
+  describe('get', () => {
+    it('prints the full config, or one key', async () => {
+      await seed(JSON.stringify({ searchTier: 'fuse', enableWatcher: true }));
+      await run('get');
+      expect(JSON.parse(out[0] ?? '')).toEqual({ searchTier: 'fuse', enableWatcher: true });
+      out.length = 0;
+      await run('get', 'searchTier');
+      expect(out).toEqual(['fuse']);
     });
 
-    it('reads a specific key', async () => {
-      const testConfig = { searchTier: 'sqlite', claudeConfigPath: '/custom/path' };
-      await writeFile(configPath, JSON.stringify(testConfig));
-      const { readConfig } = await loadConfigModule(configPath);
-
-      const config = await readConfig();
-      expect(config['searchTier']).toBe('sqlite');
+    it('prints {} when there is no config file yet', async () => {
+      await run('get');
+      expect(out).toEqual(['{}']);
     });
 
-    it('returns empty object when config file does not exist', async () => {
-      const { readConfig } = await loadConfigModule(join(tmpDir, 'nonexistent.json'));
-
-      const config = await readConfig();
-      expect(config).toEqual({});
-    });
-  });
-
-  describe('config set', () => {
-    it('writes a key-value pair to the config', async () => {
-      const { readConfig, writeConfig } = await loadConfigModule(configPath);
-
-      await writeConfig({ searchTier: 'fuse' });
-      const config = await readConfig();
-      expect(config['searchTier']).toBe('fuse');
-    });
-
-    it('preserves existing keys when setting a new one', async () => {
-      await writeFile(configPath, JSON.stringify({ searchTier: 'fuse' }));
-      const { readConfig, writeConfig } = await loadConfigModule(configPath);
-
-      const existing = await readConfig();
-      const updated = { ...existing, enableWatcher: false };
-      await writeConfig(updated);
-
-      const result = await readConfig();
-      expect(result['searchTier']).toBe('fuse');
-      expect(result['enableWatcher']).toBe(false);
+    it('fails on a malformed file instead of pretending it is empty', async () => {
+      await seed('{bad');
+      await expect(run('get')).rejects.toMatchObject({ exitCode: 1 });
+      expect(out).toEqual([]);
     });
   });
 
-  describe('parseValue', () => {
-    it('parses "true" as boolean true', async () => {
-      const { parseValue } = await loadConfigModule(configPath);
-      expect(parseValue('true')).toBe(true);
+  describe('set', () => {
+    it('writes a validated value and reports it', async () => {
+      await run('set', 'searchTier', 'fuse');
+      expect(JSON.parse(await readFile(configPath, 'utf8'))).toEqual({ searchTier: 'fuse' });
+      expect(out[0]).toContain('searchTier');
+      expect(out[0]).toContain('"fuse"');
     });
 
-    it('parses "false" as boolean false', async () => {
-      const { parseValue } = await loadConfigModule(configPath);
-      expect(parseValue('false')).toBe(false);
+    it('keeps the other keys', async () => {
+      await seed(JSON.stringify({ searchTier: 'fuse', extra: [1] }));
+      await run('set', 'enableWatcher', 'false');
+      expect(JSON.parse(await readFile(configPath, 'utf8'))).toEqual({
+        searchTier: 'fuse',
+        extra: [1],
+        enableWatcher: false,
+      });
     });
 
-    it('parses numeric strings as numbers', async () => {
-      const { parseValue } = await loadConfigModule(configPath);
-      expect(parseValue('42')).toBe(42);
-      expect(parseValue('3.14')).toBe(3.14);
-      expect(parseValue('0')).toBe(0);
+    it('rejects an invalid value before touching the file', async () => {
+      await seed('{"searchTier":"fuse"}');
+      await expect(run('set', 'searchTier', 'bogus')).rejects.toMatchObject({ exitCode: 2 });
+      expect(await readFile(configPath, 'utf8')).toBe('{"searchTier":"fuse"}');
+      expect(out).toEqual([]);
     });
 
-    it('keeps non-numeric, non-boolean strings as-is', async () => {
-      const { parseValue } = await loadConfigModule(configPath);
-      expect(parseValue('hello')).toBe('hello');
-      expect(parseValue('/some/path')).toBe('/some/path');
+    it('checks the value first, then refuses a malformed file without touching it', async () => {
+      await seed('{bad');
+      await expect(run('set', 'searchTier', 'bogus')).rejects.toMatchObject({ exitCode: 2 });
+      await expect(run('set', 'searchTier', 'fuse')).rejects.toMatchObject({ exitCode: 1 });
+      expect(await readFile(configPath, 'utf8')).toBe('{bad');
     });
   });
 });

@@ -2,7 +2,13 @@
 
 import { createRequire } from 'node:module';
 import { Command } from 'commander';
-import { parseTierOption, resolveClaudePath } from './config.js';
+import {
+  camelToKebab,
+  globalOptionArgs,
+  parseTierOption,
+  resolveClaudePath,
+  resolveProjectRoot,
+} from './config.js';
 import { installProcessHandlers, runCli } from './errors.js';
 
 installProcessHandlers();
@@ -15,22 +21,43 @@ const program = new Command();
 // Parse errors and --help/--version surface as CommanderError so `withCommand` maps them to exit codes.
 program.exitOverride();
 
-program
-  .name('vault')
-  .version(version)
-  .description('CommandVault — terminal companion for managing AI slash commands')
-  .option('--claude-path <path>', 'Override ~/.claude config location')
-  .option('--tier <tier>', 'Search engine tier (fuse|minisearch|sqlite)')
-  .option('--json', 'Output as JSON (for scripting)');
+/** The global options, declared on the root program and again on the wrapper that runs a command. */
+function addGlobalOptions(command: Command): Command {
+  return command
+    .option('--claude-path <path>', 'Override ~/.claude config location')
+    .option('--tier <tier>', 'Search engine tier (fuse|minisearch|sqlite)')
+    .option('--json', 'Output as JSON (for scripting)')
+    .option(
+      '--project [dir]',
+      'Also scan a project directory for agent configs (bare: the current directory)',
+    );
+}
 
-// Validate the global options once, before any command runs, and hand commands the resolved path.
+addGlobalOptions(
+  program
+    .name('vault')
+    .version(version)
+    .description('CommandVault — terminal companion for managing AI slash commands'),
+);
+
+// The default action takes no arguments, which would otherwise switch off the implicit `help` command.
+program.helpCommand(true);
+
+// Validate the global options once, before any command runs, and hand commands the resolved paths.
 program.hook('preAction', (thisCommand) => {
-  const { tier, claudePath } = thisCommand.opts<{ tier?: string; claudePath?: string }>();
+  const { tier, claudePath, project } = thisCommand.opts<{
+    tier?: string;
+    claudePath?: string;
+    project?: string | true;
+  }>();
   if (tier !== undefined) {
     parseTierOption(tier);
   }
   if (claudePath !== undefined) {
     thisCommand.setOptionValue('claudePath', resolveClaudePath(claudePath));
+  }
+  if (project !== undefined) {
+    thisCommand.setOptionValue('project', resolveProjectRoot(project));
   }
 });
 
@@ -74,11 +101,7 @@ async function lazyRun(
 
   // Create a parent program that carries the global options, so that
   // command.optsWithGlobals() inside the action handler sees them.
-  const wrapper = new Command();
-  wrapper
-    .option('--claude-path <path>', 'Override ~/.claude config location')
-    .option('--tier <tier>', 'Search engine tier (fuse|minisearch|sqlite)')
-    .option('--json', 'Output as JSON (for scripting)');
+  const wrapper = addGlobalOptions(new Command());
   wrapper.addCommand(cmd);
   applyExitOverride(wrapper);
 
@@ -87,11 +110,11 @@ async function lazyRun(
 
 /**
  * Build the full argv array for forwarding to the lazily-loaded command.
- * Includes the command name plus any positional args and options from the
- * outer shell command that already parsed them.
+ * Includes the command name (and subcommand, for `config`/`registry`) plus any positional args and
+ * options from the outer shell command that already parsed them, then the global options.
  */
-function buildLazyArgv(commandName: string, command: Command): string[] {
-  const argv = ['node', 'vault', commandName];
+function buildLazyArgv(commandName: string, command: Command, subcommand?: string): string[] {
+  const argv = ['node', 'vault', commandName, ...(subcommand ? [subcommand] : [])];
 
   // Forward positional arguments
   for (const arg of command.args ?? []) {
@@ -111,26 +134,10 @@ function buildLazyArgv(commandName: string, command: Command): string[] {
     }
   }
 
-  // Forward global options from parent program
-  argv.push(...globalOptionArgs(command.parent?.opts() ?? {}));
+  // The root program owns the global options wherever they appeared on the command line.
+  argv.push(...globalOptionArgs(program.opts()));
 
   return argv;
-}
-
-function globalOptionArgs(globalOpts: Record<string, unknown>): string[] {
-  const args: string[] = [];
-  for (const [key, value] of Object.entries(globalOpts)) {
-    if (value === true) {
-      args.push(`--${camelToKebab(key)}`);
-    } else if (value !== undefined && value !== false) {
-      args.push(`--${camelToKebab(key)}`, String(value));
-    }
-  }
-  return args;
-}
-
-function camelToKebab(str: string): string {
-  return str.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
 }
 
 /**
@@ -142,38 +149,38 @@ function commandFromActionArgs(actionArgs: readonly unknown[]): Command {
   return actionArgs[actionArgs.length - 1] as Command;
 }
 
-/** Action handler for a shell command whose real implementation is loaded lazily. */
+/**
+ * Action handler for a shell command whose real implementation is loaded lazily. `subcommand`
+ * names the leaf for `config`/`registry`, whose shells mirror the real subcommands so `--help`
+ * lists them.
+ */
 function lazyAction(
   commandName: string,
   importFn: () => Promise<Record<string, unknown>>,
   factoryName: string,
+  subcommand?: string,
 ): (...actionArgs: unknown[]) => Promise<void> {
   return async (...actionArgs) => {
     const command = commandFromActionArgs(actionArgs);
-    await lazyRun(importFn, factoryName, buildLazyArgv(commandName, command));
+    await lazyRun(importFn, factoryName, buildLazyArgv(commandName, command, subcommand));
   };
 }
 
 /**
- * Action handler for `config` and `registry`: the real command owns subcommands and their own
- * options, so every raw argument is forwarded unchanged along with the global options.
+ * Runs the interactive command for both `vault interactive` and the bare `vault`. The root program
+ * owns `--tui`/`--no-tui` (it swallows them wherever they appear), so the mode is read from the
+ * merged options, and the global options are forwarded like for any other command.
  */
-function subcommandAction(
-  commandName: string,
-  importFn: () => Promise<Record<string, unknown>>,
-  factoryName: string,
-): (...actionArgs: unknown[]) => Promise<void> {
-  return async (...actionArgs) => {
-    const command = commandFromActionArgs(actionArgs);
-    const argv = [
-      'node',
-      'vault',
-      commandName,
-      ...(command.args ?? []),
-      ...globalOptionArgs(command.parent?.opts() ?? {}),
-    ];
-    await lazyRun(importFn, factoryName, argv);
-  };
+async function runInteractive(...actionArgs: unknown[]): Promise<void> {
+  const { tui } = commandFromActionArgs(actionArgs).optsWithGlobals<{ tui?: boolean }>();
+  const mode = tui === undefined ? [] : [tui ? '--tui' : '--no-tui'];
+  await lazyRun(() => import('./commands/interactive.js'), 'createInteractiveCommand', [
+    'node',
+    'vault',
+    'interactive',
+    ...mode,
+    ...globalOptionArgs(program.opts()),
+  ]);
 }
 
 // --- list ---
@@ -290,19 +297,7 @@ program
   .description('Interactive fuzzy search mode (full TUI in terminal, legacy mode in pipes)')
   .option('--tui', 'Force TUI mode')
   .option('--no-tui', 'Force legacy non-interactive mode')
-  .action(async (...actionArgs) => {
-    const command = commandFromActionArgs(actionArgs);
-    const { createInteractiveCommand } = await import('./commands/interactive.js');
-    const realCmd = createInteractiveCommand();
-    const args: string[] = [];
-    const localOpts = command.opts();
-    if (localOpts.tui === true) {
-      args.push('--tui');
-    } else if (localOpts.tui === false) {
-      args.push('--no-tui');
-    }
-    await realCmd.parseAsync(args, { from: 'user' });
-  });
+  .action(runInteractive);
 
 // --- open ---
 program
@@ -335,12 +330,20 @@ program
   .action(lazyAction('restore', () => import('./commands/restore.js'), 'createRestoreCommand'));
 
 // --- config ---
-program
-  .command('config')
-  .description('Manage CommandVault configuration')
-  .argument('[args...]', 'Subcommand and arguments (get [key] | set <key> <value>)')
-  .allowUnknownOption()
-  .action(subcommandAction('config', () => import('./commands/config.js'), 'createConfigCommand'));
+const configShell = program.command('config').description('Manage CommandVault configuration');
+const lazyConfig = (subcommand: string) =>
+  lazyAction('config', () => import('./commands/config.js'), 'createConfigCommand', subcommand);
+configShell
+  .command('get')
+  .argument('[key]', 'Config key to read (omit for full config)')
+  .description('Read a config value or the full config')
+  .action(lazyConfig('get'));
+configShell
+  .command('set')
+  .argument('<key>', 'Config key (claudeConfigPath|searchTier|enableWatcher|projectPaths)')
+  .argument('<value>', 'Config value')
+  .description('Set a config value')
+  .action(lazyConfig('set'));
 
 // --- completions ---
 program
@@ -356,14 +359,32 @@ program
   );
 
 // --- registry ---
-program
-  .command('registry')
-  .description('Manage remote skill registries')
-  .argument('[args...]', 'Subcommand and arguments')
-  .allowUnknownOption()
-  .action(
-    subcommandAction('registry', () => import('./commands/registry.js'), 'createRegistryCommand'),
+const registryShell = program.command('registry').description('Manage remote skill registries');
+const lazyRegistry = (subcommand: string) =>
+  lazyAction(
+    'registry',
+    () => import('./commands/registry.js'),
+    'createRegistryCommand',
+    subcommand,
   );
+registryShell
+  .command('add <name> <url>')
+  .option('--type <type>', 'Registry type (json|api)', 'json')
+  .description('Add a remote registry')
+  .action(lazyRegistry('add'));
+registryShell
+  .command('remove <name>')
+  .description('Remove a registry')
+  .action(lazyRegistry('remove'));
+registryShell
+  .command('list')
+  .description('List configured registries')
+  .action(lazyRegistry('list'));
+registryShell
+  .command('search <query>')
+  .description('Search across all registries')
+  .option('--limit <n>', 'Max results', '10')
+  .action(lazyRegistry('search'));
 
 // --- audit ---
 program
@@ -376,18 +397,6 @@ program
 // Default action: launch interactive mode when no subcommand is given
 program.option('--tui', 'Force TUI mode').option('--no-tui', 'Force legacy non-interactive mode');
 
-program.action(async (...actionArgs) => {
-  const command = commandFromActionArgs(actionArgs);
-  const { createInteractiveCommand } = await import('./commands/interactive.js');
-  const realCmd = createInteractiveCommand();
-  const globalOpts = command.opts();
-  const args: string[] = [];
-  if (globalOpts.tui === true) {
-    args.push('--tui');
-  } else if (globalOpts.tui === false) {
-    args.push('--no-tui');
-  }
-  await realCmd.parseAsync(args, { from: 'user' });
-});
+program.action(runInteractive);
 
 runCli(() => program.parseAsync(process.argv));

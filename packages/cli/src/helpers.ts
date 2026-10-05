@@ -13,6 +13,25 @@ export interface CliGlobalOptions {
   readonly claudePath?: string;
   readonly tier?: SearchTier;
   readonly json?: boolean;
+  /** Absolute project directory to scan in addition to the Claude config; absent = none. */
+  readonly project?: string;
+}
+
+/**
+ * Builds a vault from the global options, falling back to config.json for what they leave unset.
+ * Every command that opens a vault goes through here so none of them ignores the config file.
+ */
+export async function createConfiguredVault(
+  options: CliGlobalOptions,
+  enableWatcher: boolean,
+): Promise<Vault> {
+  const config = await loadConfig();
+  return createVault({
+    claudeConfigPath: options.claudePath ?? config.claudeConfigPath,
+    defaultSearchTier: options.tier ?? config.searchTier,
+    projectRoot: options.project,
+    enableWatcher,
+  });
 }
 
 export async function withVault<T>(
@@ -32,16 +51,11 @@ export function jsonOutput(data: unknown): void {
 }
 
 export async function createVaultInstance(options: CliGlobalOptions) {
-  const config = await loadConfig();
+  // Before the spinner: a bad config.json fails here without printing "Initializing vault...".
+  const vault = await createConfiguredVault(options, false);
   const spinner = options.json ? null : createSpinner('Initializing vault...').start();
 
   try {
-    const vault = createVault({
-      claudeConfigPath: options.claudePath ?? config.claudeConfigPath,
-      defaultSearchTier: options.tier ?? config.searchTier,
-      enableWatcher: false,
-    });
-
     const stats = await vault.initialize();
     spinner?.succeed(`Vault loaded: ${stats.totalEntries} entries indexed`);
     return vault;

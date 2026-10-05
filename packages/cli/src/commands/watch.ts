@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { createVault, type VaultEntry, type SearchTier } from '@commandvault/core';
-import type { CliGlobalOptions } from '../helpers.js';
+import type { VaultEntry } from '@commandvault/core';
+import { createConfiguredVault, type CliGlobalOptions } from '../helpers.js';
 import { createSpinner } from '../ui/spinner.js';
 import { onShutdown } from '../errors.js';
 
@@ -19,15 +19,11 @@ export function createWatchCommand(): Command {
     .action(async (_opts: unknown, command: Command) => {
       const globalOpts = command.optsWithGlobals() as CliGlobalOptions;
 
+      // Before the spinner: a bad config.json fails here without printing "Initializing vault...".
+      const vault = await createConfiguredVault(globalOpts, true);
       const spinner = globalOpts.json
         ? null
         : createSpinner('Initializing vault in watch mode...').start();
-
-      const vault = createVault({
-        claudeConfigPath: globalOpts.claudePath,
-        defaultSearchTier: globalOpts.tier as SearchTier | undefined,
-        enableWatcher: true,
-      });
 
       try {
         const stats = await vault.initialize();
