@@ -1,80 +1,21 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { dirname } from 'node:path';
-import { configFilePath } from '../config.js';
+import {
+  parseConfigValue,
+  readConfigDocument,
+  writeConfigDocument,
+  type ConfigDocument,
+} from '../config.js';
 
-async function readConfig(): Promise<Record<string, unknown>> {
-  try {
-    const raw = await readFile(configFilePath(), 'utf-8');
-    return JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    return {};
-  }
-}
-
-async function writeConfig(config: Record<string, unknown>): Promise<void> {
-  const path = configFilePath();
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, JSON.stringify(config, null, 2) + '\n', 'utf-8');
-}
-
-function parseValue(raw: string): unknown {
-  if (raw === 'true') return true;
-  if (raw === 'false') return false;
-
-  // Parse JSON arrays and objects
-  if (raw.startsWith('[') || raw.startsWith('{')) {
-    try {
-      return JSON.parse(raw);
-    } catch {
-      // Fall through to treat as plain string
-    }
-  }
-
-  const asNum = Number(raw);
-  if (!Number.isNaN(asNum) && raw.trim() !== '') return asNum;
-
-  // Expand tilde to home directory
-  if (raw.startsWith('~')) {
-    return raw.replace(/^~/, homedir());
-  }
-
-  return raw;
-}
-
-function getNestedValue(obj: Record<string, unknown>, key: string): unknown {
-  const parts = key.split('.');
+function getNestedValue(obj: ConfigDocument, key: string): unknown {
   let current: unknown = obj;
-  for (const part of parts) {
+  for (const part of key.split('.')) {
     if (current === null || current === undefined || typeof current !== 'object') {
       return undefined;
     }
     current = (current as Record<string, unknown>)[part];
   }
   return current;
-}
-
-function setNestedValue(
-  obj: Record<string, unknown>,
-  key: string,
-  value: unknown,
-): Record<string, unknown> {
-  const parts = key.split('.');
-  if (parts.length === 1) {
-    return { ...obj, [key]: value };
-  }
-
-  const [head, ...rest] = parts;
-  const child =
-    typeof obj[head] === 'object' && obj[head] !== null
-      ? { ...(obj[head] as Record<string, unknown>) }
-      : {};
-  return {
-    ...obj,
-    [head]: setNestedValue(child, rest.join('.'), value),
-  };
 }
 
 export function createConfigCommand(): Command {
@@ -85,7 +26,7 @@ export function createConfigCommand(): Command {
     .argument('[key]', 'Config key to read (omit for full config)')
     .description('Read a config value or the full config')
     .action(async (key?: string) => {
-      const config = await readConfig();
+      const config = await readConfigDocument();
 
       if (!key) {
         console.log(JSON.stringify(config, null, 2));
@@ -103,18 +44,15 @@ export function createConfigCommand(): Command {
 
   cmd
     .command('set')
-    .argument('<key>', 'Config key')
+    .argument('<key>', 'Config key (claudeConfigPath|searchTier|enableWatcher|projectPaths)')
     .argument('<value>', 'Config value')
     .description('Set a config value')
     .action(async (key: string, rawValue: string) => {
-      const config = await readConfig();
-      const value = parseValue(rawValue);
-      const updated = setNestedValue(config, key, value);
-      await writeConfig(updated);
+      const value = parseConfigValue(key, rawValue);
+      const config = await readConfigDocument();
+      await writeConfigDocument({ ...config, [key]: value });
       console.log(chalk.green(`Set ${chalk.bold(key)} = ${JSON.stringify(value)}`));
     });
 
   return cmd;
 }
-
-export { readConfig, writeConfig, parseValue };

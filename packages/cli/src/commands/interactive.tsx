@@ -4,15 +4,15 @@ import { execFileSync } from 'node:child_process';
 import { accessSync, constants } from 'node:fs';
 import { resolve } from 'node:path';
 import { search, select } from '@inquirer/prompts';
-import { createVault, type VaultEntry, type SearchTier } from '@commandvault/core';
+import type { VaultEntry } from '@commandvault/core';
 import {
+  createConfiguredVault,
   typeEmoji,
   typeColor,
   truncate,
   formatDate,
   type CliGlobalOptions,
 } from '../helpers.js';
-import { loadConfig } from '../config.js';
 import { createSpinner } from '../ui/spinner.js';
 
 type ActionChoice = 'copy' | 'open' | 'again' | 'exit';
@@ -41,12 +41,7 @@ function displayEntryDetail(entry: VaultEntry, slashCommand: string): void {
 }
 
 async function runLegacyMode(globalOpts: CliGlobalOptions): Promise<void> {
-  const config = await loadConfig();
-  const vault = createVault({
-    claudeConfigPath: globalOpts.claudePath ?? config.claudeConfigPath,
-    defaultSearchTier: globalOpts.tier ?? config.searchTier,
-    enableWatcher: false,
-  });
+  const vault = await createConfiguredVault(globalOpts, false);
   const spinner = createSpinner('Initializing vault...').start();
   try {
     const stats = await vault.initialize();
@@ -123,14 +118,8 @@ async function runLegacyMode(globalOpts: CliGlobalOptions): Promise<void> {
 async function runTuiMode(globalOpts: CliGlobalOptions): Promise<void> {
   const { render } = await import('ink');
   const { App } = await import('../tui/App.js');
-  const config = await loadConfig();
+  const vault = await createConfiguredVault(globalOpts, true);
   const spinner = createSpinner('Initializing vault...').start();
-
-  const vault = createVault({
-    claudeConfigPath: globalOpts.claudePath ?? config.claudeConfigPath,
-    defaultSearchTier: (globalOpts.tier ?? config.searchTier) as SearchTier | undefined,
-    enableWatcher: true,
-  });
 
   try {
     const stats = await vault.initialize();
