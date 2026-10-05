@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { Vault, VaultEntry, EntryType } from '@commandvault/core';
+import { escapeMarkdownInline } from './markdown-text';
 
 const TYPE_ICONS: Readonly<Record<EntryType, vscode.ThemeIcon>> = {
   skill: new vscode.ThemeIcon('symbol-event'),
@@ -46,12 +47,12 @@ export class FavoritesProvider implements vscode.TreeDataProvider<VaultEntry> {
 
   private buildTooltip(entry: VaultEntry): vscode.MarkdownString {
     const md = new vscode.MarkdownString();
-    md.appendMarkdown(`**${entry.name}** $(star-full)\n\n`);
-    md.appendMarkdown(`${entry.description}\n\n`);
-    md.appendMarkdown(`**Type:** ${entry.type}  \n`);
-    md.appendMarkdown(`**Source:** ${entry.source}  \n`);
+    md.appendMarkdown(`**${escapeMarkdownInline(entry.name)}** $(star-full)\n\n`);
+    md.appendMarkdown(`${escapeMarkdownInline(entry.description)}\n\n`);
+    md.appendMarkdown(`**Type:** ${escapeMarkdownInline(entry.type)}  \n`);
+    md.appendMarkdown(`**Source:** ${escapeMarkdownInline(entry.source)}  \n`);
     if (entry.tags.length > 0) {
-      md.appendMarkdown(`**Tags:** ${entry.tags.join(', ')}`);
+      md.appendMarkdown(`**Tags:** ${entry.tags.map(escapeMarkdownInline).join(', ')}`);
     }
     return md;
   }

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { Vault } from '@commandvault/core';
 import type { VaultRef } from './completion-provider';
+import { sourceFileUri } from './source-link';
 
 const SLASH_COMMAND_PATTERN = /\/[\w-]+/g;
 
@@ -32,6 +33,13 @@ export class LinkProvider implements vscode.DocumentLinkProvider {
           continue;
         }
 
+        // The link opens the source file itself. It used to run a command with the whole entry,
+        // content included, serialised into the URI.
+        const target = sourceFileUri(entry.filePath);
+        if (!target) {
+          continue;
+        }
+
         const range = new vscode.Range(
           lineIndex,
           match.index,
@@ -39,10 +47,7 @@ export class LinkProvider implements vscode.DocumentLinkProvider {
           match.index + match[0].length,
         );
 
-        const args = encodeURIComponent(JSON.stringify(entry));
-        const commandUri = vscode.Uri.parse(`command:commandvault.openFile?${args}`);
-
-        const link = new vscode.DocumentLink(range, commandUri);
+        const link = new vscode.DocumentLink(range, target);
         link.tooltip = `Open ${entry.name} source file`;
         links.push(link);
       }
