@@ -1,15 +1,14 @@
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
 import type { VaultEntry } from '@commandvault/core';
+import { failureMessage } from './failure-message';
+import { resolveOpenableFile } from './open-file-policy';
+import { toScriptJson } from './script-json';
 
-const allowedRoots = [
-  path.join(os.homedir(), '.claude'),
-  path.join(os.homedir(), '.cursor'),
-  path.join(os.homedir(), '.continue'),
-];
+const OUTSIDE_ALLOWED_DIRECTORIES_MESSAGE =
+  'CommandVault: Cannot open file outside allowed directories';
+
+const COULD_NOT_OPEN_FILE = 'Could not open file';
 
 const PANEL_COLUMN = vscode.ViewColumn.One;
 
@@ -42,30 +41,12 @@ export function createDetailPanel(
   panel.webview.html = buildHtml(entry, nonce);
 
   panel.webview.onDidReceiveMessage(
-    async (message: { type: string; text?: string; path?: string }) => {
+    async (message: { type: string; text?: string; path?: unknown }) => {
       if (message.type === 'copy' && message.text) {
         await vscode.env.clipboard.writeText(message.text);
         vscode.window.showInformationMessage('CommandVault: Copied to clipboard');
       } else if (message.type === 'openFile' && message.path) {
-        try {
-          const realPath = fs.realpathSync(path.normalize(message.path));
-          const isWithinAllowed = allowedRoots.some((root) => {
-            const realRoot = fs.realpathSync(root);
-            return realPath.startsWith(realRoot + path.sep) || realPath === realRoot;
-          });
-          if (!isWithinAllowed) {
-            vscode.window.showErrorMessage(
-              'CommandVault: Cannot open file outside allowed directories',
-            );
-            return;
-          }
-          const uri = vscode.Uri.file(realPath);
-          const doc = await vscode.workspace.openTextDocument(uri);
-          await vscode.window.showTextDocument(doc);
-        } catch (err) {
-          const errorMessage = err instanceof Error ? err.message : String(err);
-          vscode.window.showErrorMessage(`CommandVault: Could not open file - ${errorMessage}`);
-        }
+        await openSourceFile(message.path);
       }
     },
     undefined,
@@ -83,6 +64,20 @@ export function createDetailPanel(
   );
 
   return panel;
+}
+
+async function openSourceFile(requestedPath: unknown): Promise<void> {
+  try {
+    const realPath = await resolveOpenableFile(requestedPath);
+    if (!realPath) {
+      vscode.window.showErrorMessage(OUTSIDE_ALLOWED_DIRECTORIES_MESSAGE);
+      return;
+    }
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(realPath));
+    await vscode.window.showTextDocument(doc);
+  } catch (err) {
+    vscode.window.showErrorMessage(failureMessage(COULD_NOT_OPEN_FILE, err));
+  }
 }
 
 function getIconForType(type: VaultEntry['type']): string {
@@ -142,7 +137,7 @@ function renderContent(content: string): string {
 }
 
 function buildHtml(entry: VaultEntry, nonce: string): string {
-  const typeBadgeClass = `badge badge-type badge-${entry.type}`;
+  const typeBadgeClass = `badge badge-type badge-${escapeHtml(entry.type)}`;
   const sourceBadgeClass = 'badge badge-source';
 
   return `<!DOCTYPE html>
@@ -190,6 +185,7 @@ function buildHtml(entry: VaultEntry, nonce: string): string {
     .badge {
       display: inline-block;
       padding: 2px 10px;
+      border: 1px solid transparent;
       border-radius: 12px;
       font-size: 0.8em;
       font-weight: 500;
@@ -197,22 +193,24 @@ function buildHtml(entry: VaultEntry, nonce: string): string {
       letter-spacing: 0.03em;
     }
 
+    /* The badge colours are a pair the theme guarantees is readable. The type is told apart by the
+       border, so no text sits on a chart colour (which no theme pairs with a text colour). */
     .badge-type {
       background-color: var(--vscode-badge-background);
       color: var(--vscode-badge-foreground);
     }
 
-    .badge-skill { background-color: var(--vscode-charts-green); color: #fff; }
-    .badge-agent { background-color: var(--vscode-charts-blue); color: #fff; }
-    .badge-command { background-color: var(--vscode-charts-yellow); color: #000; }
-    .badge-plugin { background-color: var(--vscode-charts-purple); color: #fff; }
-    .badge-rule { background-color: var(--vscode-charts-orange); color: #fff; }
-    .badge-hook { background-color: var(--vscode-charts-red); color: #fff; }
+    .badge-skill { border-color: var(--vscode-charts-green); }
+    .badge-agent { border-color: var(--vscode-charts-blue); }
+    .badge-command { border-color: var(--vscode-charts-yellow); }
+    .badge-plugin { border-color: var(--vscode-charts-purple); }
+    .badge-rule { border-color: var(--vscode-charts-orange); }
+    .badge-hook { border-color: var(--vscode-charts-red); }
 
     .badge-source {
-      background-color: var(--vscode-textBlockQuote-background);
-      color: var(--vscode-textBlockQuote-border);
-      border: 1px solid var(--vscode-textBlockQuote-border);
+      background-color: transparent;
+      color: var(--vscode-descriptionForeground);
+      border: 1px solid var(--vscode-descriptionForeground);
     }
 
     .description {
@@ -296,7 +294,7 @@ function buildHtml(entry: VaultEntry, nonce: string): string {
     }
 
     .muted {
-      color: var(--vscode-disabledForeground);
+      color: var(--vscode-descriptionForeground);
       font-style: italic;
     }
 
@@ -315,6 +313,7 @@ function buildHtml(entry: VaultEntry, nonce: string): string {
       gap: 4px;
     }
 
+    /* The primary button pair: the only button colours every built-in theme defines together. */
     .copy-btn {
       display: inline-flex;
       align-items: center;
@@ -324,8 +323,8 @@ function buildHtml(entry: VaultEntry, nonce: string): string {
       font-size: 0.75em;
       font-weight: 500;
       color: var(--vscode-button-foreground);
-      background-color: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
-      border: none;
+      background-color: var(--vscode-button-background);
+      border: 1px solid var(--vscode-button-border, transparent);
       border-radius: 3px;
       cursor: pointer;
       vertical-align: middle;
@@ -333,7 +332,7 @@ function buildHtml(entry: VaultEntry, nonce: string): string {
     }
 
     .copy-btn:hover {
-      background-color: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-hoverBackground));
+      background-color: var(--vscode-button-hoverBackground);
     }
 
     .file-link {
@@ -368,7 +367,7 @@ function buildHtml(entry: VaultEntry, nonce: string): string {
     <p class="description">${escapeHtml(entry.description)}</p>
     <a class="file-link" data-path="${escapeHtml(entry.filePath)}" title="Open file in editor">${escapeHtml(entry.filePath)}</a>
     <div class="info-row">
-      <span>Used: ${entry.usageCount} times</span>
+      <span>Used: ${escapeHtml(String(entry.usageCount))} times</span>
       <span>Modified: ${entry.lastModified.toLocaleDateString()}</span>
     </div>
   </div>
@@ -394,7 +393,7 @@ function buildHtml(entry: VaultEntry, nonce: string): string {
   <script nonce="${nonce}">
     (function() {
       var vscode = acquireVsCodeApi();
-      var content = ${JSON.stringify(entry.content)};
+      var content = ${toScriptJson(entry.content)};
 
       document.addEventListener('click', function(e) {
         var target = e.target;
