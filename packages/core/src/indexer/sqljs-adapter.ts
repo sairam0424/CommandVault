@@ -1,9 +1,16 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { Database as SqlJsDatabase } from 'sql.js';
 import type { DatabaseAdapter, DatabaseAdapterOptions } from './database-adapter.js';
+import { classifyOpenError, toOpenError } from './db-errors.js';
+import { fileFingerprint, quarantineCorruptDatabase } from './quarantine.js';
+import { OWNER_ONLY_MODE } from './quarantine-fs.js';
 
 const PERSIST_DEBOUNCE_MS = 2000;
+
+interface SqlJsModule {
+  readonly Database: new (data?: ArrayLike<number> | Buffer | null) => SqlJsDatabase;
+}
 
 export class SqlJsAdapter implements DatabaseAdapter {
   readonly path: string;
@@ -25,22 +32,10 @@ export class SqlJsAdapter implements DatabaseAdapter {
     const sqlAsmModule = await import('sql.js/dist/sql-asm.js');
     const initSqlJs = (sqlAsmModule.default ?? sqlAsmModule) as (
       config?: Record<string, unknown>,
-    ) => Promise<{ Database: new (data?: ArrayLike<number> | Buffer | null) => SqlJsDatabase }>;
+    ) => Promise<SqlJsModule>;
     const SQL = await initSqlJs();
 
-    let db: SqlJsDatabase;
-    if (existsSync(dbPath)) {
-      try {
-        const buffer = readFileSync(dbPath);
-        db = new SQL.Database(buffer);
-      } catch {
-        const corruptPath = dbPath.replace(/\.db$/, '.corrupt');
-        renameSync(dbPath, corruptPath);
-        db = new SQL.Database();
-      }
-    } else {
-      db = new SQL.Database();
-    }
+    const db = openStoredDatabase(SQL, dbPath);
 
     if (options.walMode) {
       db.run('PRAGMA journal_mode = WAL');
@@ -53,7 +48,7 @@ export class SqlJsAdapter implements DatabaseAdapter {
     }
 
     const adapter = new SqlJsAdapter(db, dbPath);
-    adapter.persist();
+    writeFirstCopy(adapter, dbPath);
     return adapter;
   }
 
@@ -102,7 +97,7 @@ export class SqlJsAdapter implements DatabaseAdapter {
 
   persist(): void {
     const data = this.db.export();
-    writeFileSync(this.path, Buffer.from(data), { mode: 0o600 });
+    writeFileSync(this.path, Buffer.from(data), { mode: OWNER_ONLY_MODE });
     this.dirty = false;
   }
 
@@ -126,5 +121,56 @@ export class SqlJsAdapter implements DatabaseAdapter {
     if (this.dirty) {
       this.persist();
     }
+  }
+}
+
+/** The first write can fail on a file the user may read but not change: say so, in typed form. */
+function writeFirstCopy(adapter: SqlJsAdapter, dbPath: string): void {
+  try {
+    adapter.persist();
+  } catch (error) {
+    adapter.close();
+    throw toOpenError(error, dbPath);
+  }
+}
+
+/** Reads the file into memory. SQLite only judges its contents on the first statement, so probe. */
+function readStoredDatabase(SQL: SqlJsModule, dbPath: string): SqlJsDatabase {
+  if (!existsSync(dbPath)) {
+    return new SQL.Database();
+  }
+  const db = new SQL.Database(readFileSync(dbPath));
+  try {
+    db.exec('SELECT 1 FROM sqlite_master LIMIT 1');
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+  return db;
+}
+
+/**
+ * Loads the database. The file is copied under a backup name and emptied in place only when SQLite
+ * itself reports it as corrupt; an unreadable file or any unrecognised failure leaves it exactly
+ * as it is.
+ */
+function openStoredDatabase(SQL: SqlJsModule, dbPath: string): SqlJsDatabase {
+  try {
+    return readOrQuarantine(SQL, dbPath);
+  } catch (error) {
+    throw toOpenError(error, dbPath);
+  }
+}
+
+function readOrQuarantine(SQL: SqlJsModule, dbPath: string): SqlJsDatabase {
+  const failedFingerprint = fileFingerprint(dbPath);
+  try {
+    return readStoredDatabase(SQL, dbPath);
+  } catch (error) {
+    if (classifyOpenError(error) !== 'corrupt') throw error;
+    // If another process replaced the file meanwhile, nothing is changed and the read below judges
+    // whatever is there now.
+    const backupPath = quarantineCorruptDatabase(dbPath, failedFingerprint, error);
+    return backupPath === undefined ? readStoredDatabase(SQL, dbPath) : new SQL.Database();
   }
 }

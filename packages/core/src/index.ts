@@ -1,6 +1,14 @@
 export { Vault, createVault } from './vault.js';
 export { resolveDataDir, resolveClaudeDir } from './paths.js';
 export { SearchEngine } from './indexer/search-engine.js';
+export {
+  DatabaseOpenError,
+  NativeAddonUnavailableError,
+  DatabaseLockedError,
+  DatabasePermissionError,
+  DatabaseCorruptError,
+  DatabaseIoError,
+} from './indexer/db-errors.js';
 export { VaultWatcher } from './watcher/index.js';
 export { exportEntries, exportToFile, importFromFile, importFromUrl } from './sync/index.js';
 export type { VaultExportBundle, ExportedEntry } from './sync/index.js';
