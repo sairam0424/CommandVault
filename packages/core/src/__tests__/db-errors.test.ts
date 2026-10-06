@@ -5,9 +5,12 @@ import {
   DatabaseLockedError,
   DatabaseOpenError,
   DatabasePermissionError,
+  MigrationBackupError,
   NativeAddonUnavailableError,
+  SchemaTooNewError,
   classifyOpenError,
   toOpenError,
+  type FileState,
   type OpenErrorKind,
 } from '../indexer/db-errors.js';
 import * as core from '../index.js';
@@ -149,7 +152,15 @@ describe('typed open errors', () => {
     expect(core.DatabasePermissionError).toBe(DatabasePermissionError);
     expect(core.DatabaseCorruptError).toBe(DatabaseCorruptError);
     expect(core.DatabaseIoError).toBe(DatabaseIoError);
+    expect(core.SchemaTooNewError).toBe(SchemaTooNewError);
+    expect(core.MigrationBackupError).toBe(MigrationBackupError);
     expect(new core.NativeAddonUnavailableError(dbPath)).toBeInstanceOf(core.DatabaseOpenError);
+    expect(
+      new core.SchemaTooNewError(dbPath, { databaseVersion: 99, supportedVersion: 5 }),
+    ).toBeInstanceOf(core.DatabaseOpenError);
+    expect(new core.MigrationBackupError(dbPath, '/data/backups/b.db')).toBeInstanceOf(
+      core.DatabaseOpenError,
+    );
   });
 
   it('say the database was not modified where that is true, and how to fix it', () => {
@@ -163,6 +174,68 @@ describe('typed open errors', () => {
     expect(new DatabaseIoError(dbPath, cause).message).toMatch(/no data was deleted/i);
     expect(new DatabaseLockedError(dbPath, cause).message).toMatch(/another process/i);
     expect(new DatabasePermissionError(dbPath, cause).message).toContain(`chmod u+rw "${dbPath}"`);
+  });
+
+  // A file that was still in rollback-journal mode has been switched to write-ahead logging by the
+  // time the copy is tried, so "not modified" would not be true of its bytes; the data is what
+  // the message can promise.
+  it('say what is true when the safety copy cannot be written: nothing was migrated', () => {
+    const { message } = new MigrationBackupError(dbPath, '/data/backups/b.db', new Error('full'));
+    expect(message).toMatch(/nothing was migrated and no data was changed/i);
+    expect(message).not.toMatch(/database not modified/i);
+    expect(message).toContain('/data/backups/b.db');
+    expect(message).toContain('full');
+  });
+
+  it('say what is true when the entries are found damaged after the schema was brought up to date', () => {
+    const { message } = new DatabaseCorruptError(
+      dbPath,
+      new Error('bad page'),
+      'entries-untouched',
+    );
+    expect(message).not.toMatch(/database not modified/i);
+    expect(message).toMatch(/no entry was changed or deleted/i);
+    expect(message).toMatch(/backups/);
+    expect(message).toMatch(/restore it from a backup/);
+  });
+
+  describe.each<[string, (fileState?: FileState) => DatabaseOpenError]>([
+    [
+      'DatabaseLockedError',
+      (fileState) => new DatabaseLockedError(dbPath, new Error('x'), fileState),
+    ],
+    [
+      'DatabasePermissionError',
+      (fileState) => new DatabasePermissionError(dbPath, new Error('x'), fileState),
+    ],
+    [
+      'DatabaseCorruptError',
+      (fileState) => new DatabaseCorruptError(dbPath, new Error('x'), fileState),
+    ],
+  ])('%s and what it promises about the file', (_name, build) => {
+    it('says the database was not modified unless it is told the open got further', () => {
+      expect(build().message).toMatch(/database not modified/i);
+      expect(build('unmodified').message).toMatch(/database not modified/i);
+    });
+
+    it('promises only the entries once the switch to write-ahead logging may have happened', () => {
+      const { message } = build('journal-switched');
+      expect(message).not.toMatch(/database not modified/i);
+      expect(message).toMatch(/no entry was changed or deleted/i);
+      expect(message).toMatch(/write-ahead logging/i);
+      expect(message).not.toMatch(/backups/);
+    });
+
+    it('promises the entries and points to the copy once the migrations may have committed', () => {
+      const { message } = build('entries-untouched');
+      expect(message).not.toMatch(/database not modified/i);
+      expect(message).toMatch(/no entry was changed or deleted/i);
+      expect(message).toMatch(/"backups" folder/);
+    });
+  });
+
+  it('does not claim that a lock was retried, which it may not have been', () => {
+    expect(new DatabaseLockedError(dbPath, new Error('x')).message).not.toMatch(/retries/i);
   });
 
   it('states built-versus-running ABI when the loader message carries both', () => {
@@ -235,6 +308,24 @@ describe('toOpenError', () => {
     expect(classifyOpenError(typed)).toBe('native-addon');
 
     expect(toOpenError(typed, '/x/vault.db')).toBe(typed);
+  });
+
+  it.each<[FileState, RegExp]>([
+    ['unmodified', /database not modified/i],
+    ['journal-switched', /write-ahead logging/i],
+    ['entries-untouched', /"backups" folder/],
+  ])('tells the typed error what the open did to the file: %s', (fileState, expected) => {
+    for (const code of ['SQLITE_BUSY', 'EACCES', 'SQLITE_NOTADB']) {
+      expect((toOpenError(withCode(code), '/x/vault.db', fileState) as Error).message).toMatch(
+        expected,
+      );
+    }
+  });
+
+  it('leaves the file state out of errors that have no claim to make about it', () => {
+    const io = toOpenError(withCode('ENOSPC'), '/x/vault.db', 'entries-untouched');
+    expect(io).toBeInstanceOf(DatabaseIoError);
+    expect((io as Error).message).not.toMatch(/backups/);
   });
 
   it.each<[string, new (dbPath: string, cause?: unknown) => DatabaseOpenError]>([

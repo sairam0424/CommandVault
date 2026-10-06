@@ -78,15 +78,35 @@ export class NativeAddonUnavailableError extends DatabaseOpenError {
   }
 }
 
+/**
+ * What can be promised of the file when a failure is reported, by how far the open got. Most of the
+ * time nothing was written (`unmodified`). A file that was still in rollback-journal mode is
+ * switched to write-ahead logging before the migrations start: its bytes change, its entries do
+ * not (`journal-switched`). Once the migrations have committed the schema may be new as well
+ * (`entries-untouched`).
+ */
+export type FileState = 'unmodified' | 'journal-switched' | 'entries-untouched';
+
+const FILE_STATE_SENTENCE: Readonly<Record<FileState, string>> = {
+  unmodified: 'Database not modified.',
+  'journal-switched':
+    'No entry was changed or deleted. Opening it may have switched the file to write-ahead ' +
+    'logging, which changes how it is stored, not what it holds.',
+  'entries-untouched':
+    'No entry was changed or deleted. If opening it had to bring its schema up to date first, ' +
+    'that change was kept, and the copy taken before it is in the "backups" folder next to ' +
+    'the database.',
+};
+
 export class DatabaseLockedError extends DatabaseOpenError {
   override readonly name = 'DatabaseLockedError';
 
-  constructor(dbPath: string, cause?: unknown) {
+  constructor(dbPath: string, cause?: unknown, fileState: FileState = 'unmodified') {
     const detail = cause === undefined ? '' : ` (${describeCause(cause)})`;
     super(
-      `Cannot open ${dbPath}: the database is locked by another process and stayed locked ` +
-        `after several retries${detail}. Database not modified. Close other CommandVault ` +
-        'processes (CLI, TUI, VS Code) that are using it, then try again.',
+      `Cannot open ${dbPath}: the database is locked by another process and was still locked ` +
+        `when the wait for it ended${detail}. ${FILE_STATE_SENTENCE[fileState]} Close other ` +
+        'CommandVault processes (CLI, TUI, VS Code) that are using it, then try again.',
       dbPath,
       cause,
     );
@@ -96,9 +116,9 @@ export class DatabaseLockedError extends DatabaseOpenError {
 export class DatabasePermissionError extends DatabaseOpenError {
   override readonly name = 'DatabasePermissionError';
 
-  constructor(dbPath: string, cause?: unknown) {
+  constructor(dbPath: string, cause?: unknown, fileState: FileState = 'unmodified') {
     super(
-      `Cannot open ${dbPath}: ${describeCause(cause)}. Database not modified. ` +
+      `Cannot open ${dbPath}: ${describeCause(cause)}. ${FILE_STATE_SENTENCE[fileState]} ` +
         'Check that the file and its folder are owned by you and writable ' +
         `(for example: chmod u+rw "${dbPath}") and that the location is not read-only.`,
       dbPath,
@@ -107,15 +127,18 @@ export class DatabasePermissionError extends DatabaseOpenError {
   }
 }
 
-/** Positive corruption evidence, but the file was left where it is (read-only open, or a race). */
+/**
+ * Positive corruption evidence, but the file was not repaired (read-only open, a race, or damage
+ * found once the open was under way); `fileState` says what the open had done to it by then.
+ */
 export class DatabaseCorruptError extends DatabaseOpenError {
   override readonly name = 'DatabaseCorruptError';
 
-  constructor(dbPath: string, cause?: unknown) {
+  constructor(dbPath: string, cause?: unknown, fileState: FileState = 'unmodified') {
     super(
       `${dbPath} is not a valid SQLite database (${describeCause(cause)}). ` +
-        'Database not modified. Move it aside yourself, or restore it from a backup, ' +
-        'then run CommandVault again to create a new one.',
+        `${FILE_STATE_SENTENCE[fileState]} Move it aside yourself, or restore it from a ` +
+        'backup, then run CommandVault again to create a new one.',
       dbPath,
       cause,
     );
@@ -133,6 +156,60 @@ export class DatabaseIoError extends DatabaseOpenError {
       dbPath,
       cause,
     );
+  }
+}
+
+/** What is known about the build that wrote a database this build cannot read. */
+export interface NewerSchemaDetails {
+  readonly databaseVersion: number;
+  readonly supportedVersion: number;
+  /** The package version of the newest build that migrated the file, if it says so. */
+  readonly writtenBy?: string | undefined;
+}
+
+/**
+ * The file was written by a newer schema than this build knows and does not say that an older
+ * build may read it. Opening it could damage data this build cannot keep consistent, so nothing is
+ * read beyond the version records and nothing is written.
+ */
+export class SchemaTooNewError extends DatabaseOpenError {
+  override readonly name = 'SchemaTooNewError';
+  readonly databaseVersion: number;
+  readonly supportedVersion: number;
+  readonly writtenBy: string | undefined;
+
+  constructor(dbPath: string, details: NewerSchemaDetails) {
+    const writer =
+      details.writtenBy === undefined
+        ? 'a newer version of CommandVault'
+        : `CommandVault ${details.writtenBy}`;
+    super(
+      `${dbPath} was written by ${writer} (database schema ${details.databaseVersion}; this ` +
+        `version understands schema ${details.supportedVersion} and older). Opening it with this ` +
+        'older version could damage it, so it was left exactly as it is. Upgrade CommandVault ' +
+        '(update the VS Code extension, or run `npm install -g @commandvault/cli@latest`) and try again.',
+      dbPath,
+    );
+    this.databaseVersion = details.databaseVersion;
+    this.supportedVersion = details.supportedVersion;
+    this.writtenBy = details.writtenBy;
+  }
+}
+
+/** The copy taken before a migration could not be written, so the migration did not happen. */
+export class MigrationBackupError extends DatabaseOpenError {
+  override readonly name = 'MigrationBackupError';
+  readonly backupPath: string;
+
+  constructor(dbPath: string, backupPath: string, cause?: unknown) {
+    super(
+      `Cannot upgrade ${dbPath}: the safety backup ${backupPath} could not be written ` +
+        `(${describeCause(cause)}). Nothing was migrated and no data was changed. Free some disk ` +
+        'space or fix the permissions of that folder, then try again.',
+      dbPath,
+      cause,
+    );
+    this.backupPath = backupPath;
   }
 }
 
@@ -170,17 +247,30 @@ function nativeAddonMessage(dbPath: string, cause: unknown): string {
   );
 }
 
-const ERROR_CLASS_BY_KIND = {
-  'native-addon': NativeAddonUnavailableError,
-  locked: DatabaseLockedError,
-  permission: DatabasePermissionError,
-  corrupt: DatabaseCorruptError,
-  io: DatabaseIoError,
-} as const;
+type TypedErrorFactory = (
+  dbPath: string,
+  cause: unknown,
+  fileState: FileState,
+) => DatabaseOpenError;
 
-/** The typed error for a raw open failure; unknown failures come back untouched, stack included. */
-export function toOpenError(error: unknown, dbPath: string): unknown {
+const ERROR_FOR_KIND: Readonly<Record<Exclude<OpenErrorKind, 'unknown'>, TypedErrorFactory>> = {
+  'native-addon': (dbPath, cause) => new NativeAddonUnavailableError(dbPath, cause),
+  locked: (dbPath, cause, fileState) => new DatabaseLockedError(dbPath, cause, fileState),
+  permission: (dbPath, cause, fileState) => new DatabasePermissionError(dbPath, cause, fileState),
+  corrupt: (dbPath, cause, fileState) => new DatabaseCorruptError(dbPath, cause, fileState),
+  io: (dbPath, cause) => new DatabaseIoError(dbPath, cause),
+};
+
+/**
+ * The typed error for a raw open failure; unknown failures come back untouched, stack included.
+ * `fileState` is what the open had done to the file when it failed; see FileState.
+ */
+export function toOpenError(
+  error: unknown,
+  dbPath: string,
+  fileState: FileState = 'unmodified',
+): unknown {
   if (error instanceof DatabaseOpenError) return error;
   const kind = classifyOpenError(error);
-  return kind === 'unknown' ? error : new ERROR_CLASS_BY_KIND[kind](dbPath, error);
+  return kind === 'unknown' ? error : ERROR_FOR_KIND[kind](dbPath, error, fileState);
 }

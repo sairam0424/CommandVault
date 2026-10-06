@@ -1,18 +1,23 @@
-import { chmodSync, existsSync, mkdirSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import Database from 'better-sqlite3';
-import type { DatabaseAdapter, DatabaseAdapterOptions } from './database-adapter.js';
+import type {
+  DatabaseAdapter,
+  DatabaseAdapterOptions,
+  TransactionOptions,
+} from './database-adapter.js';
 import { classifyOpenError, toOpenError } from './db-errors.js';
 import { fileFingerprint, quarantineCorruptDatabase } from './quarantine.js';
 import { OWNER_ONLY_MODE } from './quarantine-fs.js';
 import { withRegisteredOpener } from './quarantine-openers.js';
 
-const DEFAULT_BUSY_TIMEOUT = 5000;
+const DEFAULT_BUSY_TIMEOUT = 10_000;
 const OPEN_LOCK_RETRIES = 3;
 // A corrupt file is judged again when the file changed under the attempt that failed; see below.
 const MAX_OPEN_ATTEMPTS = 3;
 const OPEN_LOCK_RETRY_DELAY_MS = 100;
+const WAL_SWITCH_RETRY_DELAY_MS = 25;
 
 interface OpenSettings {
   readonly walMode: boolean;
@@ -23,17 +28,24 @@ interface OpenSettings {
 export class BetterSqliteAdapter implements DatabaseAdapter {
   readonly path: string;
   private readonly db: Database.Database;
+  private readonly busyTimeout: number;
 
-  private constructor(db: Database.Database, dbPath: string) {
+  private constructor(db: Database.Database, dbPath: string, busyTimeout: number) {
     this.db = db;
     this.path = dbPath;
+    this.busyTimeout = busyTimeout;
   }
 
   static async create(
     dbPath: string,
     options?: DatabaseAdapterOptions,
   ): Promise<BetterSqliteAdapter> {
-    return new BetterSqliteAdapter(await openDatabase(dbPath, options), dbPath);
+    const settings = resolveSettings(options);
+    return new BetterSqliteAdapter(
+      await openDatabase(dbPath, settings),
+      dbPath,
+      settings.busyTimeout,
+    );
   }
 
   queryAll<T>(sql: string, params: Record<string, unknown> = {}): T[] {
@@ -57,13 +69,51 @@ export class BetterSqliteAdapter implements DatabaseAdapter {
     }
   }
 
-  transaction<T>(fn: () => T): T {
+  transaction<T>(fn: () => T, options?: TransactionOptions): T {
     const wrapped = this.db.transaction(fn);
-    return wrapped();
+    return options?.mode === 'immediate' ? wrapped.immediate() : wrapped();
+  }
+
+  enableWriteAheadLog(): void {
+    retryWhileLocked(() => enableWal(this.db), this.busyTimeout);
+  }
+
+  backupTo(destination: string): void {
+    // The copy is the whole vault. A file SQLite creates itself gets the mode it is built with
+    // (0644) from its first byte, so the file is made here, owner-only and exclusively (which also
+    // refuses to overwrite one), and VACUUM INTO fills the empty file.
+    closeSync(openSync(destination, 'wx', OWNER_ONLY_MODE));
+    // VACUUM cannot run inside a transaction, and this connection may be in one. A second,
+    // read-only connection sees the last committed state, which is what a migration is about to
+    // change, and leaves out whatever this connection has written since.
+    const reader = new Database(this.path, { readonly: true, fileMustExist: true });
+    try {
+      reader.pragma(`busy_timeout = ${DEFAULT_BUSY_TIMEOUT}`);
+      copyInto(reader, destination);
+    } finally {
+      reader.close();
+    }
   }
 
   close(): void {
     this.db.close();
+  }
+}
+
+/**
+ * VACUUM INTO rebuilds the database and so has to read every b-tree, which a single damaged page
+ * stops (SQLITE_CORRUPT), although the page may belong to a table the user never wrote to, such as
+ * the full-text index. The pages can still be copied as they are. That copy keeps the damage, and
+ * it is the safety copy a migration needs: the file as it was before anything changed it.
+ */
+function copyInto(reader: Database.Database, destination: string): void {
+  try {
+    reader.prepare('VACUUM INTO ?').run(destination);
+  } catch (error) {
+    if (classifyOpenError(error) !== 'corrupt') throw error;
+    // The file exists (made owner-only by the caller) and may hold what VACUUM wrote before it
+    // stopped; writing to it truncates that and keeps its mode.
+    writeFileSync(destination, reader.serialize());
   }
 }
 
@@ -76,16 +126,15 @@ function stripParamPrefix(params: Record<string, unknown>): Record<string, unkno
   return stripped;
 }
 
-async function openDatabase(
-  dbPath: string,
-  options?: DatabaseAdapterOptions,
-): Promise<Database.Database> {
-  const settings: OpenSettings = {
+function resolveSettings(options?: DatabaseAdapterOptions): OpenSettings {
+  return {
     walMode: options?.walMode ?? true,
     busyTimeout: options?.busyTimeout ?? DEFAULT_BUSY_TIMEOUT,
     readonly: options?.readonly ?? false,
   };
+}
 
+async function openDatabase(dbPath: string, settings: OpenSettings): Promise<Database.Database> {
   const dir = dirname(dbPath);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
@@ -184,10 +233,40 @@ function configureDatabase(
   // Before the WAL switch: that switch needs a lock, and must wait for one rather than fail.
   db.pragma(`busy_timeout = ${busyTimeout}`);
   if (walMode) {
-    db.pragma('journal_mode = WAL');
+    enableWal(db);
   }
   db.pragma('foreign_keys = ON');
   return db;
+}
+
+function enableWal(db: Database.Database): void {
+  db.pragma('journal_mode = WAL');
+}
+
+/**
+ * Runs `attempt` again, after a short pause, for as long as it fails with a lock and `timeoutMs`
+ * has not passed; the last failure is thrown as it came. The busy timeout alone does not cover the
+ * switch to write-ahead logging: when two processes hold a shared lock and both want the exclusive
+ * one it needs, SQLite fails one of them at once, without calling the busy handler, because
+ * waiting with a shared lock held could deadlock. That statement lets go of its lock when it
+ * fails, so trying again is what lets the other process finish.
+ */
+function retryWhileLocked(attempt: () => void, timeoutMs: number): void {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      attempt();
+      return;
+    } catch (error) {
+      if (classifyOpenError(error) !== 'locked' || Date.now() >= deadline) throw error;
+      pauseThread(WAL_SWITCH_RETRY_DELAY_MS);
+    }
+  }
+}
+
+/** The adapter is synchronous, like SQLite's own busy wait, so its pauses block the thread too. */
+function pauseThread(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT)), 0, 0, ms);
 }
 
 /** better-sqlite3 opens lazily: reading the schema is what makes SQLite judge the file. */

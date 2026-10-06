@@ -2,166 +2,35 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import Database from 'better-sqlite3';
 import { SqliteEngine } from '../indexer/sqlite-engine.js';
+import {
+  FAVORITE_ID,
+  SAMPLE_ENTRY_COUNT,
+  USED_ID,
+  createLegacyDatabase,
+  createMaintainerShapedDatabase,
+  engineMeta,
+  ftsMatches,
+  ftsRowCount,
+  recordedVersions,
+  rowCounts,
+  schemaObjects,
+  withDatabase,
+  CURRENT_VERSIONS,
+} from './migration-fixtures.js';
 
 // A vault.db created by the published @commandvault/core@0.1.0 (schema_version MAX = 2,
 // external-content FTS5 table entries_fts with sync triggers) must open with the current engine.
 // better-sqlite3 >= 12 enables SQLITE_DBCONFIG_DEFENSIVE, which forbids dropping FTS5 shadow tables
 // directly, so the legacy cleanup has to drop the virtual table itself.
 //
-// The DDL below is copied from a database produced by the real 0.1.0 package (better-sqlite3 11.10).
-
-const LEGACY_DDL = [
-  `CREATE TABLE entries (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    type TEXT NOT NULL,
-    source TEXT NOT NULL,
-    description TEXT NOT NULL,
-    file_path TEXT NOT NULL,
-    tags TEXT NOT NULL,
-    metadata TEXT NOT NULL,
-    content TEXT NOT NULL,
-    last_modified TEXT NOT NULL,
-    favorite INTEGER NOT NULL DEFAULT 0,
-    usage_count INTEGER NOT NULL DEFAULT 0
-  )`,
-  `CREATE TABLE user_tags (
-    entry_id TEXT NOT NULL,
-    tag TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY(entry_id, tag)
-  )`,
-  `CREATE TABLE scan_snapshots (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    type TEXT NOT NULL,
-    content_hash TEXT NOT NULL,
-    scanned_at TEXT NOT NULL DEFAULT (datetime('now'))
-  )`,
-  `CREATE TABLE schema_version (
-    version INTEGER PRIMARY KEY,
-    applied_at TEXT NOT NULL DEFAULT (datetime('now')),
-    description TEXT NOT NULL
-  )`,
-  `CREATE TABLE entry_tags (
-    entry_id TEXT NOT NULL,
-    tag TEXT NOT NULL,
-    PRIMARY KEY (entry_id, tag)
-  )`,
-  'CREATE INDEX idx_entry_tags_tag ON entry_tags(tag)',
-  `CREATE VIRTUAL TABLE entries_fts USING fts5(
-    name, description, tags, content,
-    content='entries',
-    content_rowid='rowid'
-  )`,
-  `CREATE TRIGGER entries_ai AFTER INSERT ON entries BEGIN
-    INSERT INTO entries_fts(rowid, name, description, tags, content)
-    VALUES (new.rowid, new.name, new.description, new.tags, new.content);
-  END`,
-  `CREATE TRIGGER entries_ad AFTER DELETE ON entries BEGIN
-    INSERT INTO entries_fts(entries_fts, rowid, name, description, tags, content)
-    VALUES ('delete', old.rowid, old.name, old.description, old.tags, old.content);
-  END`,
-  `CREATE TRIGGER entries_au AFTER UPDATE ON entries BEGIN
-    INSERT INTO entries_fts(entries_fts, rowid, name, description, tags, content)
-    VALUES ('delete', old.rowid, old.name, old.description, old.tags, old.content);
-    INSERT INTO entries_fts(rowid, name, description, tags, content)
-    VALUES (new.rowid, new.name, new.description, new.tags, new.content);
-  END`,
-];
-
-const FAVORITE_ID = '1f8080c615dc';
-const USED_ID = '7c1e988998f8';
-
-/** Builds a database shaped exactly like one written by @commandvault/core@0.1.0. */
-function createLegacyDatabase(path: string): void {
-  const db = new Database(path);
-  try {
-    for (const statement of LEGACY_DDL) db.exec(statement);
-    db.exec(`
-      INSERT INTO schema_version (version, description) VALUES
-        (1, 'Add entry_tags junction table for exact tag matching'),
-        (2, 'Migrate entry IDs from filePath-based to type+name-based');
-    `);
-    const insert = db.prepare(
-      `INSERT INTO entries (id, name, type, source, description, file_path, tags, metadata, content, last_modified, favorite, usage_count)
-       VALUES (@id, @name, 'skill', 'custom', @description, @file_path, @tags, '{}', @content, '2026-05-02T00:00:00.000Z', @favorite, @usage)`,
-    );
-    insert.run({
-      id: FAVORITE_ID,
-      name: 'other-skill',
-      description: 'Another skill',
-      file_path: '/home/u/.claude/skills/other-skill/SKILL.md',
-      tags: 'misc',
-      content: 'Deployment pipeline notes',
-      favorite: 1,
-      usage: 0,
-    });
-    insert.run({
-      id: USED_ID,
-      name: 'demo-skill',
-      description: 'A demo skill for upgrade testing',
-      file_path: '/home/u/.claude/skills/demo-skill/SKILL.md',
-      tags: 'demo',
-      content: 'Body of the demo skill',
-      favorite: 0,
-      usage: 3,
-    });
-    db.prepare("INSERT INTO user_tags (entry_id, tag) VALUES (?, 'upgrade-test')").run(FAVORITE_ID);
-    db.prepare("INSERT INTO entry_tags (entry_id, tag) VALUES (?, 'misc')").run(FAVORITE_ID);
-  } finally {
-    db.close();
-  }
-}
-
-function readSchema(path: string): { sqlByName: Map<string, string>; versions: number[] } {
-  const db = new Database(path, { readonly: true });
-  try {
-    const rows = db
-      .prepare("SELECT name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'")
-      .all() as { name: string; sql: string | null }[];
-    const versions = (
-      db.prepare('SELECT version FROM schema_version ORDER BY version').all() as {
-        version: number;
-      }[]
-    ).map((r) => r.version);
-    return { sqlByName: new Map(rows.map((r) => [r.name, r.sql ?? ''])), versions };
-  } finally {
-    db.close();
-  }
-}
-
-/** Ids matched by the FTS table itself; the engine's own search silently falls back to LIKE. */
-function ftsMatches(path: string, term: string): string[] {
-  const db = new Database(path, { readonly: true });
-  try {
-    const rows = db.prepare('SELECT id FROM entries_fts WHERE entries_fts MATCH ?').all(term) as {
-      id: string;
-    }[];
-    return rows.map((r) => r.id);
-  } finally {
-    db.close();
-  }
-}
-
-function ftsRowCount(path: string): number {
-  const db = new Database(path, { readonly: true });
-  try {
-    return (db.prepare('SELECT COUNT(*) AS n FROM entries_fts').get() as { n: number }).n;
-  } finally {
-    db.close();
-  }
-}
+// The fixture (migration-fixtures.ts) copies its DDL from a database produced by the real 0.1.0
+// package (better-sqlite3 11.10).
 
 function execOnLegacyDatabase(path: string, statements: readonly string[]): void {
-  const db = new Database(path);
-  try {
+  withDatabase(path, (db) => {
     for (const statement of statements) db.exec(statement);
-  } finally {
-    db.close();
-  }
+  });
 }
 
 describe('upgrade from a database written by @commandvault/core 0.1.0', () => {
@@ -202,16 +71,16 @@ describe('upgrade from a database written by @commandvault/core 0.1.0', () => {
     } finally {
       engine.close();
     }
-    expect(ftsRowCount(dbPath)).toBe(2);
+    expect(ftsRowCount(dbPath)).toBe(SAMPLE_ENTRY_COUNT);
     expect(ftsMatches(dbPath, 'deployment')).toEqual([FAVORITE_ID]);
   });
 
-  it('replaces the legacy external-content FTS table and its triggers, and records v3 and v4', async () => {
+  it('replaces the legacy external-content FTS table and its triggers, and records every version', async () => {
     const engine = await SqliteEngine.create(dbPath);
     engine.close();
 
-    const { sqlByName, versions } = readSchema(dbPath);
-    expect(versions).toEqual([1, 2, 3, 4]);
+    const sqlByName = schemaObjects(dbPath);
+    expect(recordedVersions(dbPath)).toEqual(CURRENT_VERSIONS);
     expect(sqlByName.get('entries_fts')).toBeDefined();
     expect(sqlByName.get('entries_fts')).not.toContain("content='entries'");
     for (const trigger of ['entries_ai', 'entries_ad', 'entries_au']) {
@@ -231,7 +100,7 @@ describe('upgrade from a database written by @commandvault/core 0.1.0', () => {
     } finally {
       engine.close();
     }
-    expect(readSchema(dbPath).versions).toEqual([1, 2, 3, 4]);
+    expect(recordedVersions(dbPath)).toEqual(CURRENT_VERSIONS);
     expect(ftsMatches(dbPath, 'deployment')).toEqual([FAVORITE_ID]);
   });
 
@@ -248,8 +117,14 @@ describe('upgrade from a database written by @commandvault/core 0.1.0', () => {
     } finally {
       engine.close();
     }
-    expect(readSchema(dbPath).versions).toEqual([1, 2, 3, 4]);
+    expect(recordedVersions(dbPath)).toEqual(CURRENT_VERSIONS);
     expect(ftsMatches(dbPath, 'deployment')).toEqual([FAVORITE_ID]);
+  });
+
+  it('records the full-text table as ready, so it is not rebuilt again', async () => {
+    (await SqliteEngine.create(dbPath)).close();
+
+    expect(engineMeta(dbPath).fts_state).toBe('ready');
   });
 
   it('is idempotent: opening the upgraded database again changes nothing', async () => {
@@ -260,6 +135,56 @@ describe('upgrade from a database written by @commandvault/core 0.1.0', () => {
     } finally {
       engine.close();
     }
-    expect(readSchema(dbPath).versions).toEqual([1, 2, 3, 4]);
+    expect(recordedVersions(dbPath)).toEqual(CURRENT_VERSIONS);
+  });
+});
+
+// A database with the three 0.1.0 triggers but no table for them to write to: the triggers fire on
+// every change to `entries`, migration 2 among them, and each of those changes would fail.
+describe('upgrade from a schema-1 database whose 0.1.0 triggers outlived their full-text table', () => {
+  const USER_TABLES = ['entries', 'user_tags', 'entry_tags', 'scan_snapshots'] as const;
+  let tempDir: string;
+  let dbPath: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'cv-dangling-triggers-'));
+    dbPath = join(tempDir, 'vault.db');
+    createMaintainerShapedDatabase(dbPath, { danglingTriggers: true });
+    withDatabase(dbPath, (db) => db.exec('DELETE FROM schema_version WHERE version > 1'));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('starts out with the triggers and without the table they write to', () => {
+    const objects = schemaObjects(dbPath);
+
+    for (const trigger of ['entries_ai', 'entries_ad', 'entries_au']) {
+      expect(objects.has(trigger)).toBe(true);
+    }
+    expect(objects.has('entries_fts')).toBe(false);
+    expect(recordedVersions(dbPath)).toEqual([1]);
+  });
+
+  it('removes the triggers before migration 2 rewrites the entries, and migrates completely', async () => {
+    const countsBefore = rowCounts(dbPath, USER_TABLES);
+
+    const engine = await SqliteEngine.create(dbPath);
+    try {
+      expect(engine.getEntry(FAVORITE_ID)?.favorite).toBe(true);
+      expect(engine.toggleFavorite(USED_ID)).toBe(true);
+    } finally {
+      engine.close();
+    }
+
+    expect(recordedVersions(dbPath)).toEqual(CURRENT_VERSIONS);
+    expect(rowCounts(dbPath, USER_TABLES)).toEqual(countsBefore);
+    const objects = schemaObjects(dbPath);
+    for (const trigger of ['entries_ai', 'entries_ad', 'entries_au']) {
+      expect(objects.has(trigger)).toBe(false);
+    }
+    expect(ftsRowCount(dbPath)).toBe(SAMPLE_ENTRY_COUNT);
+    expect(ftsMatches(dbPath, 'deployment')).toEqual([FAVORITE_ID]);
   });
 });
