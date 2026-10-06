@@ -144,7 +144,17 @@ function findOnWindowsPath(
   return undefined;
 }
 
-const quoteForCmd = (text: string): string => `"${text.replace(/"/g, '\\"')}"`;
+/**
+ * Quotes one argument for a command line that Windows splits with the CommandLineToArgvW rules:
+ * a backslash is literal unless it precedes a double quote, so a run of backslashes before a quote
+ * (or at the end, before the closing quote) is doubled and the quote itself is escaped.
+ */
+export function quoteForCmd(text: string): string {
+  const escaped = text
+    .replace(/(\\*)"/g, (_match, slashes: string) => `${slashes}${slashes}\\"`)
+    .replace(/(\\+)$/, (_match, slashes: string) => `${slashes}${slashes}`);
+  return `"${escaped}"`;
+}
 
 /**
  * Builds the spawn arguments for one editor. On Windows a `.cmd` or `.bat` (VS Code's `code` is

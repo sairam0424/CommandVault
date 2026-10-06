@@ -5,6 +5,7 @@ import { CommandError, EXIT_RUNTIME_ERROR } from '../errors.js';
 import {
   openInEditor,
   planInvocation,
+  quoteForCmd,
   resolveEditorCandidates,
   splitCommandLine,
   type SpawnEditor,
@@ -246,5 +247,24 @@ describe('openInEditor', () => {
 
     expect(() => openInEditor(FILE, { ...base, env: {}, spawn })).toThrow(/exited with status 1/);
     expect(spawn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('quoteForCmd', () => {
+  it.each([
+    ['plain text', 'a b', '"a b"'],
+    ['the empty string', '', '""'],
+    ['backslashes that precede nothing special', 'C:\\dir\\file.md', '"C:\\dir\\file.md"'],
+    ['a double quote', 'say "hi"', '"say \\"hi\\""'],
+    ['one backslash before a quote (doubled, quote escaped)', 'a\\"b', '"a\\\\\\"b"'],
+    ['two backslashes before a quote', 'a\\\\"b', '"a\\\\\\\\\\"b"'],
+    [
+      'a trailing backslash (doubled so it cannot escape the closing quote)',
+      'C:\\dir\\',
+      '"C:\\dir\\\\"',
+    ],
+    ['trailing backslashes and a quote', 'x\\"y\\\\', '"x\\\\\\"y\\\\\\\\"'],
+  ])('quotes %s', (_name, input, expected) => {
+    expect(quoteForCmd(input)).toBe(expected);
   });
 });
