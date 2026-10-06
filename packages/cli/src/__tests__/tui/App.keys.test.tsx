@@ -35,10 +35,10 @@ const PREVIEW_LINE_COUNT = 80;
 const POLL_TIMEOUT_MS = 10_000;
 // Each key press is a full Ink render; Windows CI runners are the slow case.
 const TEST_TIMEOUT_MS = 30_000;
-// The harness terminal has 30 rows, so the preview box is 25 rows tall and
-// shows 23 lines inside its border: the last one is row-23 until it scrolls.
-const LAST_ROW_BEFORE_SCROLL = 'row-23';
-const FIRST_ROW_AFTER_SCROLL = 'row-24';
+// The harness terminal has 30 rows, so the preview box is 24 rows tall and shows 21 lines
+// under its border and header line: the last one is row-21 until it scrolls.
+const LAST_ROW_BEFORE_SCROLL = 'row-21';
+const FIRST_ROW_AFTER_SCROLL = 'row-22';
 
 const longContent = Array.from(
   { length: PREVIEW_LINE_COUNT },
@@ -69,6 +69,7 @@ function makeVault(entries: VaultEntry[]): Vault {
       .fn()
       .mockReturnValue(entries.map((e) => ({ entry: e, score: 1, matchedFields: [] as string[] }))),
     getAllEntries: vi.fn().mockReturnValue(entries),
+    getEntry: vi.fn().mockImplementation((id: string) => entries.find((e) => e.id === id)),
     recordUsage: vi.fn(),
     toggleFavorite: vi.fn().mockReturnValue(true),
     getSlashCommand: vi.fn().mockImplementation((e: VaultEntry) => `/${e.name}`),

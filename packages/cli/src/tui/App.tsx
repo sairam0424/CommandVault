@@ -1,29 +1,39 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Box, Text, useApp } from 'ink';
+import { Box, Text, useApp, useStdout } from 'ink';
 import type { Key } from 'ink';
-import type { VaultEntry, EntryType, EntrySource } from '@commandvault/core';
+import type { VaultEntry } from '@commandvault/core';
 import type { Vault } from '@commandvault/core';
 import { SearchBar } from './SearchBar.js';
 import { ResultsList } from './ResultsList.js';
 import { PreviewPane } from './PreviewPane.js';
 import { ActionBar } from './ActionBar.js';
-import { FilterBar } from './FilterBar.js';
 import { openInEditor } from './openInEditor.js';
 import { useVaultSearch } from './hooks/useVaultSearch.js';
+import { useStoredEntries } from './hooks/useStoredEntries.js';
 import { useScroll } from './hooks/useScroll.js';
 import { usePreviewScroll } from './hooks/usePreviewScroll.js';
 import { useKeyEvents, STOP_KEYS } from './hooks/useKeyEvents.js';
 import { useQueryEditor } from './hooks/useQueryEditor.js';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
-import { previewLineCount, previewTextRows } from './previewExcerpt.js';
+import {
+  previewInitialTop,
+  previewLineCount,
+  previewMatchLine,
+  previewTextRows,
+} from './previewExcerpt.js';
+import { CLEAR_SCREEN } from './terminal.js';
 
 const MIN_PREVIEW_WIDTH = 80;
 const MIN_USABLE_WIDTH = 60;
 const RESULTS_WIDTH_RATIO = 0.38;
 const MIN_RESULTS_WIDTH = 28;
+// Each bar is one text row inside a border, so three rows tall. Body rows plus both bars must
+// equal the terminal height: one row more and the terminal scrolls on every render.
 const SEARCH_BAR_HEIGHT = 3;
-const ACTION_BAR_HEIGHT = 2;
+const ACTION_BAR_HEIGHT = 3;
 const ERROR_CLEAR_MS = 3000;
+// The type and source filters are not offered (see FilterBar.tsx), so no search is narrowed.
+const NO_FILTER = null;
 
 interface Props {
   readonly vault: Vault;
@@ -31,6 +41,7 @@ interface Props {
 
 export function App({ vault }: Props) {
   const { exit } = useApp();
+  const { write: writeToTerminal } = useStdout();
   const { columns, rows } = useTerminalSize();
 
   const bodyHeight = rows - SEARCH_BAR_HEIGHT - ACTION_BAR_HEIGHT;
@@ -45,22 +56,13 @@ export function App({ vault }: Props) {
 
   const editor = useQueryEditor();
   const query = editor.value;
-  const [filterType, setFilterType] = useState<EntryType | null>(null);
-  const [filterSource, setFilterSource] = useState<EntrySource | null>(null);
-  const [mode, setMode] = useState<'search' | 'filter'>('search');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const handleError = useCallback((err: Error) => {
     setErrorMessage(err.message);
   }, []);
 
-  const { results, resultsFor } = useVaultSearch(
-    vault,
-    query,
-    filterType,
-    filterSource,
-    handleError,
-  );
+  const { results, resultsFor } = useVaultSearch(vault, query, NO_FILTER, NO_FILTER, handleError);
 
   const {
     selectedIndex,
@@ -70,7 +72,15 @@ export function App({ vault }: Props) {
     reset: scrollReset,
     getSelectedIndex,
   } = useScroll(results.length, visibleCount);
-  const selectedEntry: VaultEntry | null = results[selectedIndex]?.entry ?? null;
+  const {
+    shown,
+    stored,
+    refresh: refreshStored,
+  } = useStoredEntries(vault, results, scrollTop, visibleCount);
+  const selectedEntry: VaultEntry | null = shown[selectedIndex]?.entry ?? null;
+  const selectedInitialTop = selectedEntry
+    ? previewInitialTop(previewMatchLine(selectedEntry.content, query), previewRows)
+    : 0;
 
   const {
     scrollTopFor: previewScrollTopFor,
@@ -86,18 +96,19 @@ export function App({ vault }: Props) {
   const listNow = () => resultsFor(editor.getValue());
   const entryAtSelection = (): VaultEntry | null => {
     const list = listNow();
-    return list[getSelectedIndex(list.length)]?.entry ?? null;
+    const found = list[getSelectedIndex(list.length)]?.entry;
+    return found ? stored(found) : null;
   };
   const previewTarget = () => {
     const entry = entryAtSelection();
-    const lineCount = entry ? previewLineCount(entry.content, editor.getValue(), bodyHeight) : 0;
-    return { id: entry?.id ?? null, lineCount };
+    if (!entry) return { id: null, lineCount: 0 };
+    const matchLine = previewMatchLine(entry.content, editor.getValue());
+    return {
+      id: entry.id,
+      lineCount: previewLineCount(entry.content),
+      initialTop: previewInitialTop(matchLine, previewRows),
+    };
   };
-
-  // Reset list scroll when a filter changes (query edits reset it as they are typed)
-  useEffect(() => {
-    scrollReset();
-  }, [filterType, filterSource, scrollReset]);
 
   // Auto-clear error messages
   useEffect(() => {
@@ -121,10 +132,6 @@ export function App({ vault }: Props) {
       else moveDown(length);
       // A key that cannot move the selection (first or last row) leaves the preview alone.
       if (getSelectedIndex(length) !== before) previewReset();
-      return true;
-    }
-    if (key.tab) {
-      setMode((m) => (m === 'search' ? 'filter' : 'search'));
       return true;
     }
     if (key.pageUp) {
@@ -156,6 +163,7 @@ export function App({ vault }: Props) {
         })
         .then(() => {
           vault.recordUsage(entry.id);
+          refreshStored();
           setErrorMessage(`Copied: ${slashCmd}`);
         })
         .catch((err: unknown) => {
@@ -164,12 +172,15 @@ export function App({ vault }: Props) {
       return true;
     }
 
-    // Ctrl+O: open file in $EDITOR
+    // Ctrl+O: open the file in the user's editor, which takes over the terminal until it closes
     if (key.ctrl && input === 'o') {
       try {
         openInEditor(entry.filePath);
       } catch (err) {
-        setErrorMessage(`Editor error: ${err instanceof Error ? err.message : String(err)}`);
+        setErrorMessage(err instanceof Error ? err.message : String(err));
+      } finally {
+        // The editor may have left anything on the screen; Ink paints its last frame again.
+        writeToTerminal(CLEAR_SCREEN);
       }
       return true;
     }
@@ -177,6 +188,7 @@ export function App({ vault }: Props) {
     // Ctrl+F: toggle favorite
     if (key.ctrl && input === 'f') {
       const isFav = vault.toggleFavorite(entry.id);
+      refreshStored();
       setErrorMessage(
         isFav ? `★ Added to favorites: ${entry.name}` : `☆ Removed from favorites: ${entry.name}`,
       );
@@ -234,22 +246,13 @@ export function App({ vault }: Props) {
       <SearchBar
         query={query}
         cursor={editor.cursor}
-        filterType={filterType}
-        filterSource={filterSource}
+        filterType={NO_FILTER}
+        filterSource={NO_FILTER}
         width={columns}
       />
-      {mode === 'filter' && (
-        <FilterBar
-          activeType={filterType}
-          activeSource={filterSource}
-          onSelectType={setFilterType}
-          onSelectSource={setFilterSource}
-          width={columns}
-        />
-      )}
       <Box flexDirection="row" height={bodyHeight}>
         <ResultsList
-          results={results}
+          results={shown}
           selectedIndex={selectedIndex}
           scrollTop={scrollTop}
           visibleCount={visibleCount}
@@ -261,7 +264,7 @@ export function App({ vault }: Props) {
             <PreviewPane
               entry={selectedEntry}
               query={query}
-              scrollTop={previewScrollTopFor(selectedEntry?.id ?? null)}
+              scrollTop={previewScrollTopFor(selectedEntry?.id ?? null, selectedInitialTop)}
               height={bodyHeight}
               width={previewWidth}
             />
@@ -271,7 +274,6 @@ export function App({ vault }: Props) {
       <ActionBar
         errorMessage={errorMessage}
         width={columns}
-        mode={mode}
         hasSelection={selectedEntry !== null}
         showPreview={showPreview}
       />

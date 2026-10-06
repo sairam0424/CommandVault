@@ -64,6 +64,8 @@ export interface Sandbox {
   readonly altClaudeDir: string;
   /** Receives the arguments the fake $EDITOR was launched with (POSIX only). */
   readonly editorLog: string;
+  /** The script that writes `editorLog`; point EDITOR or VISUAL at it, with arguments if wanted. */
+  readonly editorStub: string;
   /** `env` adds to (and overrides) the sandbox environment for this one run. */
   run(args: readonly string[], env?: Readonly<Record<string, string>>): RunResult;
   /**
@@ -266,6 +268,7 @@ export function createSandbox(options: SandboxOptions = {}): Sandbox {
     workDir,
     altClaudeDir,
     editorLog,
+    editorStub,
     run: (args, overrides) => runToCompletion(args, workDir, env, overrides),
     runUntil: (args, marker, timeoutMs, signal = 'SIGTERM') =>
       runUntilMarker(args, marker, timeoutMs, signal, workDir, env),

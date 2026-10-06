@@ -1,10 +1,10 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { execFileSync } from 'node:child_process';
 import { accessSync, constants } from 'node:fs';
 import { resolve } from 'node:path';
 import { createVaultInstance, type CliGlobalOptions } from '../helpers.js';
-import { CommandError, EXIT_RUNTIME_ERROR } from '../errors.js';
+import { CommandError } from '../errors.js';
+import { openInEditor } from '../editor.js';
 
 export function createOpenCommand(): Command {
   const cmd = new Command('open')
@@ -23,8 +23,6 @@ export function createOpenCommand(): Command {
         }
 
         const entry = results[0].entry;
-        const editor = process.env.EDITOR || 'code';
-
         const resolvedPath = resolve(entry.filePath);
         try {
           accessSync(resolvedPath, constants.R_OK);
@@ -32,17 +30,8 @@ export function createOpenCommand(): Command {
           throw new CommandError(`file not found or not readable: ${entry.filePath}`);
         }
 
-        console.log(chalk.dim(`\nOpening ${entry.name} in ${editor}...`));
-
-        try {
-          execFileSync(editor, [resolvedPath], { stdio: 'inherit' });
-        } catch {
-          throw new CommandError(
-            `failed to open editor (${editor})`,
-            EXIT_RUNTIME_ERROR,
-            'set $EDITOR to override',
-          );
-        }
+        console.log(chalk.dim(`\nOpening ${entry.name}...`));
+        openInEditor(resolvedPath);
 
         vault.recordUsage(entry.id);
       } finally {

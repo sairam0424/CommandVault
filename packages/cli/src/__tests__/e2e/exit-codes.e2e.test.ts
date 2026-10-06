@@ -300,9 +300,9 @@ describe('built CLI: runtime and user errors exit 1', () => {
     const result = box.run(['open', 'demo-skill'], { EDITOR: editor });
     expect(result.status, context(result)).toBe(EXIT_RUNTIME);
     expect(errorLines(result), context(result)).toEqual([
-      `error: failed to open editor (${editor})`,
+      `error: failed to open editor (${editor}): command not found`,
     ]);
-    expect(result.stderr, context(result)).toMatch(/^hint: set \$EDITOR to override/m);
+    expect(result.stderr, context(result)).toMatch(/^hint: set \$VISUAL or \$EDITOR to override/m);
   });
 
   it('info --json of a missing entry still prints a valid JSON document, then exits 1', () => {

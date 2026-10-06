@@ -56,6 +56,7 @@ export function makeVault(entries: VaultEntry[], onSearch?: SearchFn): Vault {
         find(options).map((entry) => ({ entry, score: 1, matchedFields: [] as string[] })),
       ),
     getAllEntries: vi.fn().mockReturnValue(entries),
+    getEntry: vi.fn().mockImplementation((id: string) => entries.find((e) => e.id === id)),
     recordUsage: vi.fn(),
     toggleFavorite: vi.fn().mockReturnValue(true),
     getSlashCommand: vi.fn().mockImplementation((e: VaultEntry) => `/${e.name}`),
@@ -101,7 +102,9 @@ export async function mountApp(vault: Vault, options: MountOptions = {}) {
   if (options.columns !== undefined && options.rows !== undefined) {
     await resize(options.columns, options.rows);
   }
-  return { frame, write, waitForFrame, resize };
+  // Everything written to the terminal, in order; a redraw request shows up as its own write.
+  const writes = (): readonly string[] => app.frames;
+  return { frame, write, waitForFrame, resize, writes };
 }
 
 export type MountedApp = Awaited<ReturnType<typeof mountApp>>;
