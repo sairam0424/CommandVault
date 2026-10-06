@@ -2,7 +2,14 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import Table from 'cli-table3';
 import { importFromFile, importFromUrl } from '@commandvault/core';
-import { createVaultInstance, typeEmoji, typeColor, type CliGlobalOptions } from '../helpers.js';
+import {
+  createVaultInstance,
+  headlineProblem,
+  printParseProblems,
+  typeEmoji,
+  typeColor,
+  type CliGlobalOptions,
+} from '../helpers.js';
 import { createSpinner } from '../ui/spinner.js';
 import { CommandError } from '../errors.js';
 
@@ -21,15 +28,13 @@ export function createImportCommand(): Command {
 
       if (result.entries.length === 0) {
         spinner?.stop();
-        const reason = result.errors[0] ? ` (${result.errors[0].message})` : '';
+        const headline = headlineProblem(result.errors);
+        const reason = headline ? ` (${headline.message})` : '';
         throw new CommandError(`no valid entries found in source${reason}`);
       }
 
-      for (const err of result.errors) {
-        spinner?.warn(chalk.yellow(`Warning: ${err.message}`));
-      }
-
       spinner?.succeed(`Found ${result.entries.length} entries to import`);
+      printParseProblems(result.errors);
 
       const table = new Table({
         head: [

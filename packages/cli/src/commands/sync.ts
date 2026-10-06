@@ -1,7 +1,12 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { importFromUrl } from '@commandvault/core';
-import { createVaultInstance, type CliGlobalOptions } from '../helpers.js';
+import { getParseSeverity, importFromUrl } from '@commandvault/core';
+import {
+  createVaultInstance,
+  headlineProblem,
+  printParseProblems,
+  type CliGlobalOptions,
+} from '../helpers.js';
 import { createSpinner } from '../ui/spinner.js';
 import { usageError, CommandError } from '../errors.js';
 
@@ -23,12 +28,14 @@ export function createSyncCommand(): Command {
       const spinner = globalOpts.json ? null : createSpinner(`Fetching from ${url}...`).start();
       const result = await importFromUrl(url);
 
-      if (result.errors.length > 0) {
+      const failed = result.errors.some((problem) => getParseSeverity(problem) === 'error');
+      if (failed) {
         spinner?.stop();
-        throw new CommandError(result.errors[0].message);
+        throw new CommandError(headlineProblem(result.errors)?.message ?? 'sync failed');
       }
 
       spinner?.succeed(`Fetched ${result.entries.length} entries from remote`);
+      printParseProblems(result.errors);
 
       if (result.entries.length === 0) {
         console.log(chalk.yellow('No entries found at remote URL.'));

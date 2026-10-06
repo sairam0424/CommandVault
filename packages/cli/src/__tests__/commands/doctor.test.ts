@@ -1,243 +1,370 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MOCK_ENTRIES } from '../fixtures/mock-vault.js';
+import { Command } from 'commander';
+import { DatabaseIoError, DatabaseLockedError, type ParseError } from '@commandvault/core';
 
 vi.mock('../../helpers.js', async () => {
   const actual = await vi.importActual<typeof import('../../helpers.js')>('../../helpers.js');
-  return {
-    ...actual,
-    createVaultInstance: vi.fn(),
-  };
+  return { ...actual, createConfiguredVault: vi.fn() };
 });
 
-import { createVaultInstance } from '../../helpers.js';
-import { createDoctorCommand } from '../../commands/doctor.js';
-import { Command } from 'commander';
+import { createConfiguredVault } from '../../helpers.js';
+import { checkNodeVersion, createDoctorCommand } from '../../commands/doctor.js';
 
-function buildProgram() {
-  const program = new Command();
-  program.option('--json', 'JSON output');
-  program.addCommand(createDoctorCommand());
-  return program;
+interface Row {
+  readonly name: string;
+  readonly status: string;
+  readonly detail: string;
 }
 
-function createMockVault(entries = MOCK_ENTRIES) {
+interface Report {
+  readonly claudeDir: string;
+  readonly checks: readonly Row[];
+  readonly counts: Readonly<Record<string, number>>;
+  readonly problems: ReadonlyArray<{ readonly filePath: string; readonly message: string }>;
+}
+
+function fakeVault(totalEntries: number, errors: readonly ParseError[] = []) {
   return {
-    getAllEntries: () => entries,
+    initialize: vi.fn().mockResolvedValue({ totalEntries }),
+    getErrors: () => errors,
     dispose: vi.fn().mockResolvedValue(undefined),
   };
 }
 
 describe('doctor command', () => {
-  let tmpDir: string;
-  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let home: string;
+  let claudeDir: string;
+  let logSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), 'vault-doctor-test-'));
-    // doctor resolves ~/.claude and ~/.commandvault when it runs, so point them at the temp dir.
-    vi.stubEnv('HOME', tmpDir);
-    vi.stubEnv('USERPROFILE', tmpDir);
-    vi.stubEnv('COMMANDVAULT_HOME', '');
+    home = await mkdtemp(join(tmpdir(), 'vault-doctor-test-'));
+    claudeDir = join(home, '.claude');
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('USERPROFILE', home);
+    vi.stubEnv('COMMANDVAULT_HOME', join(home, '.commandvault'));
     vi.stubEnv('CLAUDE_CONFIG_DIR', '');
-    consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await mkdir(claudeDir, { recursive: true });
+    await mkdir(join(home, '.commandvault'), { recursive: true });
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.mocked(createConfiguredVault).mockResolvedValue(fakeVault(3) as never);
   });
 
   afterEach(async () => {
-    consoleSpy.mockRestore();
+    logSpy.mockRestore();
     vi.clearAllMocks();
     vi.unstubAllEnvs();
-    await rm(tmpDir, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
   });
 
-  it('reports healthy status when all checks pass', async () => {
-    // Create all expected directories and files
-    const claudeDir = join(tmpDir, '.claude');
-    await mkdir(join(claudeDir, 'skills'), { recursive: true });
-    await mkdir(join(claudeDir, 'agents'), { recursive: true });
-    await mkdir(join(claudeDir, 'commands'), { recursive: true });
-    await mkdir(join(claudeDir, 'plugins'), { recursive: true });
-    await mkdir(join(tmpDir, '.commandvault'), { recursive: true });
+  async function runDoctor(...args: string[]): Promise<Report> {
+    const program = new Command();
+    program.option('--json').option('--claude-path <dir>');
+    program.addCommand(createDoctorCommand());
+    await program.parseAsync(['node', 'vault', 'doctor', '--json', ...args]);
+    return JSON.parse(String(logSpy.mock.calls.at(-1)?.[0])) as Report;
+  }
 
-    await writeFile(join(claudeDir, 'plugins', 'installed_plugins.json'), JSON.stringify([]));
-    await writeFile(join(claudeDir, 'settings.json'), JSON.stringify({ hooks: {} }));
-    await writeFile(join(tmpDir, '.commandvault', 'vault.db'), '');
+  const rowNamed = (report: Report, name: string): Row =>
+    report.checks.find((row) => row.name === name) as Row;
 
-    const vault = createMockVault();
-    vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
-
-    const program = buildProgram();
-    await program.parseAsync(['node', 'vault', 'doctor']);
-
-    const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
-    expect(output).toContain('checks passed');
-  });
-
-  it('detects missing ~/.claude directory', async () => {
-    // Don't create .claude directory
-    await mkdir(join(tmpDir, '.commandvault'), { recursive: true });
-    await writeFile(join(tmpDir, '.commandvault', 'vault.db'), '');
-
-    const vault = createMockVault();
-    vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
-
-    const program = buildProgram();
-    await program.parseAsync(['node', 'vault', 'doctor']);
-
-    const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
-    expect(output).toContain('~/.claude/ directory');
-    expect(output).toContain('not found');
-  });
-
-  it('detects missing vault.db', async () => {
-    const claudeDir = join(tmpDir, '.claude');
-    await mkdir(claudeDir, { recursive: true });
-    // Don't create .commandvault directory or vault.db
-
-    const vault = createMockVault();
-    vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
-
-    const program = buildProgram();
-    await program.parseAsync(['node', 'vault', 'doctor']);
-
-    const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
-    expect(output).toContain('vault.db');
-    expect(output).toContain('Not found');
-  });
-
-  it('reports scan pipeline failure when vault throws', async () => {
-    const claudeDir = join(tmpDir, '.claude');
-    await mkdir(claudeDir, { recursive: true });
-
-    vi.mocked(createVaultInstance).mockRejectedValue(new Error('DB corrupted'));
-
-    const program = buildProgram();
-    await program.parseAsync(['node', 'vault', 'doctor']);
-
-    const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
-    expect(output).toContain('Vault scan pipeline');
-    expect(output).toContain('DB corrupted');
-  });
-
-  it('detects invalid plugins JSON', async () => {
-    const claudeDir = join(tmpDir, '.claude');
-    await mkdir(join(claudeDir, 'plugins'), { recursive: true });
-    await writeFile(join(claudeDir, 'plugins', 'installed_plugins.json'), '{broken json!!!');
-    await mkdir(join(tmpDir, '.commandvault'), { recursive: true });
-    await writeFile(join(tmpDir, '.commandvault', 'vault.db'), '');
-
-    const vault = createMockVault();
-    vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
-
-    const program = buildProgram();
-    await program.parseAsync(['node', 'vault', 'doctor']);
-
-    const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
-    expect(output).toContain('installed_plugins.json');
-    expect(output).toContain('invalid JSON');
-  });
-
-  it('reports scan entry count on success', async () => {
-    const claudeDir = join(tmpDir, '.claude');
-    await mkdir(claudeDir, { recursive: true });
-
-    const vault = createMockVault();
-    vi.mocked(createVaultInstance).mockResolvedValue(vault as any);
-
-    const program = buildProgram();
-    await program.parseAsync(['node', 'vault', 'doctor']);
-
-    const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
-    expect(output).toContain(`${MOCK_ENTRIES.length} entries successfully`);
-  });
-
-  describe('with the directories redirected by environment variables', () => {
-    interface ClaudeDirShape {
-      readonly skills: number;
-      readonly agents: number;
-      readonly commands: number;
-      readonly installedPlugins: string;
-      readonly settings: Record<string, unknown>;
-    }
-
-    async function populateClaudeDir(dir: string, shape: ClaudeDirShape): Promise<void> {
-      const counts = { skills: shape.skills, agents: shape.agents, commands: shape.commands };
-      for (const [folder, count] of Object.entries(counts)) {
-        for (let index = 0; index < count; index += 1) {
-          await mkdir(join(dir, folder, `${folder}-${index}`), { recursive: true });
-        }
-      }
-      await mkdir(join(dir, 'plugins'), { recursive: true });
-      await writeFile(join(dir, 'plugins', 'installed_plugins.json'), shape.installedPlugins);
-      await writeFile(join(dir, 'settings.json'), JSON.stringify(shape.settings));
-    }
-
-    async function doctorOutput(): Promise<string> {
-      vi.mocked(createVaultInstance).mockResolvedValue(createMockVault() as any);
-      await buildProgram().parseAsync(['node', 'vault', 'doctor']);
-      return consoleSpy.mock.calls.map((c) => c[0]).join('\n');
-    }
-
-    const lineFor = (output: string, label: string): string =>
-      output.split('\n').find((line) => line.includes(label)) ?? `(no line for ${label})`;
-
-    it('inspects CLAUDE_CONFIG_DIR, not <HOME>/.claude, in every Claude check', async () => {
-      // <HOME>/.claude is complete and healthy; the redirected directory differs in every respect
-      // a check reports, so a check that still reads <HOME>/.claude prints the wrong detail.
-      await populateClaudeDir(join(tmpDir, '.claude'), {
-        skills: 1,
-        agents: 1,
-        commands: 1,
-        installedPlugins: '[]',
-        settings: { hooks: {} },
-      });
-      const redirected = join(tmpDir, 'elsewhere', 'claude');
-      await populateClaudeDir(redirected, {
-        skills: 2,
-        agents: 3,
-        commands: 4,
-        installedPlugins: '{broken json',
-        settings: {},
-      });
-      vi.stubEnv('CLAUDE_CONFIG_DIR', redirected);
-
-      const output = await doctorOutput();
-
-      expect(lineFor(output, '~/.claude/skills/')).toContain('2 skills found');
-      expect(lineFor(output, '~/.claude/agents/')).toContain('3 agents found');
-      expect(lineFor(output, '~/.claude/commands/')).toContain('4 commands found');
-      expect(lineFor(output, 'installed_plugins.json')).toContain('invalid JSON');
-      expect(lineFor(output, 'settings.json')).toContain('no hooks section');
+  describe('the Node.js check', () => {
+    it('fails below the floor named in the package engines', () => {
+      expect(checkNodeVersion('20.18.0', '>=22.13.0').status).toBe('fail');
+      expect(checkNodeVersion('22.12.9', '>=22.13.0').status).toBe('fail');
+      expect(checkNodeVersion('21.9.0', '>=22.13.0').detail).toContain('>=22.13.0');
     });
 
-    it('reports a missing CLAUDE_CONFIG_DIR even though <HOME>/.claude is healthy', async () => {
-      await populateClaudeDir(join(tmpDir, '.claude'), {
-        skills: 1,
-        agents: 1,
-        commands: 1,
-        installedPlugins: '[]',
-        settings: { hooks: {} },
-      });
-      vi.stubEnv('CLAUDE_CONFIG_DIR', join(tmpDir, 'missing', 'claude'));
-
-      const output = await doctorOutput();
-
-      expect(lineFor(output, '~/.claude/ directory')).toContain('Directory not found');
-      expect(output).not.toMatch(/\d+ (skill|agent|command)s? found/);
-      expect(output).not.toContain('Valid');
+    it('passes at and above the floor', () => {
+      expect(checkNodeVersion('22.13.0', '>=22.13.0').status).toBe('pass');
+      expect(checkNodeVersion('22.14.0', '>=22.13.0').status).toBe('pass');
+      expect(checkNodeVersion('24.0.0', '>=22.13.0').status).toBe('pass');
     });
 
-    it('looks for the vault in COMMANDVAULT_HOME, not <HOME>/.commandvault', async () => {
-      const dataDir = join(tmpDir, 'elsewhere', 'data');
-      await mkdir(dataDir, { recursive: true });
-      await writeFile(join(dataDir, 'vault.db'), '');
-      vi.stubEnv('COMMANDVAULT_HOME', dataDir);
+    it('reads the floor from the CLI package.json when none is given', () => {
+      const manifest = JSON.parse(
+        readFileSync(new URL('../../../package.json', import.meta.url), 'utf8'),
+      ) as { engines: { node: string } };
 
-      const output = await doctorOutput();
-
-      expect(lineFor(output, '~/.commandvault/ directory')).toContain('Directory exists');
-      expect(lineFor(output, '~/.commandvault/vault.db')).toContain('SQLite database exists');
+      expect(checkNodeVersion('99.0.0').detail).toContain(`requires ${manifest.engines.node}`);
     });
+
+    it('does not pass a range it cannot read', () => {
+      expect(checkNodeVersion('22.13.0', '^22').status).toBe('warn');
+    });
+  });
+
+  it('reports a typed database failure as one Database row and fails the command', async () => {
+    const locked = new DatabaseLockedError(join(home, '.commandvault', 'vault.db'));
+    vi.mocked(createConfiguredVault).mockRejectedValue(locked);
+    await writeFile(join(home, '.commandvault', 'vault.db'), '');
+
+    await expect(runDoctor()).rejects.toThrow('1 required check failed');
+    const report = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0])) as Report;
+
+    const rows = report.checks.filter((row) => row.status === 'fail');
+    expect(rows.map((row) => row.name)).toEqual(['Database']);
+    expect(rows[0]?.detail).toBe(locked.message);
+    expect(report.checks.some((row) => row.name === 'Vault scan')).toBe(false);
+  });
+
+  it('reports an untyped scan failure as a failing Vault scan row', async () => {
+    vi.mocked(createConfiguredVault).mockRejectedValue(new Error('boom'));
+
+    await expect(runDoctor()).rejects.toThrow('1 required check failed');
+    const report = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0])) as Report;
+
+    expect(rowNamed(report, 'Vault scan')).toMatchObject({ status: 'fail' });
+    expect(rowNamed(report, 'Vault scan').detail).toContain('boom');
+  });
+
+  it('counts warnings and lists only the errors', async () => {
+    const problems: ParseError[] = [
+      { filePath: '/a/SKILL.md', message: 'frontmatter recovered', severity: 'warning' },
+      { filePath: '/b/SKILL.md', message: 'file too large', severity: 'warning' },
+      { filePath: '/c/agent.md', message: 'cannot read', severity: 'error' },
+      { filePath: '/d/legacy.md', message: 'no severity means error' },
+    ];
+    vi.mocked(createConfiguredVault).mockResolvedValue(fakeVault(3, problems) as never);
+
+    const report = await runDoctor();
+
+    expect(rowNamed(report, 'Parse problems')).toMatchObject({
+      status: 'warn',
+      detail: '2 errors in 2 files, 2 warnings',
+    });
+    expect(report.problems.map((problem) => problem.filePath)).toEqual([
+      '/c/agent.md',
+      '/d/legacy.md',
+    ]);
+    expect(report.counts['fail']).toBe(0);
+  });
+
+  it('shows warnings alone as information, not as a problem', async () => {
+    const warning: ParseError = { filePath: '/a', message: 'recovered', severity: 'warning' };
+    vi.mocked(createConfiguredVault).mockResolvedValue(fakeVault(3, [warning]) as never);
+
+    const report = await runDoctor();
+
+    expect(rowNamed(report, 'Parse problems')).toMatchObject({
+      status: 'info',
+      detail: '1 warning',
+    });
+  });
+
+  it('does not count a missing optional source as a parse problem', async () => {
+    const absent: ParseError = {
+      filePath: join(claudeDir, 'commands'),
+      message: 'Commands directory not found',
+      severity: 'error',
+    };
+    vi.mocked(createConfiguredVault).mockResolvedValue(fakeVault(3, [absent]) as never);
+
+    const report = await runDoctor();
+
+    expect(rowNamed(report, 'Parse problems')).toMatchObject({ status: 'pass', detail: 'none' });
+    expect(report.problems).toEqual([]);
+  });
+
+  it('keeps a parse error for a source that does exist', async () => {
+    await mkdir(join(claudeDir, 'commands'));
+    const broken: ParseError = {
+      filePath: join(claudeDir, 'commands'),
+      message: 'cannot be read',
+      severity: 'error',
+    };
+    vi.mocked(createConfiguredVault).mockResolvedValue(fakeVault(3, [broken]) as never);
+
+    const report = await runDoctor();
+
+    expect(report.problems).toHaveLength(1);
+  });
+
+  it('warns, without failing, when the scan finds no entries', async () => {
+    vi.mocked(createConfiguredVault).mockResolvedValue(fakeVault(0) as never);
+
+    const report = await runDoctor();
+
+    expect(rowNamed(report, 'Entries')).toMatchObject({ status: 'warn' });
+    expect(rowNamed(report, 'Entries').detail).toContain(claudeDir);
+    expect(report.counts['fail']).toBe(0);
+  });
+
+  describe('the settings.json check', () => {
+    const settingsRow = async (): Promise<Row> => rowNamed(await runDoctor(), 'settings.json');
+
+    it('is informational when the file does not exist', async () => {
+      expect(await settingsRow()).toMatchObject({ status: 'info' });
+    });
+
+    it('passes a valid object, with or without a hooks section', async () => {
+      await writeFile(join(claudeDir, 'settings.json'), JSON.stringify({ hooks: {} }));
+      expect((await settingsRow()).detail).not.toContain('no hooks');
+
+      await writeFile(join(claudeDir, 'settings.json'), JSON.stringify({ model: 'x' }));
+      expect(await settingsRow()).toMatchObject({ status: 'pass' });
+      expect((await settingsRow()).detail).toContain('no hooks section');
+    });
+
+    it('fails on JSON that does not parse, naming the parse error', async () => {
+      await writeFile(join(claudeDir, 'settings.json'), '{ "hooks": ');
+
+      await expect(runDoctor()).rejects.toThrow('1 required check failed');
+      const row = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0])).checks.find(
+        (candidate: Row) => candidate.name === 'settings.json',
+      ) as Row;
+
+      expect(row.status).toBe('fail');
+      expect(row.detail).toMatch(/is not valid JSON: .*JSON/);
+    });
+
+    it.each(['[1, 2]', 'null', '"text"', '7'])(
+      'fails on valid JSON that is not an object: %s',
+      async (text) => {
+        await writeFile(join(claudeDir, 'settings.json'), text);
+
+        await expect(runDoctor()).rejects.toThrow('1 required check failed');
+      },
+    );
+  });
+
+  it('warns, without failing, about an installed_plugins.json that is not valid JSON', async () => {
+    await mkdir(join(claudeDir, 'plugins'));
+    await writeFile(join(claudeDir, 'plugins', 'installed_plugins.json'), '{broken');
+
+    const report = await runDoctor();
+
+    expect(rowNamed(report, 'installed_plugins.json')).toMatchObject({ status: 'warn' });
+    expect(report.counts['fail']).toBe(0);
+  });
+
+  it('fails the required Claude directory check when it does not exist', async () => {
+    await rm(claudeDir, { recursive: true });
+
+    await expect(runDoctor()).rejects.toThrow('1 required check failed');
+  });
+
+  it('inspects --claude-path, not the default directory', async () => {
+    const elsewhere = join(home, 'elsewhere');
+    await mkdir(join(elsewhere, 'skills', 'one'), { recursive: true });
+
+    const report = await runDoctor('--claude-path', elsewhere);
+
+    expect(report.claudeDir).toBe(elsewhere);
+    expect(rowNamed(report, 'skills directory').detail).toContain(join(elsewhere, 'skills'));
+    expect(rowNamed(report, 'skills directory').detail).toContain('1 skill');
+  });
+
+  it('inspects the vault with the config it already loaded, not a second read', async () => {
+    const elsewhere = join(home, 'elsewhere');
+    await mkdir(elsewhere);
+    await writeFile(
+      join(home, '.commandvault', 'config.json'),
+      JSON.stringify({ claudeConfigPath: elsewhere }),
+    );
+
+    await runDoctor();
+
+    const call = vi.mocked(createConfiguredVault).mock.calls[0];
+    expect(call?.[1]).toBe(false);
+    expect(call?.[2]?.config).toEqual({ claudeConfigPath: elsewhere });
+  });
+
+  it('scans against a throwaway index while no vault.db exists', async () => {
+    await runDoctor();
+
+    const overrides = vi.mocked(createConfiguredVault).mock.calls[0]?.[2];
+    expect(overrides?.dbPath).toBeDefined();
+    expect(overrides?.dbPath).not.toContain(join(home, '.commandvault'));
+  });
+
+  describe('when vault.db already exists', () => {
+    const realDb = () => join(home, '.commandvault', 'vault.db');
+
+    it('scans a copy of it, never the file itself', async () => {
+      await writeFile(realDb(), 'the user index');
+      let copied = '';
+      vi.mocked(createConfiguredVault).mockImplementation((async (
+        _options: unknown,
+        _watch: unknown,
+        overrides: { dbPath: string },
+      ) => {
+        copied = readFileSync(overrides.dbPath, 'utf-8');
+        return {
+          initialize: async () => {
+            await writeFile(overrides.dbPath, 'rewritten by the scan');
+            return { totalEntries: 3 };
+          },
+          getErrors: () => [],
+          dispose: async () => undefined,
+        };
+      }) as never);
+
+      const report = await runDoctor();
+
+      expect(copied).toBe('the user index');
+      expect(readFileSync(realDb(), 'utf-8')).toBe('the user index');
+      expect(rowNamed(report, 'Database').status).toBe('pass');
+    });
+
+    it('fails the Database row, and leaves the file alone, when the scan had to quarantine it', async () => {
+      await writeFile(realDb(), 'not sqlite');
+      vi.mocked(createConfiguredVault).mockImplementation((async (
+        _options: unknown,
+        _watch: unknown,
+        overrides: { dbPath: string },
+      ) => ({
+        initialize: async () => {
+          await writeFile(`${overrides.dbPath}.corrupt.1791224063137.bak`, 'not sqlite');
+          return { totalEntries: 3 };
+        },
+        getErrors: () => [],
+        dispose: async () => undefined,
+      })) as never);
+
+      await expect(runDoctor()).rejects.toThrow('1 required check failed');
+      const report = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0])) as Report;
+
+      expect(rowNamed(report, 'Database')).toMatchObject({ status: 'fail' });
+      expect(rowNamed(report, 'Database').detail).toContain(realDb());
+      expect(readFileSync(realDb(), 'utf-8')).toBe('not sqlite');
+    });
+
+    it('names the real file, not the scratch copy, in a typed open error', async () => {
+      await writeFile(realDb(), '');
+      let scratchDb = '';
+      vi.mocked(createConfiguredVault).mockImplementation((async (
+        _options: unknown,
+        _watch: unknown,
+        overrides: { dbPath: string },
+      ) => ({
+        initialize: async () => {
+          scratchDb = overrides.dbPath;
+          throw new DatabaseIoError(overrides.dbPath, new Error('boom'));
+        },
+        getErrors: () => [],
+        dispose: async () => undefined,
+      })) as never);
+
+      await expect(runDoctor()).rejects.toThrow('1 required check failed');
+      const report = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0])) as Report;
+
+      expect(rowNamed(report, 'Database').detail).toContain(realDb());
+      expect(scratchDb).not.toBe('');
+      expect(rowNamed(report, 'Database').detail).not.toContain(scratchDb);
+    });
+  });
+
+  it('fails the config.json check, and skips the scan, when config.json is malformed', async () => {
+    await writeFile(join(home, '.commandvault', 'config.json'), '{ nope');
+
+    await expect(runDoctor()).rejects.toThrow('1 required check failed');
+    const report = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0])) as Report;
+
+    expect(rowNamed(report, 'config.json')).toMatchObject({ status: 'fail' });
+    expect(createConfiguredVault).not.toHaveBeenCalled();
   });
 });

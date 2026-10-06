@@ -1,12 +1,16 @@
+import { resolve } from 'node:path';
 import chalk from 'chalk';
 import {
   createVault,
+  getParseSeverity,
+  resolveClaudeDir,
+  type ParseError,
   type Vault,
   type VaultEntry,
   type EntryType,
   type SearchTier,
 } from '@commandvault/core';
-import { loadConfig } from './config.js';
+import { loadConfig, type CliConfig } from './config.js';
 import { createSpinner } from './ui/spinner.js';
 
 export interface CliGlobalOptions {
@@ -17,6 +21,18 @@ export interface CliGlobalOptions {
   readonly project?: string;
 }
 
+export interface VaultOverrides {
+  /** Keep the index somewhere other than the data directory, e.g. a throwaway file. */
+  readonly dbPath?: string;
+  /** A config.json the caller already loaded, so it is read (and its warnings printed) once. */
+  readonly config?: CliConfig;
+}
+
+/** The Claude config directory a vault built from these options scans. */
+export function claudeDirFor(options: CliGlobalOptions, config: CliConfig): string {
+  return resolve(options.claudePath ?? config.claudeConfigPath ?? resolveClaudeDir());
+}
+
 /**
  * Builds a vault from the global options, falling back to config.json for what they leave unset.
  * Every command that opens a vault goes through here so none of them ignores the config file.
@@ -24,13 +40,15 @@ export interface CliGlobalOptions {
 export async function createConfiguredVault(
   options: CliGlobalOptions,
   enableWatcher: boolean,
+  overrides: VaultOverrides = {},
 ): Promise<Vault> {
-  const config = await loadConfig();
+  const config = overrides.config ?? (await loadConfig());
   return createVault({
     claudeConfigPath: options.claudePath ?? config.claudeConfigPath,
     defaultSearchTier: options.tier ?? config.searchTier,
     projectRoot: options.project,
     enableWatcher,
+    ...(overrides.dbPath === undefined ? {} : { dbPath: overrides.dbPath }),
   });
 }
 
@@ -50,9 +68,12 @@ export function jsonOutput(data: unknown): void {
   console.log(JSON.stringify(data, null, 2));
 }
 
-export async function createVaultInstance(options: CliGlobalOptions) {
+export async function createVaultInstance(
+  options: CliGlobalOptions,
+  overrides: VaultOverrides = {},
+) {
   // Before the spinner: a bad config.json fails here without printing "Initializing vault...".
-  const vault = await createConfiguredVault(options, false);
+  const vault = await createConfiguredVault(options, false, overrides);
   const spinner = options.json ? null : createSpinner('Initializing vault...').start();
 
   try {
@@ -63,6 +84,43 @@ export async function createVaultInstance(options: CliGlobalOptions) {
     spinner?.fail('Failed to initialize vault');
     throw error;
   }
+}
+
+const MAX_PROBLEMS_LISTED = 10;
+
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+/**
+ * Prints parse problems to stderr: errors in red, warnings in yellow, then a count line. A warning
+ * never reads as a failure. Prints nothing when there is nothing to report.
+ */
+export function printParseProblems(problems: readonly ParseError[]): void {
+  if (problems.length === 0) {
+    return;
+  }
+  const errors = problems.filter((problem) => getParseSeverity(problem) === 'error');
+  const warnings = problems.filter((problem) => getParseSeverity(problem) === 'warning');
+  const lines = [
+    ...errors.map((problem) => chalk.red(`  ✗ ${problem.message}`)),
+    ...warnings.map((problem) => chalk.yellow(`  ⚠ ${problem.message}`)),
+  ];
+  for (const line of lines.slice(0, MAX_PROBLEMS_LISTED)) {
+    console.error(line);
+  }
+  if (lines.length > MAX_PROBLEMS_LISTED) {
+    console.error(chalk.dim(`  ... and ${lines.length - MAX_PROBLEMS_LISTED} more`));
+  }
+  const summarise = errors.length > 0 ? chalk.red : chalk.yellow;
+  console.error(
+    summarise(`  ${plural(errors.length, 'error')}, ${plural(warnings.length, 'warning')}`),
+  );
+}
+
+/** The first problem that is an error (a warning is never the headline), else the first problem. */
+export function headlineProblem(problems: readonly ParseError[]): ParseError | undefined {
+  return problems.find((problem) => getParseSeverity(problem) === 'error') ?? problems[0];
 }
 
 const TYPE_EMOJIS: Readonly<Record<EntryType, string>> = {

@@ -1,24 +1,56 @@
+import { join } from 'node:path';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { detectStaleness, scoreEntries } from '@commandvault/core';
-import { createVaultInstance, jsonOutput, type CliGlobalOptions } from '../helpers.js';
+import { loadConfig } from '../config.js';
+import {
+  claudeDirFor,
+  createVaultInstance,
+  jsonOutput,
+  type CliGlobalOptions,
+} from '../helpers.js';
+import { CommandError, usageError } from '../errors.js';
+
+const MAX_THRESHOLD_DAYS = 36_500;
+const MAX_SCORE = 100;
+
+/** A whole number from `min` to `max`; anything else (NaN, 1.5, "30days", -1) is a usage error. */
+function parseWholeNumber(flag: string, raw: string, min: number, max: number): number {
+  const value = /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : Number.NaN;
+  if (!Number.isSafeInteger(value) || value < min || value > max) {
+    throw usageError(`${flag} must be a whole number between ${min} and ${max}`);
+  }
+  return value;
+}
+
+/** The gate: only an explicit --fail-under turns low-quality entries into exit 1. */
+function failUnder(enabled: boolean, belowCount: number, minScore: number): void {
+  if (enabled && belowCount > 0) {
+    throw new CommandError(
+      `${belowCount} ${belowCount === 1 ? 'entry' : 'entries'} scored below ${minScore}`,
+    );
+  }
+}
 
 export function createAuditCommand(): Command {
   const cmd = new Command('audit')
     .description('Detect stale entries and score vault quality')
     .option('--threshold <days>', 'Staleness threshold in days', '30')
     .option('--min-score <score>', 'Minimum quality score threshold', '40')
+    .option('--fail-under', 'Exit 1 when any entry scores below --min-score')
     .action(async (opts, command) => {
       const globalOpts = command.optsWithGlobals() as CliGlobalOptions;
-      const thresholdDays = parseInt(opts.threshold, 10);
-      const minScore = parseInt(opts.minScore, 10);
+      const thresholdDays = parseWholeNumber('--threshold', opts.threshold, 0, MAX_THRESHOLD_DAYS);
+      const minScore = parseWholeNumber('--min-score', opts.minScore, 0, MAX_SCORE);
 
-      const vault = await createVaultInstance(globalOpts);
+      const config = await loadConfig();
+      const settingsPath = join(claudeDirFor(globalOpts, config), 'settings.json');
+      const vault = await createVaultInstance(globalOpts, { config });
 
       try {
         const entries = vault.getAllEntries();
         const [stalenessResults, qualityScores] = await Promise.all([
-          detectStaleness(entries, thresholdDays),
+          detectStaleness(entries, thresholdDays, { settingsPath }),
           Promise.resolve(scoreEntries(entries)),
         ]);
 
@@ -39,6 +71,10 @@ export function createAuditCommand(): Command {
               filePath: r.entry.filePath,
               sourceFileExists: r.sourceFileExists,
             })),
+            missing: missingEntries.map((r) => ({
+              name: r.entry.name,
+              filePath: r.entry.filePath,
+            })),
             lowQuality: lowQuality.map((q) => ({
               name: q.entry.name,
               score: q.score,
@@ -52,6 +88,7 @@ export function createAuditCommand(): Command {
               averageScore: avgScore,
             },
           });
+          failUnder(opts.failUnder === true, lowQuality.length, minScore);
           return;
         }
 
@@ -114,6 +151,7 @@ export function createAuditCommand(): Command {
         console.log(`    Low quality: ${chalk.yellow(String(lowQuality.length))} (${lowPct}%)`);
         console.log(`    Average quality score: ${chalk.bold(`${avgScore}/100`)}`);
         console.log('');
+        failUnder(opts.failUnder === true, lowQuality.length, minScore);
       } finally {
         await vault.dispose();
       }

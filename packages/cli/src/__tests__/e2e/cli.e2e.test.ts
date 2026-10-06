@@ -191,11 +191,12 @@ describe('built CLI: commands without a positional argument', () => {
     expect(result.stdout.trim()).toBe(pkg.version);
   });
 
-  it('doctor runs its checks and exits 0 even when it finds problems', () => {
+  it('doctor prints its report and exits 0 when every required check passes', () => {
+    expectSuccess(run(['list', '--json'])); // creates the data directory doctor requires
     const result = run(['doctor']);
     expectSuccess(result);
     expect(result.stdout, context(result)).toMatch(/CommandVault Doctor/);
-    expect(result.stdout, context(result)).toMatch(/Node\.js version/);
+    expect(result.stdout, context(result)).toMatch(/Node\.js\s+v\d+/);
   });
 
   it('an unknown command is rejected with a usage error', () => {

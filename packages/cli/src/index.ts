@@ -392,6 +392,7 @@ program
   .description('Detect stale entries and score vault quality')
   .option('--threshold <days>', 'Staleness threshold in days', '30')
   .option('--min-score <score>', 'Minimum quality score threshold', '40')
+  .option('--fail-under', 'Exit 1 when any entry scores below --min-score')
   .action(lazyAction('audit', () => import('./commands/audit.js'), 'createAuditCommand'));
 
 // Default action: launch interactive mode when no subcommand is given
