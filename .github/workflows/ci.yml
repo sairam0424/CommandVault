@@ -129,3 +129,27 @@ jobs:
         run: >-
           pnpm audit --audit-level high ||
           echo "::warning title=Development dependency advisories::pnpm audit reports high or critical advisories in the development toolchain. Tracked for the vitest 4 upgrade."
+
+  # The one check a ruleset can require. Matrix jobs produce per-leg check names and nothing
+  # aggregated them, so pull requests merged while `Test (windows-latest)` was red. This job runs
+  # even when a needed job fails or is skipped (`if: always()`) and is green only when every one
+  # of them reports `success`; `failure`, `cancelled` and `skipped` all turn it red.
+  ci-gate:
+    name: CI gate
+    runs-on: ubuntu-latest
+    permissions: {}
+    if: always()
+    needs: [build-and-test, cross-platform, package-vscode, dependency-audit]
+
+    steps:
+      - name: Require every needed job to succeed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          if jq -e 'length > 0 and all(.[]; .result == "success")' <<< "$NEEDS" > /dev/null; then
+            echo "CI gate: every needed job succeeded."
+          else
+            echo "::error title=CI gate::at least one needed job did not succeed (failure, cancelled or skipped)."
+            jq . <<< "$NEEDS"
+            exit 1
+          fi
