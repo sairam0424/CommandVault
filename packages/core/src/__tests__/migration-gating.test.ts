@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { closeSync, existsSync, fstatSync, openSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,6 +22,17 @@ import {
 
 // Migrations are gated on the set of versions a database has recorded, not on the highest one, and
 // a database that is fully migrated is opened without taking any write lock.
+
+/** One descriptor for the mtime and the bytes, so both describe the same version of the file. */
+function snapshotFile(filePath: string): { sha256: string; mtimeMs: number } {
+  const fd = openSync(filePath, 'r');
+  try {
+    const { mtimeMs } = fstatSync(fd);
+    return { sha256: createHash('sha256').update(readFileSync(fd)).digest('hex'), mtimeMs };
+  } finally {
+    closeSync(fd);
+  }
+}
 
 const scenario = vi.hoisted(() => ({ transactionModes: [] as Array<string | undefined> }));
 
@@ -111,8 +122,7 @@ describe('migration gating', () => {
 
   it('opens a database that is fully migrated without writing a single byte', async () => {
     (await SqliteEngine.create(dbPath)).close();
-    const bytesBefore = createHash('sha256').update(readFileSync(dbPath)).digest('hex');
-    const modifiedBefore = statSync(dbPath).mtimeMs;
+    const before = snapshotFile(dbPath);
     const probe = new Database(dbPath);
     const dataVersionBefore = probe.pragma('data_version', { simple: true });
 
@@ -120,8 +130,9 @@ describe('migration gating', () => {
 
     expect(probe.pragma('data_version', { simple: true })).toBe(dataVersionBefore);
     probe.close();
-    expect(createHash('sha256').update(readFileSync(dbPath)).digest('hex')).toBe(bytesBefore);
-    expect(statSync(dbPath).mtimeMs).toBe(modifiedBefore);
+    const after = snapshotFile(dbPath);
+    expect(after.sha256).toBe(before.sha256);
+    expect(after.mtimeMs).toBe(before.mtimeMs);
   });
 
   it('takes the write lock when the transaction starts, not when it first writes', async () => {
