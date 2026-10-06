@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as crypto from 'crypto';
 import type { VaultEntry } from '@commandvault/core';
 import { failureMessage } from './failure-message';
+import { notifyError, notifyInfo } from './notifications';
 import { resolveOpenableFile } from './open-file-policy';
 import { toScriptJson } from './script-json';
 
@@ -44,7 +45,7 @@ export function createDetailPanel(
     async (message: { type: string; text?: string; path?: unknown }) => {
       if (message.type === 'copy' && message.text) {
         await vscode.env.clipboard.writeText(message.text);
-        vscode.window.showInformationMessage('CommandVault: Copied to clipboard');
+        notifyInfo('CommandVault: Copied to clipboard');
       } else if (message.type === 'openFile' && message.path) {
         await openSourceFile(message.path);
       }
@@ -70,13 +71,13 @@ async function openSourceFile(requestedPath: unknown): Promise<void> {
   try {
     const realPath = await resolveOpenableFile(requestedPath);
     if (!realPath) {
-      vscode.window.showErrorMessage(OUTSIDE_ALLOWED_DIRECTORIES_MESSAGE);
+      notifyError(OUTSIDE_ALLOWED_DIRECTORIES_MESSAGE);
       return;
     }
     const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(realPath));
     await vscode.window.showTextDocument(doc);
   } catch (err) {
-    vscode.window.showErrorMessage(failureMessage(COULD_NOT_OPEN_FILE, err));
+    notifyError(failureMessage(COULD_NOT_OPEN_FILE, err));
   }
 }
 

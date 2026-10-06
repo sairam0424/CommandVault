@@ -1,3 +1,4 @@
+import { basename } from 'path';
 import * as vscode from 'vscode';
 import { createVault, Vault } from '@commandvault/core';
 import type { VaultConfig, SearchTier } from '@commandvault/core';
@@ -9,6 +10,7 @@ import type { VaultRef } from './providers/completion-provider';
 import { HoverProvider } from './providers/hover-provider';
 import { LinkProvider } from './providers/link-provider';
 import { registerCommands } from './commands/index';
+import { notifyError, notifyInfo, notifyWarn, safeNotificationText } from './webview/notifications';
 
 let vault: Vault | undefined;
 
@@ -90,7 +92,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
 
   vault.on('error', (error) => {
-    vscode.window.showWarningMessage(`CommandVault: ${error.message} (${error.filePath})`);
+    // The message quotes the file and the file's name is a third party's: both go through
+    // safeNotificationText, and the directory (where the hostile part of a path usually is) is
+    // left out.
+    const fileName = safeNotificationText(fileNameOf(error.filePath));
+    const where = fileName ? ` (${fileName})` : '';
+    notifyWarn(`CommandVault: ${safeNotificationText(error.message)}${where}`);
   });
 
   const commandDisposables = registerCommands(
@@ -134,21 +141,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       value: stats.totalEntries,
       tooltip: 'Total commands',
     };
-    vscode.window.showInformationMessage(`CommandVault: Loaded ${stats.totalEntries} entries`);
+    notifyInfo(`CommandVault: Loaded ${stats.totalEntries} entries`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    vscode.window.showErrorMessage(`CommandVault: Failed to initialize vault - ${message}`);
+    notifyError(`CommandVault: Failed to initialize vault - ${safeNotificationText(message)}`);
   }
 
   const configWatcher = vscode.workspace.onDidChangeConfiguration((e) => {
     if (e.affectsConfiguration('commandvault')) {
-      vscode.window.showInformationMessage(
-        'CommandVault: Configuration changed. Reload window to apply.',
-      );
+      notifyInfo('CommandVault: Configuration changed. Reload window to apply.');
     }
   });
 
   context.subscriptions.push(configWatcher);
+}
+
+/** The file a scan error is about, or '' when it is about none (a failed re-scan has `filePath: ''`). */
+function fileNameOf(filePath: unknown): string {
+  return typeof filePath === 'string' ? basename(filePath) : '';
 }
 
 export async function deactivate(): Promise<void> {

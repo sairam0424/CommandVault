@@ -4,6 +4,26 @@ import type { EntriesProvider } from '../providers/entries-provider';
 import type { FavoritesProvider } from '../providers/favorites-provider';
 import type { RecentProvider } from '../providers/recent-provider';
 import { createDetailPanel } from '../webview/detail-panel';
+import { failureMessage } from '../webview/failure-message';
+import {
+  notifyError,
+  notifyInfo,
+  notifyWarn,
+  safeNotificationText,
+} from '../webview/notifications';
+
+const COULD_NOT_OPEN_FILE = 'Could not open file';
+
+/**
+ * A control character (Unicode category Cc): the C0 controls (newline, carriage return, escape,
+ * NUL, Ctrl-C ...), DEL and the C1 controls, and with them the Unicode line and paragraph
+ * separators. A terminal reads a newline as Enter and an escape sequence as keystrokes, so text
+ * with one is not text to type for the user: an entry name that holds `\nrm -rf ~` would run the
+ * next command.
+ */
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+const NOT_INSERTED_MESSAGE =
+  'CommandVault: Not inserted into the terminal - the text has a control character';
 
 const TYPE_ICONS: Readonly<Record<EntryType, string>> = {
   skill: '$(symbol-event)',
@@ -104,10 +124,10 @@ export function registerCommands(
   const refreshCommand = vscode.commands.registerCommand('commandvault.refresh', async () => {
     try {
       await vault.scan();
-      vscode.window.showInformationMessage('CommandVault: Vault refreshed');
+      notifyInfo('CommandVault: Vault refreshed');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      vscode.window.showErrorMessage(`CommandVault: Refresh failed - ${message}`);
+      notifyError(`CommandVault: Refresh failed - ${safeNotificationText(message)}`);
     }
   });
 
@@ -115,7 +135,7 @@ export function registerCommands(
     'commandvault.openDetail',
     (entry: VaultEntry) => {
       if (!entry) {
-        vscode.window.showWarningMessage('CommandVault: No entry selected');
+        notifyWarn('CommandVault: No entry selected');
         return;
       }
       vault.recordUsage(entry.id);
@@ -129,13 +149,13 @@ export function registerCommands(
     (entryOrNode: VaultEntry | { readonly entry: VaultEntry }) => {
       const entry = 'entry' in entryOrNode ? entryOrNode.entry : entryOrNode;
       if (!entry?.id) {
-        vscode.window.showWarningMessage('CommandVault: No entry selected');
+        notifyWarn('CommandVault: No entry selected');
         return;
       }
 
       const isFavorite = vault.toggleFavorite(entry.id);
       const action = isFavorite ? 'added to' : 'removed from';
-      vscode.window.showInformationMessage(`CommandVault: "${entry.name}" ${action} favorites`);
+      notifyInfo(`CommandVault: "${safeNotificationText(entry.name)}" ${action} favorites`);
       refreshAll();
     },
   );
@@ -145,13 +165,13 @@ export function registerCommands(
     async (entryOrNode: VaultEntry | { readonly entry: VaultEntry }) => {
       const entry = 'entry' in entryOrNode ? entryOrNode.entry : entryOrNode;
       if (!entry) {
-        vscode.window.showWarningMessage('CommandVault: No entry selected');
+        notifyWarn('CommandVault: No entry selected');
         return;
       }
 
       const slashCommand = vault.getSlashCommand(entry);
       await vscode.env.clipboard.writeText(slashCommand);
-      vscode.window.showInformationMessage(`CommandVault: Copied "${slashCommand}" to clipboard`);
+      notifyInfo(`CommandVault: Copied "${safeNotificationText(slashCommand)}" to clipboard`);
     },
   );
 
@@ -160,17 +180,21 @@ export function registerCommands(
     (entryOrNode: VaultEntry | { readonly entry: VaultEntry }) => {
       const entry = 'entry' in entryOrNode ? entryOrNode.entry : entryOrNode;
       if (!entry) {
-        vscode.window.showWarningMessage('CommandVault: No entry selected');
+        notifyWarn('CommandVault: No entry selected');
+        return;
+      }
+
+      const slashCommand = vault.getSlashCommand(entry);
+      if (CONTROL_CHARACTER.test(slashCommand)) {
+        notifyWarn(NOT_INSERTED_MESSAGE);
         return;
       }
 
       const terminal = vscode.window.activeTerminal ?? vscode.window.createTerminal('CommandVault');
       terminal.show();
-      const slashCommand = vault.getSlashCommand(entry);
+      // Typed, never run: no newline of our own, so the user reads the line and presses Enter.
       terminal.sendText(slashCommand, false);
-      vscode.window.showInformationMessage(
-        `CommandVault: Inserted "${slashCommand}" into terminal`,
-      );
+      notifyInfo(`CommandVault: Inserted "${safeNotificationText(slashCommand)}" into terminal`);
     },
   );
 
@@ -179,7 +203,7 @@ export function registerCommands(
     async (entryOrNode: VaultEntry | { readonly entry: VaultEntry }) => {
       const entry = 'entry' in entryOrNode ? entryOrNode.entry : entryOrNode;
       if (!entry?.filePath) {
-        vscode.window.showWarningMessage('CommandVault: No file path available');
+        notifyWarn('CommandVault: No file path available');
         return;
       }
 
@@ -188,8 +212,7 @@ export function registerCommands(
         const doc = await vscode.workspace.openTextDocument(uri);
         await vscode.window.showTextDocument(doc);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        vscode.window.showErrorMessage(`CommandVault: Could not open file - ${message}`);
+        notifyError(failureMessage(COULD_NOT_OPEN_FILE, err));
       }
     },
   );
@@ -218,26 +241,24 @@ export function registerCommands(
       sourceLines,
     ].join('\n');
 
-    vscode.window
-      .showInformationMessage(
-        `CommandVault Stats: ${stats.totalEntries} entries, ${stats.favoriteCount} favorites`,
-        'Show Details',
-      )
-      .then((selection) => {
-        if (selection === 'Show Details') {
-          const outputChannel = vscode.window.createOutputChannel('CommandVault Stats');
-          outputChannel.clear();
-          outputChannel.appendLine('=== CommandVault Stats ===');
-          outputChannel.appendLine(summary);
-          outputChannel.show();
-        }
-      });
+    notifyInfo(
+      `CommandVault Stats: ${stats.totalEntries} entries, ${stats.favoriteCount} favorites`,
+      'Show Details',
+    ).then((selection) => {
+      if (selection === 'Show Details') {
+        const outputChannel = vscode.window.createOutputChannel('CommandVault Stats');
+        outputChannel.clear();
+        outputChannel.appendLine('=== CommandVault Stats ===');
+        outputChannel.appendLine(summary);
+        outputChannel.show();
+      }
+    });
   });
 
   const exportCommand = vscode.commands.registerCommand('commandvault.export', async () => {
     const allEntries = vault.getAllEntries();
     if (allEntries.length === 0) {
-      vscode.window.showWarningMessage('CommandVault: No entries to export');
+      notifyWarn('CommandVault: No entries to export');
       return;
     }
 
@@ -273,8 +294,8 @@ export function registerCommands(
     const content = JSON.stringify(exportData, null, 2);
     const encoder = new TextEncoder();
     await vscode.workspace.fs.writeFile(saveUri, encoder.encode(content));
-    vscode.window.showInformationMessage(
-      `CommandVault: Exported ${allEntries.length} entries to ${saveUri.fsPath}`,
+    notifyInfo(
+      `CommandVault: Exported ${allEntries.length} entries to ${safeNotificationText(saveUri.fsPath)}`,
     );
   });
 

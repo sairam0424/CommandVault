@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { TYPE_COLORS, badgeColors } from './badge-colors';
 
 interface VaultStats {
   readonly totalEntries: number;
@@ -34,15 +35,6 @@ interface TopUsedMessage {
 }
 
 type IncomingMessage = InitMessage | StatsMessage | TopUsedMessage;
-
-const TYPE_COLORS: Readonly<Record<string, string>> = {
-  skill: '#00bcd4',
-  agent: '#2196f3',
-  command: '#ffca28',
-  plugin: '#4caf50',
-  rule: '#e040fb',
-  hook: '#ef5350',
-};
 
 const vscodeApi = acquireVsCodeApi();
 
@@ -109,7 +101,7 @@ function BarChart({
   );
 }
 
-function TopUsedList({
+export function TopUsedList({
   entries,
   onEntryClick,
 }: {
@@ -149,8 +141,7 @@ function TopUsedList({
           <span
             style={{
               ...styles.topListBadge,
-              backgroundColor:
-                TYPE_COLORS[entry.type] ?? 'var(--vscode-badge-background)',
+              ...badgeColors(entry.type),
             }}
           >
             {entry.type}
@@ -475,7 +466,6 @@ const styles: Readonly<Record<string, React.CSSProperties>> = {
     fontSize: '0.7em',
     padding: '1px 8px',
     borderRadius: '10px',
-    color: '#fff',
     textTransform: 'uppercase' as const,
     fontWeight: 600,
     letterSpacing: '0.03em',

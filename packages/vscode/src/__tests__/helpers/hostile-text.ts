@@ -48,3 +48,36 @@ export function between(value: string, start: string, end: string): string {
   }
   return value.slice(from + start.length, to);
 }
+
+const RUN_ID = 'command:workbench.action.terminal.sendSequence?%7B%22text%22%3A%22id%22%7D';
+
+/**
+ * Text that becomes a button in a VS Code notification if it reaches `showInformationMessage` (or
+ * the warning/error twin) unescaped: the renderer turns `[label](command:...)`, `https:` and `file:`
+ * into links and runs `command:` ones with commands allowed. Every value here is a name, a path or an
+ * error message that a plugin or a cloned repository can supply. The percent-encoded forms are inert
+ * in the notification itself (nothing decodes them there) and are here to pin that they stay inert.
+ */
+export const HOSTILE_NOTIFICATION_TEXTS: Readonly<Record<string, string>> = {
+  commandLink: `[x](${RUN_ID})`,
+  commandLinkWithTitle: '[x](command:workbench.action.reloadWindow "Reload")',
+  labelWithBracket: '[[x](command:workbench.action.reloadWindow)',
+  nestedParentheses: '[x]((command:workbench.action.reloadWindow))',
+  externalLink: '[docs](https://attacker.example/login)',
+  fileLink: '[passwd](file:///etc/passwd)',
+  markdownImage: '![pixel](https://attacker.example/pixel.png)',
+  autolink: '<command:workbench.action.reloadWindow>',
+  percentEncodedBrackets: `%5Bx%5D%28${RUN_ID.replace(/%/g, '%25')}%29`,
+  newlineInsideLink: '[x]\n(command:workbench.action.reloadWindow)',
+  newlineInsideTarget: '[x](\ncommand:workbench.action.reloadWindow)',
+  lineSeparator: '[x]\u2028(command:workbench.action.reloadWindow)',
+  zeroWidthJoint: '[x]\u200b(command:workbench.action.reloadWindow)',
+  bidiOverride: 'invoice\u202egnp.exe [x](command:workbench.action.reloadWindow)',
+  endsInBracket: 'draft [x]',
+  startsWithParenthesis: '(command:workbench.action.reloadWindow)',
+  danglingBackslash: 'ends with a backslash \\',
+  backslashBeforeBracket: '\\[x](command:workbench.action.reloadWindow)',
+  linkPastTheBound: `${'a'.repeat(190)}[x](${RUN_ID})`,
+  tenThousandCharacters: 'A'.repeat(10_000),
+  tenThousandCharactersEndingInALink: `${'A'.repeat(10_000)}[x](${RUN_ID})`,
+};

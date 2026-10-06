@@ -1,4 +1,4 @@
-import { vi } from 'vitest';
+import { expect, vi } from 'vitest';
 import { window } from 'vscode';
 
 /**
@@ -39,4 +39,23 @@ export function shownNotifications(): readonly string[] {
 /** Links in all shown notifications, so a test fails on any sink and not only the one it had in mind. */
 export function linksInShownNotifications(): readonly NotificationLink[] {
   return shownNotifications().flatMap(linksIn);
+}
+
+/** VS Code cuts a notification message at this many characters, in the middle of whatever it says. */
+const RENDERER_MESSAGE_LIMIT = 1_000;
+
+/**
+ * What must hold of every notification the code under test showed: there was at least one (a test
+ * that shows nothing proves nothing), none has a link the renderer would draw, none has the `](`
+ * joint a link needs, none spans lines, and none is long enough for the renderer to cut it.
+ */
+export function expectShownNotificationsInert(): void {
+  const shown = shownNotifications();
+  expect(shown.length).toBeGreaterThan(0);
+  expect(linksInShownNotifications()).toEqual([]);
+  for (const message of shown) {
+    expect(message).not.toContain('](');
+    expect(message).not.toMatch(/[\r\n\u2028\u2029]/);
+    expect(message.length).toBeLessThan(RENDERER_MESSAGE_LIMIT);
+  }
 }
