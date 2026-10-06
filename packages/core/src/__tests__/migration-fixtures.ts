@@ -213,12 +213,18 @@ function recordVersions(db: Database.Database, upTo: number): void {
   }
 }
 
-/** Builds a database shaped exactly like one written by @commandvault/core@0.1.0 (schema 1-2). */
-export function createLegacyDatabase(path: string): void {
+/**
+ * Builds a database shaped exactly like one written by @commandvault/core@0.1.0 (schema 1-2), holding
+ * the sample rows unless `populate` writes its own (legacy-vault-fixture.ts does).
+ */
+export function createLegacyDatabase(
+  path: string,
+  populate: (db: Database.Database) => void = insertSampleData,
+): void {
   withDatabase(path, (db) => {
     for (const statement of [...BASE_DDL, ...LEGACY_FTS_DDL]) db.exec(statement);
     recordVersions(db, 2);
-    insertSampleData(db);
+    populate(db);
   });
 }
 
