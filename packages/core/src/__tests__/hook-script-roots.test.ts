@@ -18,12 +18,6 @@ import type { VaultEntry } from '../types/index.js';
  * through /private, and a project or settings directory may legitimately be reached through a link.
  */
 
-const IS_WINDOWS = process.platform === 'win32';
-// `safePath` (parsers/utils.ts) tests containment with a '/' separator, so on Windows no nested
-// file is ever inside a root and every hook falls back to its command string. The cases that
-// expect a script body cannot pass there until that is fixed; drop the skip when it is.
-const itReadsScriptBody = it.skipIf(IS_WINDOWS);
-
 const ORIGINAL_CWD = process.cwd();
 const SETTINGS_BODY = 'script in the settings directory';
 const PROJECT_BODY = 'script in the project directory';
@@ -48,9 +42,9 @@ async function linkTo(target: string, name: string): Promise<string> {
   return linkPath;
 }
 
-async function writeSettings(command: string): Promise<string> {
+async function writeSettings(command: string, dir: string = claudeDir): Promise<string> {
   const hooks = { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command }] }] };
-  return writeIn(claudeDir, 'settings.json', JSON.stringify({ hooks }));
+  return writeIn(dir, 'settings.json', JSON.stringify({ hooks }));
 }
 
 async function parseHookContent(
@@ -108,14 +102,14 @@ describe('parseHooks with a relative script', () => {
     expect(content).not.toContain(CWD_BODY);
   });
 
-  itReadsScriptBody('reads the script from the settings directory', async () => {
+  it('reads the script from the settings directory', async () => {
     const settingsPath = await writeSettings('node hooks/x.js');
     await writeIn(claudeDir, 'hooks/x.js', SETTINGS_BODY);
 
     expect(await parseHookContent(settingsPath)).toBe(SETTINGS_BODY);
   });
 
-  itReadsScriptBody('gives the same content from two different current directories', async () => {
+  it('gives the same content from two different current directories', async () => {
     const settingsPath = await writeSettings('node hooks/x.js');
     await writeIn(claudeDir, 'hooks/x.js', SETTINGS_BODY);
     await writeIn(otherDir, 'hooks/x.js', CWD_BODY);
@@ -161,7 +155,7 @@ describe('parseHooks with an absolute script', () => {
     expect(await parseHookContent(settingsPath)).toBe(`// Command: node ${script}`);
   });
 
-  itReadsScriptBody('reads one inside the settings directory', async () => {
+  it('reads one inside the settings directory', async () => {
     const script = await writeIn(claudeDir, 'hooks/abs.js', SETTINGS_BODY);
     const settingsPath = await writeSettings(`node ${script}`);
 
@@ -170,19 +164,16 @@ describe('parseHooks with an absolute script', () => {
 });
 
 describe('parseHooks with an explicit project root', () => {
-  itReadsScriptBody(
-    'reads a relative script from the project directory, whatever the current directory',
-    async () => {
-      const settingsPath = await writeSettings('node scripts/x.js');
-      await writeIn(projectDir, 'scripts/x.js', PROJECT_BODY);
-      await writeIn(otherDir, 'scripts/x.js', CWD_BODY);
-      process.chdir(otherDir);
+  it('reads a relative script from the project directory, whatever the current directory', async () => {
+    const settingsPath = await writeSettings('node scripts/x.js');
+    await writeIn(projectDir, 'scripts/x.js', PROJECT_BODY);
+    await writeIn(otherDir, 'scripts/x.js', CWD_BODY);
+    process.chdir(otherDir);
 
-      expect(await parseHookContent(settingsPath, { projectRoot: projectDir })).toBe(PROJECT_BODY);
-    },
-  );
+    expect(await parseHookContent(settingsPath, { projectRoot: projectDir })).toBe(PROJECT_BODY);
+  });
 
-  itReadsScriptBody('reads an absolute script inside the project directory', async () => {
+  it('reads an absolute script inside the project directory', async () => {
     const script = await writeIn(projectDir, 'scripts/abs.js', PROJECT_BODY);
     const settingsPath = await writeSettings(`node ${script}`);
     process.chdir(otherDir);
@@ -190,26 +181,20 @@ describe('parseHooks with an explicit project root', () => {
     expect(await parseHookContent(settingsPath, { projectRoot: projectDir })).toBe(PROJECT_BODY);
   });
 
-  itReadsScriptBody(
-    'prefers the project directory, where hooks run, when both have the script',
-    async () => {
-      const settingsPath = await writeSettings('node hooks/x.js');
-      await writeIn(claudeDir, 'hooks/x.js', SETTINGS_BODY);
-      await writeIn(projectDir, 'hooks/x.js', PROJECT_BODY);
+  it('prefers the project directory, where hooks run, when both have the script', async () => {
+    const settingsPath = await writeSettings('node hooks/x.js');
+    await writeIn(claudeDir, 'hooks/x.js', SETTINGS_BODY);
+    await writeIn(projectDir, 'hooks/x.js', PROJECT_BODY);
 
-      expect(await parseHookContent(settingsPath, { projectRoot: projectDir })).toBe(PROJECT_BODY);
-    },
-  );
+    expect(await parseHookContent(settingsPath, { projectRoot: projectDir })).toBe(PROJECT_BODY);
+  });
 
-  itReadsScriptBody(
-    'still reads from the settings directory when the project has no such script',
-    async () => {
-      const settingsPath = await writeSettings('node hooks/x.js');
-      await writeIn(claudeDir, 'hooks/x.js', SETTINGS_BODY);
+  it('still reads from the settings directory when the project has no such script', async () => {
+    const settingsPath = await writeSettings('node hooks/x.js');
+    await writeIn(claudeDir, 'hooks/x.js', SETTINGS_BODY);
 
-      expect(await parseHookContent(settingsPath, { projectRoot: projectDir })).toBe(SETTINGS_BODY);
-    },
-  );
+    expect(await parseHookContent(settingsPath, { projectRoot: projectDir })).toBe(SETTINGS_BODY);
+  });
 
   it.each(['', '   '])('does not read %j as the current directory', async (blank) => {
     const settingsPath = await writeSettings('node ./x.js');
@@ -233,7 +218,7 @@ describe('Vault hook entries', () => {
     expect(entry?.content).toBe('// Command: node ./x.js');
   });
 
-  itReadsScriptBody('read a relative script from the explicit project directory', async () => {
+  it('read a relative script from the explicit project directory', async () => {
     await writeSettings('node scripts/x.js');
     await writeIn(projectDir, 'scripts/x.js', PROJECT_BODY);
     await writeIn(otherDir, 'scripts/x.js', CWD_BODY);
@@ -268,7 +253,13 @@ describe('Vault hook entries', () => {
   });
 });
 
-describe.skipIf(IS_WINDOWS)('a project or settings directory reached through a symlink', () => {
+// Windows cannot create a symlink without SeCreateSymbolicLinkPrivilege (an elevated shell or
+// Developer Mode), which a developer machine often lacks, and this block links a file as well as
+// directories (a junction would only cover directories). Posix only; the containment rules
+// themselves are covered for Windows paths in path-containment.test.ts and safe-path-win32.test.ts.
+const describePosixOnly = describe.skipIf(process.platform === 'win32');
+
+describePosixOnly('a project or settings directory reached through a symlink', () => {
   it('reads a relative script from a project directory given as a symlink', async () => {
     const settingsPath = await writeSettings('node scripts/x.js');
     await writeIn(projectDir, 'scripts/x.js', PROJECT_BODY);
@@ -317,6 +308,26 @@ describe.skipIf(IS_WINDOWS)('a project or settings directory reached through a s
     const content = await parseHookContent(settingsPath, { projectRoot });
 
     expect(content).toBe('// Command: node scripts/x.js');
+  });
+
+  it('climbs .. from the real project directory, not from the link to it', async () => {
+    // The link is in root, the real directory two levels down. A hook runs in the real directory,
+    // where `..` is root/deep/nested; taken from the link it would be root, and nothing is there.
+    const realProject = join(root, 'deep', 'nested', 'app');
+    await writeIn(realProject, 'scripts/x.js', PROJECT_BODY);
+    const projectLink = await linkTo(realProject, 'app-link');
+    const settingsPath = await writeSettings('node ../app/scripts/x.js');
+
+    expect(await parseHookContent(settingsPath, { projectRoot: projectLink })).toBe(PROJECT_BODY);
+  });
+
+  it('climbs .. from the real settings directory, not from the link to it', async () => {
+    const realClaude = join(root, 'deep', 'nested', 'claude-home');
+    await writeIn(realClaude, 'hooks/x.js', SETTINGS_BODY);
+    const claudeLink = await linkTo(realClaude, 'claude-link');
+    await writeSettings('node ../claude-home/hooks/x.js', realClaude);
+
+    expect(await parseHookContent(join(claudeLink, 'settings.json'))).toBe(SETTINGS_BODY);
   });
 
   it('does not follow a path out of a symlinked project directory', async () => {

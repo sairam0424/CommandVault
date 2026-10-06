@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { stat, realpath } from 'node:fs/promises';
-import { resolve, normalize } from 'node:path';
+import * as path from 'node:path';
 import type { EntrySource, ParsedFrontmatter } from '../types/index.js';
 import {
   parseStrict,
@@ -113,6 +113,43 @@ export function extractTags(
   return [...tags];
 }
 
+/** The parts of `node:path` that decide containment, so a test can hand it `win32` on any OS. */
+export type ContainmentPath = Pick<path.PlatformPath, 'relative' | 'isAbsolute' | 'sep'>;
+
+/**
+ * True when `candidate` is `root` or lies below it. The judgment is the relative path from the
+ * root: a sibling that merely starts with the root's name (`/a/b-evil` for `/a/b`) climbs out with
+ * `..`, and so does a `..` segment. On Windows `relative` answers with an absolute path for a file
+ * on another drive or share, which is not below anything. A first segment that only begins with
+ * `..` (a file called `..foo`) is an ordinary name. Purely lexical: resolve symlinks and short
+ * names on both sides first, and pass absolute paths, since `relative` resolves against the
+ * current directory otherwise.
+ */
+export function isInsideRoot(
+  root: string,
+  candidate: string,
+  pathModule: ContainmentPath = path,
+): boolean {
+  const relativePath = pathModule.relative(root, candidate);
+  if (relativePath === '..' || relativePath.startsWith(`..${pathModule.sep}`)) return false;
+  return !pathModule.isAbsolute(relativePath);
+}
+
+/**
+ * A root as the file system spells it, so it can be compared with a real path: through a symlink
+ * (macOS /var is /private/var) and, on Windows, with short names (RUNNER~1) expanded. A root that
+ * cannot be resolved, such as a project directory that was deleted, stays as given: it cannot hold
+ * a file that exists, and it must not stop the other roots from being used.
+ */
+async function canonicalRoot(root: string): Promise<string> {
+  const resolved = path.resolve(root);
+  try {
+    return await realpath(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
 /**
  * Validates that a file path resolves within one of the allowed root directories.
  * Returns the resolved real path if safe, or null if the path escapes containment.
@@ -123,17 +160,8 @@ export async function safePath(
 ): Promise<string | null> {
   try {
     const resolved = await realpath(filePath);
-    const normalizedResolved = normalize(resolved);
-    for (const root of allowedRoots) {
-      const normalizedRoot = normalize(resolve(root));
-      if (
-        normalizedResolved.startsWith(normalizedRoot + '/') ||
-        normalizedResolved === normalizedRoot
-      ) {
-        return resolved;
-      }
-    }
-    return null;
+    const roots = await Promise.all(allowedRoots.map(canonicalRoot));
+    return roots.some((root) => isInsideRoot(root, resolved)) ? resolved : null;
   } catch {
     return null; // File doesn't exist or can't be resolved
   }
