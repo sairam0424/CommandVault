@@ -1,194 +1,193 @@
-import { createHash } from 'node:crypto';
 import type { VaultEntry, SearchResult, SearchOptions, VaultStats } from '../types/index.js';
 import type { DatabaseAdapter } from './database-adapter.js';
 import { createDatabaseAdapter } from './database-factory.js';
+import {
+  classifyOpenError,
+  errorCode,
+  errorMessage,
+  toOpenError,
+  type FileState,
+} from './db-errors.js';
 import { EntryStore } from './entry-store.js';
+import {
+  dropLegacyFtsTriggers,
+  hasLegacyFtsTriggers,
+  migrateDatabase,
+  readEngineMeta,
+  writeEngineMeta,
+} from './migrations.js';
 import { TagStore } from './tag-store.js';
 import { SnapshotStore } from './snapshot-store.js';
 import { StatsStore } from './stats-store.js';
 
-const SCHEMA = `
-  CREATE TABLE IF NOT EXISTS entries (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    type TEXT NOT NULL,
-    source TEXT NOT NULL,
-    description TEXT NOT NULL,
-    file_path TEXT NOT NULL,
-    tags TEXT NOT NULL,
-    metadata TEXT NOT NULL,
-    content TEXT NOT NULL,
-    last_modified TEXT NOT NULL,
-    favorite INTEGER NOT NULL DEFAULT 0,
-    usage_count INTEGER NOT NULL DEFAULT 0
-  );
+const FTS_TABLE = 'entries_fts';
+const FTS_DEFINITION = `CREATE VIRTUAL TABLE ${FTS_TABLE} USING fts5(id UNINDEXED, name, description, content, tags)`;
+const FTS_SHADOW_SUFFIXES = ['data', 'idx', 'content', 'docsize', 'config'] as const;
+// `entries_fts_`: the prefix of the shadow tables, and of any that outlived their virtual table.
+const FTS_SHADOW_PREFIX_LENGTH = `${FTS_TABLE}_`.length;
 
-  CREATE TABLE IF NOT EXISTS user_tags (
-    entry_id TEXT NOT NULL,
-    tag TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY(entry_id, tag)
-  );
+type FtsState = 'ready' | 'unavailable';
 
-  CREATE TABLE IF NOT EXISTS scan_snapshots (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    type TEXT NOT NULL,
-    content_hash TEXT NOT NULL,
-    scanned_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-`;
-
-function stableId(type: string, name: string, source: string): string {
-  return createHash('sha256').update(`${type}:${name}:${source}`).digest('hex').slice(0, 12);
+interface SchemaObject {
+  readonly type: string;
+  readonly name: string;
+  readonly sql: string | null;
 }
 
-function readSchemaVersion(conn: DatabaseAdapter): number {
-  const rows = conn.queryAll<{ v: number | null }>('SELECT MAX(version) as v FROM schema_version');
-  return rows[0]?.v ?? 0;
+/** Whitespace and case carry no meaning in a definition; compare the rest. */
+function normalizeDefinition(sql: string): string {
+  return sql.replace(/\s+/g, '').toLowerCase();
+}
+
+function isFts5Available(conn: DatabaseAdapter): boolean {
+  return (
+    conn.queryOne("SELECT 1 AS present FROM pragma_module_list WHERE name = 'fts5'") !== undefined
+  );
+}
+
+function ftsSchemaObjects(conn: DatabaseAdapter): SchemaObject[] {
+  return conn.queryAll<SchemaObject>(
+    `SELECT type, name, sql FROM sqlite_master
+     WHERE name = $table OR substr(name, 1, $prefixLength) = $prefix OR type = 'trigger'`,
+    { $table: FTS_TABLE, $prefixLength: FTS_SHADOW_PREFIX_LENGTH, $prefix: `${FTS_TABLE}_` },
+  );
+}
+
+function canCountFtsRows(conn: DatabaseAdapter): boolean {
+  try {
+    conn.queryOne(`SELECT count(*) AS n FROM ${FTS_TABLE}`);
+    return true;
+  } catch (error) {
+    // A lock says nothing about the table; let the caller meet it where it has to wait for one.
+    if (classifyOpenError(error) === 'locked') throw error;
+    return false;
+  }
 }
 
 /**
- * Databases written by @commandvault/core 0.1.0 carry an external-content FTS5 table
- * (`entries_fts`) kept in sync by three triggers. Migration 3 replaces it with a standalone table.
- *
- * The virtual table is dropped as a whole: its shadow tables go with it, whereas dropping them one
- * by one is refused under SQLITE_DBCONFIG_DEFENSIVE, which better-sqlite3 >= 12 enables.
+ * Healthy means: the virtual table exists with the definition this build searches, all its shadow
+ * tables exist, no 0.1.0 trigger is left to write to it, and SQLite can read it. The rows are not
+ * compared with `entries`: a healthy table is not rewritten on every open.
  */
-function dropLegacyFts(conn: DatabaseAdapter): void {
-  conn.transaction(() => {
-    // Re-read the version inside the transaction: another process may have finished migration 3
-    // since the caller looked, and dropping now would destroy the live FTS table it created.
-    if (readSchemaVersion(conn) >= 3) return;
+function isFtsHealthy(conn: DatabaseAdapter): boolean {
+  const objects = ftsSchemaObjects(conn);
+  const table = objects.find(({ type, name }) => type === 'table' && name === FTS_TABLE);
+  if (table?.sql == null) return false;
+  if (normalizeDefinition(table.sql) !== normalizeDefinition(FTS_DEFINITION)) return false;
 
-    conn.execute('DROP TRIGGER IF EXISTS entries_ai');
-    conn.execute('DROP TRIGGER IF EXISTS entries_ad');
-    conn.execute('DROP TRIGGER IF EXISTS entries_au');
-    conn.execute('DROP TABLE IF EXISTS entries_fts');
-  });
+  const shadows = new Set(objects.filter(({ type }) => type === 'table').map(({ name }) => name));
+  if (!FTS_SHADOW_SUFFIXES.every((suffix) => shadows.has(`${FTS_TABLE}_${suffix}`))) return false;
+  if (
+    hasLegacyFtsTriggers(objects.filter(({ type }) => type === 'trigger').map(({ name }) => name))
+  ) {
+    return false;
+  }
+  return canCountFtsRows(conn);
 }
 
-function runAdapterMigrations(conn: DatabaseAdapter): void {
-  // Ensure schema_version table exists
+/**
+ * Drops whatever is left of the full-text table and builds it again from `entries`. The virtual
+ * table goes first, taking its shadow tables with it: SQLite refuses to drop a shadow table of a
+ * live virtual table, but a plain table that only carries the name is dropped like any other.
+ */
+function rebuildFts(conn: DatabaseAdapter): void {
+  dropLegacyFtsTriggers(conn);
+  const objects = ftsSchemaObjects(conn);
+  if (objects.some(({ type, name }) => type === 'table' && name === FTS_TABLE)) {
+    conn.execute(`DROP TABLE ${FTS_TABLE}`);
+  }
+  const leftovers = ftsSchemaObjects(conn).filter(
+    ({ type, name }) => type === 'table' && name !== FTS_TABLE && name.startsWith(`${FTS_TABLE}_`),
+  );
+  for (const { name } of leftovers) conn.execute(`DROP TABLE "${name.replaceAll('"', '""')}"`);
+
+  conn.execute(FTS_DEFINITION);
   conn.execute(`
-    CREATE TABLE IF NOT EXISTS schema_version (
-      version INTEGER PRIMARY KEY,
-      applied_at TEXT NOT NULL DEFAULT (datetime('now')),
-      description TEXT NOT NULL
-    );
+    INSERT INTO entries_fts(id, name, description, content, tags)
+    SELECT id, name, description, content, tags FROM entries
   `);
+}
 
-  const currentVersion = readSchemaVersion(conn);
+function ftsStateRecord(state: FtsState, detail: string): Record<string, string> {
+  return { fts_state: state, fts_detail: detail };
+}
 
-  // Remove legacy FTS artifacts only if we haven't yet created the new FTS5 table (migration 3)
-  if (currentVersion < 3) {
-    dropLegacyFts(conn);
-  }
+function isFtsStateRecorded(conn: DatabaseAdapter, state: FtsState, detail: string): boolean {
+  const meta = readEngineMeta(conn);
+  return meta.get('fts_state') === state && (meta.get('fts_detail') ?? '') === detail;
+}
 
-  // Migration 1: entry_tags junction table
-  if (currentVersion < 1) {
-    conn.transaction(() => {
-      conn.execute(`
-        CREATE TABLE IF NOT EXISTS entry_tags (
-          entry_id TEXT NOT NULL,
-          tag TEXT NOT NULL,
-          PRIMARY KEY (entry_id, tag)
-        );
-      `);
-      conn.execute('CREATE INDEX IF NOT EXISTS idx_entry_tags_tag ON entry_tags(tag)');
-      conn.execute(
-        "INSERT INTO schema_version (version, description) VALUES (1, 'Add entry_tags junction table for exact tag matching')",
-      );
-    });
-  }
-
-  // Migration 2: stable IDs
-  if (currentVersion < 2) {
-    conn.transaction(() => {
-      const rows = conn.queryAll<{ id: string; name: string; type: string; source: string }>(
-        'SELECT id, name, type, source FROM entries',
-      );
-
-      const groups = new Map<string, string[]>();
-      for (const row of rows) {
-        const newId = stableId(row.type, row.name, row.source);
-        const existing = groups.get(newId) ?? [];
-        groups.set(newId, [...existing, row.id]);
+/** Writes only when the record differs, so that an open which changes nothing writes nothing. */
+function recordFtsState(conn: DatabaseAdapter, state: FtsState, detail: string): void {
+  if (isFtsStateRecorded(conn, state, detail)) return;
+  conn.transaction(
+    () => {
+      if (!isFtsStateRecorded(conn, state, detail)) {
+        writeEngineMeta(conn, ftsStateRecord(state, detail));
       }
+    },
+    { mode: 'immediate' },
+  );
+}
 
-      for (const [newId, oldIds] of groups) {
-        for (let i = 1; i < oldIds.length; i++) {
-          conn.execute('DELETE FROM entry_tags WHERE entry_id = $id', { $id: oldIds[i] });
-          conn.execute('DELETE FROM user_tags WHERE entry_id = $id', { $id: oldIds[i] });
-          conn.execute('DELETE FROM scan_snapshots WHERE id = $id', { $id: oldIds[i] });
-          conn.execute('DELETE FROM entries WHERE id = $id', { $id: oldIds[i] });
-        }
-        if (newId !== oldIds[0]) {
-          conn.execute('UPDATE entries SET id = $new WHERE id = $old', {
-            $new: newId,
-            $old: oldIds[0],
-          });
-          conn.execute('UPDATE user_tags SET entry_id = $new WHERE entry_id = $old', {
-            $new: newId,
-            $old: oldIds[0],
-          });
-          conn.execute('UPDATE entry_tags SET entry_id = $new WHERE entry_id = $old', {
-            $new: newId,
-            $old: oldIds[0],
-          });
-          conn.execute('UPDATE scan_snapshots SET id = $new WHERE id = $old', {
-            $new: newId,
-            $old: oldIds[0],
-          });
-        }
-      }
-
-      conn.execute(
-        "INSERT INTO schema_version (version, description) VALUES (2, 'Migrate entry IDs from filePath-based to type+name-based')",
-      );
-    });
+/**
+ * Whether `entries`, the user's own data, can be read end to end. Summing the length of `content`
+ * makes SQLite read every row in full, overflow pages included, where a bare count(*) may be
+ * answered from an index.
+ */
+function canReadEntries(conn: DatabaseAdapter): boolean {
+  try {
+    conn.queryOne('SELECT count(*) AS n, coalesce(sum(length(content)), 0) AS bytes FROM entries');
+    return true;
+  } catch (error) {
+    if (classifyOpenError(error) === 'corrupt') return false;
+    throw error;
   }
+}
 
-  // Migration 3: FTS5 full-text search + column indexes
-  if (currentVersion < 3) {
-    conn.transaction(() => {
-      // Create standalone FTS5 virtual table (not content-synced to avoid rowid issues)
-      conn.execute(`
-        CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
-          id UNINDEXED,
-          name,
-          description,
-          content,
-          tags
-        )
-      `);
+/**
+ * SQLite itself reported that the table cannot be repaired, e.g. a virtual table it cannot load, a
+ * module that calls its own tables corrupt, or a damaged page of one of them (dropping the table
+ * has to read its pages too). SQLite reports a bad page of `entries` with the same code, so the
+ * code alone proves nothing: the table counts as unavailable only when the entries can still be
+ * read. If they cannot, the database is damaged, and it reaches the caller as one.
+ */
+function isUnrepairable(conn: DatabaseAdapter, error: unknown): boolean {
+  const code = errorCode(error);
+  if (code === undefined || !code.startsWith('SQLITE_')) return false;
+  const kind = classifyOpenError(error);
+  return kind === 'corrupt' ? canReadEntries(conn) : kind === 'unknown';
+}
 
-      // Column indexes for common filter queries
-      conn.execute('CREATE INDEX IF NOT EXISTS idx_entries_type ON entries(type)');
-      conn.execute('CREATE INDEX IF NOT EXISTS idx_entries_source ON entries(source)');
-      conn.execute('CREATE INDEX IF NOT EXISTS idx_entries_favorite ON entries(favorite)');
-
-      // Populate FTS5 from existing entries
-      conn.execute(`
-        INSERT INTO entries_fts(id, name, description, content, tags)
-        SELECT id, name, description, content, tags FROM entries
-      `);
-
-      conn.execute(
-        "INSERT INTO schema_version (version, description) VALUES (3, 'Add FTS5 full-text search table and column indexes')",
-      );
-    });
+/**
+ * Makes sure the full-text table works, on every open. A database can lose it without losing its
+ * recorded version (the maintainer's did: schema 1-4, no entries_fts, a plain entries_fts_content
+ * left over), and migrations are not run again for a version that is recorded.
+ *
+ * Without the fts5 module, or with a table SQLite cannot repair, the state is recorded as
+ * `unavailable` and nothing is thrown: full-text search only serves one search tier.
+ */
+function ensureFts(conn: DatabaseAdapter): void {
+  if (!isFts5Available(conn)) {
+    recordFtsState(conn, 'unavailable', 'the SQLite build has no fts5 module');
+    return;
   }
-
-  if (currentVersion < 4) {
-    conn.transaction(() => {
-      conn.execute(
-        'CREATE INDEX IF NOT EXISTS idx_entries_last_modified ON entries(last_modified)',
-      );
-      conn.execute(
-        "INSERT INTO schema_version (version, description) VALUES (4, 'Add last_modified index for date range filters')",
-      );
-    });
+  if (isFtsHealthy(conn)) {
+    recordFtsState(conn, 'ready', '');
+    return;
+  }
+  try {
+    conn.transaction(
+      () => {
+        // Another process may have rebuilt it while this one waited for the write lock.
+        if (!isFtsHealthy(conn)) rebuildFts(conn);
+        writeEngineMeta(conn, ftsStateRecord('ready', ''));
+      },
+      { mode: 'immediate' },
+    );
+  } catch (error) {
+    if (!isUnrepairable(conn, error)) throw error;
+    recordFtsState(conn, 'unavailable', `cannot repair ${FTS_TABLE}: ${errorMessage(error)}`);
   }
 }
 
@@ -208,18 +207,21 @@ export class SqliteEngine {
   }
 
   static async create(dbPath: string): Promise<SqliteEngine> {
-    const conn = await createDatabaseAdapter(dbPath);
+    // Opened without write-ahead logging: that switch rewrites the header of a file in rollback
+    // mode, and a database written by a newer schema must be refused before anything is written.
+    const conn = await createDatabaseAdapter(dbPath, { walMode: false });
+    // What a failure may say about the file depends on how far the open got; see FileState.
+    let fileState: FileState = 'unmodified';
 
     try {
-      // Initialize base schema
-      for (const statement of SCHEMA.split(';')
-        .map((s) => s.trim())
-        .filter(Boolean)) {
-        conn.execute(statement);
-      }
-
-      // Run migrations
-      runAdapterMigrations(conn);
+      migrateDatabase(conn, {
+        onAccepted: () => {
+          conn.enableWriteAheadLog();
+          fileState = 'journal-switched';
+        },
+      });
+      fileState = 'entries-untouched';
+      ensureFts(conn);
     } catch (error) {
       // Release the file handle: on Windows an open handle blocks deleting or renaming vault.db.
       try {
@@ -228,7 +230,8 @@ export class SqliteEngine {
         // close() can fail too (sql.js flushes to disk first); the error that got us here is the
         // one worth reporting.
       }
-      throw error;
+      // A lock that outlasted the busy timeout, a read-only file and the like get their typed error.
+      throw toOpenError(error, dbPath, fileState);
     }
 
     return new SqliteEngine(conn);

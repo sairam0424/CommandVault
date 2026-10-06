@@ -3,18 +3,24 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
-import type { DatabaseAdapter } from '../indexer/database-adapter.js';
 import { SqliteEngine } from '../indexer/sqlite-engine.js';
+import { instrumentAdapter } from './adapter-instrument.js';
 
 // Two processes opening the same database for the first time can interleave: one finishes
-// migration 3 while the other is still holding the schema version it read before. The slower
-// process must not run the legacy FTS cleanup against the standalone table the first one created.
+// migrating while the other is still holding the versions it read before. The slower process must
+// not run the legacy FTS cleanup against the standalone table the first one created.
+//
+// It used to fail instead, with "UNIQUE constraint failed: schema_version.version" when it then
+// tried to record a migration twice. It now reads the recorded versions again under the write lock
+// (see migration-atomicity.test.ts for the rest), finds nothing to do, and opens.
 
-const STALE_VERSION = 2;
+const STALE_VERSIONS = [1, 2];
 const MARKER_ID = 'c0ffee000001';
+const INJECTED = 'injected failure';
 
 const scenario = vi.hoisted(() => ({
-  serveStaleVersion: false,
+  serveStaleVersions: false,
+  failOpening: false,
   closeThrows: false,
   closeCalls: 0,
 }));
@@ -25,34 +31,26 @@ vi.mock('../indexer/database-factory.js', async (importOriginal) => {
     ...original,
     createDatabaseAdapter: async (...args: Parameters<typeof original.createDatabaseAdapter>) => {
       const adapter = await original.createDatabaseAdapter(...args);
-      return scenario.serveStaleVersion ? withStaleFirstVersionRead(adapter) : adapter;
+      let hasServedStaleRead = false;
+      return instrumentAdapter(adapter, {
+        // The first read of the recorded versions is answered as it was before the winner migrated.
+        answerQuery: (sql) => {
+          if (!scenario.serveStaleVersions || hasServedStaleRead) return undefined;
+          if (!/FROM schema_version/i.test(sql)) return undefined;
+          hasServedStaleRead = true;
+          return STALE_VERSIONS.map((version) => ({ version }));
+        },
+        beforeQuery: (sql) => {
+          if (scenario.failOpening && /FROM schema_version/i.test(sql)) throw new Error(INJECTED);
+        },
+        onClose: () => {
+          scenario.closeCalls += 1;
+          if (scenario.closeThrows) throw new Error('close failed while flushing to disk');
+        },
+      });
     },
   };
 });
-
-/** Delegates to `adapter`, except that the first schema-version read reports an older version. */
-function withStaleFirstVersionRead(adapter: DatabaseAdapter): DatabaseAdapter {
-  let hasServedStaleRead = false;
-  return {
-    path: adapter.path,
-    queryAll: <T>(sql: string, params?: Record<string, unknown>): T[] => {
-      if (!hasServedStaleRead && /MAX\(version\)/i.test(sql)) {
-        hasServedStaleRead = true;
-        return [{ v: STALE_VERSION }] as unknown as T[];
-      }
-      return adapter.queryAll<T>(sql, params);
-    },
-    queryOne: <T>(sql: string, params?: Record<string, unknown>) =>
-      adapter.queryOne<T>(sql, params),
-    execute: (sql, params) => adapter.execute(sql, params),
-    transaction: <T>(fn: () => T) => adapter.transaction(fn),
-    close: () => {
-      scenario.closeCalls += 1;
-      adapter.close();
-      if (scenario.closeThrows) throw new Error('close failed while flushing to disk');
-    },
-  };
-}
 
 function withDatabase<T>(path: string, fn: (db: Database.Database) => T): T {
   const db = new Database(path);
@@ -80,21 +78,23 @@ describe('legacy FTS cleanup when another process already migrated the database'
         )
         .run(MARKER_ID),
     );
+    scenario.closeCalls = 0;
   });
 
   afterEach(async () => {
-    scenario.serveStaleVersion = false;
+    scenario.serveStaleVersions = false;
+    scenario.failOpening = false;
     scenario.closeThrows = false;
     scenario.closeCalls = 0;
     await rm(tempDir, { recursive: true, force: true });
   });
 
   it('leaves the live FTS table and its rows alone', async () => {
-    scenario.serveStaleVersion = true;
+    scenario.serveStaleVersions = true;
 
-    // The stale process still fails when it tries to record migration 3 again (its primary key
-    // insert collides); what matters is that it does not take the winner's search index down.
-    await expect(SqliteEngine.create(dbPath)).rejects.toThrow(/UNIQUE/);
+    // The stale process no longer collides with the winner's records; what matters, as before, is
+    // that it does not take the winner's search index down.
+    (await SqliteEngine.create(dbPath)).close();
 
     const matches = withDatabase(dbPath, (db) =>
       db.prepare('SELECT id FROM entries_fts WHERE entries_fts MATCH ?').all('raceproof'),
@@ -103,18 +103,18 @@ describe('legacy FTS cleanup when another process already migrated the database'
   });
 
   it('releases the database handle when opening fails', async () => {
-    scenario.serveStaleVersion = true;
+    scenario.failOpening = true;
 
-    await expect(SqliteEngine.create(dbPath)).rejects.toThrow(/UNIQUE/);
+    await expect(SqliteEngine.create(dbPath)).rejects.toThrow(INJECTED);
 
     // An open handle blocks deleting vault.db on Windows.
     expect(scenario.closeCalls).toBe(1);
   });
 
   it('reports the original error when releasing the handle fails as well', async () => {
-    scenario.serveStaleVersion = true;
+    scenario.failOpening = true;
     scenario.closeThrows = true;
 
-    await expect(SqliteEngine.create(dbPath)).rejects.toThrow(/UNIQUE/);
+    await expect(SqliteEngine.create(dbPath)).rejects.toThrow(INJECTED);
   });
 });

@@ -8,6 +8,8 @@ export {
   DatabasePermissionError,
   DatabaseCorruptError,
   DatabaseIoError,
+  SchemaTooNewError,
+  MigrationBackupError,
 } from './indexer/db-errors.js';
 export { VaultWatcher } from './watcher/index.js';
 export { exportEntries, exportToFile, importFromFile, importFromUrl } from './sync/index.js';

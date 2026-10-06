@@ -1,7 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { Database as SqlJsDatabase } from 'sql.js';
-import type { DatabaseAdapter, DatabaseAdapterOptions } from './database-adapter.js';
+import type {
+  DatabaseAdapter,
+  DatabaseAdapterOptions,
+  TransactionOptions,
+} from './database-adapter.js';
 import { classifyOpenError, toOpenError } from './db-errors.js';
 import { fileFingerprint, quarantineCorruptDatabase } from './quarantine.js';
 import { OWNER_ONLY_MODE } from './quarantine-fs.js';
@@ -35,7 +39,7 @@ export class SqlJsAdapter implements DatabaseAdapter {
     ) => Promise<SqlJsModule>;
     const SQL = await initSqlJs();
 
-    const db = openStoredDatabase(SQL, dbPath);
+    const { db, isFromFile } = openStoredDatabase(SQL, dbPath);
 
     if (options.walMode) {
       db.run('PRAGMA journal_mode = WAL');
@@ -48,7 +52,7 @@ export class SqlJsAdapter implements DatabaseAdapter {
     }
 
     const adapter = new SqlJsAdapter(db, dbPath);
-    writeFirstCopy(adapter, dbPath);
+    ensureFileIsWritable(adapter, dbPath, isFromFile);
     return adapter;
   }
 
@@ -76,8 +80,8 @@ export class SqlJsAdapter implements DatabaseAdapter {
     this.persistDebounced();
   }
 
-  transaction<T>(fn: () => T): T {
-    this.db.run('BEGIN');
+  transaction<T>(fn: () => T, options?: TransactionOptions): T {
+    this.db.run(options?.mode === 'immediate' ? 'BEGIN IMMEDIATE' : 'BEGIN');
     try {
       const result = fn();
       this.db.run('COMMIT');
@@ -85,9 +89,22 @@ export class SqlJsAdapter implements DatabaseAdapter {
       this.persistDebounced();
       return result;
     } catch (error) {
-      this.db.run('ROLLBACK');
+      this.rollBack();
       throw error;
     }
+  }
+
+  enableWriteAheadLog(): void {
+    // The database lives in memory and is written to its file whole: there is no journal to switch.
+  }
+
+  backupTo(destination: string): void {
+    // export() reopens the database, which would end a transaction that is running, so the copy is
+    // the file itself: whatever the last persist wrote.
+    if (this.dirty) {
+      throw new Error('cannot back up a database that has changes not yet saved to its file');
+    }
+    writeFileSync(destination, readFileSync(this.path), { flag: 'wx', mode: OWNER_ONLY_MODE });
   }
 
   close(): void {
@@ -99,6 +116,15 @@ export class SqlJsAdapter implements DatabaseAdapter {
     const data = this.db.export();
     writeFileSync(this.path, Buffer.from(data), { mode: OWNER_ONLY_MODE });
     this.dirty = false;
+  }
+
+  private rollBack(): void {
+    try {
+      this.db.run('ROLLBACK');
+    } catch {
+      // SQLite rolls a transaction back by itself after some failures (a full disk, for one), and
+      // then there is nothing left to roll back. The error being rethrown is the one that matters.
+    }
   }
 
   private persistDebounced(): void {
@@ -124,20 +150,35 @@ export class SqlJsAdapter implements DatabaseAdapter {
   }
 }
 
-/** The first write can fail on a file the user may read but not change: say so, in typed form. */
-function writeFirstCopy(adapter: SqlJsAdapter, dbPath: string): void {
+/**
+ * A file the user may read but not change should fail here, in typed form, not at some later save.
+ * A file that was read is only tested: writing it back now would rewrite bytes nothing has changed,
+ * and the caller may still decide to leave it exactly as it is (a database from a newer schema).
+ * A database this open creates, or replaces after a repair, gets its first copy written.
+ */
+function ensureFileIsWritable(adapter: SqlJsAdapter, dbPath: string, isFromFile: boolean): void {
   try {
-    adapter.persist();
+    if (isFromFile) {
+      accessSync(dbPath, constants.W_OK);
+    } else {
+      adapter.persist();
+    }
   } catch (error) {
     adapter.close();
     throw toOpenError(error, dbPath);
   }
 }
 
+interface StoredDatabase {
+  readonly db: SqlJsDatabase;
+  /** The file's own contents were loaded, as opposed to a database made new by this open. */
+  readonly isFromFile: boolean;
+}
+
 /** Reads the file into memory. SQLite only judges its contents on the first statement, so probe. */
-function readStoredDatabase(SQL: SqlJsModule, dbPath: string): SqlJsDatabase {
+function readStoredDatabase(SQL: SqlJsModule, dbPath: string): StoredDatabase {
   if (!existsSync(dbPath)) {
-    return new SQL.Database();
+    return { db: new SQL.Database(), isFromFile: false };
   }
   const db = new SQL.Database(readFileSync(dbPath));
   try {
@@ -146,7 +187,7 @@ function readStoredDatabase(SQL: SqlJsModule, dbPath: string): SqlJsDatabase {
     db.close();
     throw error;
   }
-  return db;
+  return { db, isFromFile: true };
 }
 
 /**
@@ -154,7 +195,7 @@ function readStoredDatabase(SQL: SqlJsModule, dbPath: string): SqlJsDatabase {
  * itself reports it as corrupt; an unreadable file or any unrecognised failure leaves it exactly
  * as it is.
  */
-function openStoredDatabase(SQL: SqlJsModule, dbPath: string): SqlJsDatabase {
+function openStoredDatabase(SQL: SqlJsModule, dbPath: string): StoredDatabase {
   try {
     return readOrQuarantine(SQL, dbPath);
   } catch (error) {
@@ -162,7 +203,7 @@ function openStoredDatabase(SQL: SqlJsModule, dbPath: string): SqlJsDatabase {
   }
 }
 
-function readOrQuarantine(SQL: SqlJsModule, dbPath: string): SqlJsDatabase {
+function readOrQuarantine(SQL: SqlJsModule, dbPath: string): StoredDatabase {
   const failedFingerprint = fileFingerprint(dbPath);
   try {
     return readStoredDatabase(SQL, dbPath);
@@ -171,6 +212,8 @@ function readOrQuarantine(SQL: SqlJsModule, dbPath: string): SqlJsDatabase {
     // If another process replaced the file meanwhile, nothing is changed and the read below judges
     // whatever is there now.
     const backupPath = quarantineCorruptDatabase(dbPath, failedFingerprint, error);
-    return backupPath === undefined ? readStoredDatabase(SQL, dbPath) : new SQL.Database();
+    return backupPath === undefined
+      ? readStoredDatabase(SQL, dbPath)
+      : { db: new SQL.Database(), isFromFile: false };
   }
 }
