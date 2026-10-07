@@ -42,7 +42,10 @@ export class Vault {
   private searchEngine: SearchEngine | null = null;
   private readonly watcher: VaultWatcher;
   private readonly registry: ParserRegistry;
-  private entries: VaultEntry[] = [];
+  /** What the parsers produced, as the search engine indexes it. */
+  private scanned: readonly VaultEntry[] = [];
+  /** `scanned` with the favorites, use counts and user tags the rows hold: what callers see. */
+  private entries: readonly VaultEntry[] = [];
   private listeners: Map<keyof VaultEventMap, Set<VaultEventHandler<keyof VaultEventMap>>> =
     new Map();
   private scanErrors: ParseError[] = [];
@@ -150,9 +153,11 @@ export class Vault {
         ...unique.errors,
       ];
 
-      this.entries = [...unique.entries].sort((a, b) => a.id.localeCompare(b.id));
+      this.scanned = [...unique.entries].sort(
+        (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id),
+      );
       this.scanErrors = allErrors;
-      this.getSearchEngine().index(this.entries);
+      this.entries = this.getSearchEngine().index(this.scanned);
 
       const isFirstScan = oldEntries.length === 0;
       if (!isFirstScan) {
@@ -195,11 +200,14 @@ export class Vault {
   }
 
   toggleFavorite(id: string): boolean {
-    return this.getSearchEngine().toggleFavorite(id);
+    const favorite = this.getSearchEngine().toggleFavorite(id);
+    this.syncEntry(id);
+    return favorite;
   }
 
   recordUsage(id: string): void {
     this.getSearchEngine().incrementUsage(id);
+    this.syncEntry(id);
   }
 
   getStats(): VaultStats {
@@ -208,10 +216,22 @@ export class Vault {
 
   addTag(id: string, tag: string): void {
     this.getSearchEngine().addTag(id, tag);
+    this.syncEntry(id);
   }
 
   removeTag(id: string, tag: string): void {
     this.getSearchEngine().removeTag(id, tag);
+    this.syncEntry(id);
+  }
+
+  /**
+   * Takes one entry, as the engine shows it after a mark, into the list callers see. The list is
+   * patched per id, never replaced with the engine's: a rescan may be between its awaits, and the
+   * list it will hand over is not the one callers read in the meantime.
+   */
+  private syncEntry(id: string): void {
+    const fresh = this.getSearchEngine().entries.find((entry) => entry.id === id);
+    if (fresh) this.entries = this.entries.map((entry) => (entry.id === id ? fresh : entry));
   }
 
   async toggleFavorites(ids: readonly string[]): Promise<ReadonlyMap<string, boolean>> {
@@ -220,6 +240,7 @@ export class Vault {
       const engine = this.getSearchEngine();
       for (const id of ids) {
         results.set(id, engine.toggleFavorite(id));
+        this.syncEntry(id);
       }
       engine.clearCache();
       return results;
@@ -233,6 +254,7 @@ export class Vault {
         for (const tag of tags) {
           engine.addTag(id, tag);
         }
+        this.syncEntry(id);
       }
       engine.clearCache();
     });
@@ -245,6 +267,7 @@ export class Vault {
         for (const tag of tags) {
           engine.removeTag(id, tag);
         }
+        this.syncEntry(id);
       }
       engine.clearCache();
     });
@@ -294,7 +317,7 @@ export class Vault {
   async addEntries(newEntries: readonly VaultEntry[]): Promise<number> {
     return this.withScanLock(async () => {
       const { valid, errors: rejected } = partitionValidEntries(newEntries, IMPORT_PARSER);
-      const unique = dedupeEntriesById([...this.entries, ...valid]);
+      const unique = dedupeEntriesById([...this.scanned, ...valid]);
       const survivors = new Set<VaultEntry>(unique.entries);
       const accepted = valid.filter((entry) => survivors.has(entry)).length;
 
@@ -303,8 +326,8 @@ export class Vault {
 
       if (accepted > 0) {
         const oldEntries = [...this.entries];
-        this.entries = unique.entries;
-        this.getSearchEngine().index(this.entries);
+        this.scanned = unique.entries;
+        this.entries = this.getSearchEngine().index(this.scanned);
         this.diffAndEmit(oldEntries, this.entries);
         this.emit('scan:complete', this.getStats());
       }
@@ -345,9 +368,9 @@ export class Vault {
     return this.withScanLock(async () => {
       const result = await this.getParserFn(parserType)();
 
-      const kept = this.entries.filter((e) => e.type !== parserType);
+      const kept = this.scanned.filter((e) => e.type !== parserType);
       const unique = dedupeEntriesById([...kept, ...result.entries]);
-      this.entries = unique.entries;
+      this.scanned = unique.entries;
 
       const keptErrors = this.scanErrors.filter((e) => this.errorParser(e) !== parserType);
       const newErrors = [...result.errors, ...unique.errors];
@@ -357,7 +380,7 @@ export class Vault {
         this.emit('error', error);
       }
 
-      this.getSearchEngine().index(this.entries);
+      this.entries = this.getSearchEngine().index(this.scanned);
       this.emit('scan:complete', this.getStats());
     });
   }
@@ -419,14 +442,14 @@ export class Vault {
       }
       const reparseErrors = await this.applyFullReparse(fullReparseTypes);
 
-      const unique = dedupeEntriesById(this.entries);
-      this.entries = unique.entries;
+      const unique = dedupeEntriesById(this.scanned);
+      this.scanned = unique.entries;
       this.scanErrors = [...this.scanErrors, ...unique.errors];
       for (const error of [...reparseErrors, ...unique.errors]) {
         this.emit('error', error);
       }
 
-      this.getSearchEngine().index(this.entries);
+      this.entries = this.getSearchEngine().index(this.scanned);
       this.diffAndEmit(oldEntries, this.entries);
       this.emit('scan:complete', this.getStats());
     });
@@ -435,12 +458,12 @@ export class Vault {
   private async applySingleFileChange(filePath: string, parserType: ParserType): Promise<void> {
     const entry = await parseSingleFile(filePath, parserType);
     if (entry) {
-      const existed = this.entries.some((e) => e.filePath === filePath);
-      this.entries = existed
-        ? this.entries.map((e) => (e.filePath === filePath ? entry : e))
-        : [...this.entries, entry];
+      const existed = this.scanned.some((e) => e.filePath === filePath);
+      this.scanned = existed
+        ? this.scanned.map((e) => (e.filePath === filePath ? entry : e))
+        : [...this.scanned, entry];
     } else {
-      this.entries = this.entries.filter((e) => e.filePath !== filePath);
+      this.scanned = this.scanned.filter((e) => e.filePath !== filePath);
     }
     this.scanErrors = this.scanErrors.filter((e) => e.filePath !== filePath);
   }
@@ -453,8 +476,8 @@ export class Vault {
     const typesToReplace = new Set<string>(parserTypes);
     const newErrors = results.flatMap((result) => result.errors);
 
-    this.entries = [
-      ...this.entries.filter((e) => !typesToReplace.has(e.type)),
+    this.scanned = [
+      ...this.scanned.filter((e) => !typesToReplace.has(e.type)),
       ...results.flatMap((result) => result.entries),
     ];
     const keptErrors = this.scanErrors.filter((e) => {
