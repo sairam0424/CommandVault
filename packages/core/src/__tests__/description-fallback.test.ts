@@ -9,6 +9,7 @@ import { parseCommands } from '../parsers/command-parser.js';
 import { parseRules } from '../parsers/rule-parser.js';
 import { parseSkills } from '../parsers/skill-parser.js';
 import { parseSingleFile } from '../parsers/single-file-parser.js';
+import { cpuTimeMs } from './cpu-time.js';
 
 let tempDir: string;
 
@@ -293,16 +294,25 @@ describe('description fallback from the body', () => {
 
 describe('description fallback on a pathological line', () => {
   const PATHOLOGICAL_LINE_REPEATS = 20_000;
-  const TIME_BUDGET_MS = 1_000;
+  // A wall-clock budget failed on a loaded machine (load 30-160) with 1.0-2.3 s measured for ~0.1 s
+  // of CPU: the vitest worker was descheduled, the code was not slow. CPU time counts only
+  // scheduled time. Measured on a 2024 M-series: the real cost is <= 0.11 s per case idle (~0.15 s
+  // at load 64), so 1 s is ~9x headroom. The quadratic regressions this guards: dropping the scan
+  // window costs 1.3-5.8 s on each of the four opener cases ("[a](" is the cheapest, 1.3-2.1 s);
+  // dropping the indexOf cache in removeComments costs 2.6-3.7 s on "`x` " and 5.2-6.9 s on
+  // "`` x `` " (its "`a " case lands at 1.0-1.4 s, around the budget, and is not relied on). The
+  // budget is not lowered to widen those margins: a slower CI core (Windows runner) multiplies the
+  // real cost, and headroom there is what this budget exists to keep. process.cpuUsage is
+  // process-wide, so this budget assumes the file stays sequential (no `.concurrent`).
+  const CPU_BUDGET_MS = 1_000;
 
   // Each opener is never closed, which is what makes an unbounded inline-markdown regex rescan.
   it.each(['**a ', '~~a ', '[a](', '![a]('])('stays fast on one very long line of "%s"', (unit) => {
     const line = unit.repeat(PATHOLOGICAL_LINE_REPEATS);
-    const started = Date.now();
 
-    const text = firstBodyLine(line);
+    const { result: text, cpuMs } = cpuTimeMs(() => firstBodyLine(line));
 
-    expect(Date.now() - started).toBeLessThan(TIME_BUDGET_MS);
+    expect(cpuMs).toBeLessThan(CPU_BUDGET_MS);
     expect(text.length).toBeGreaterThan(0);
     expect(text.length).toBeLessThanOrEqual(MAX_DESCRIPTION_LENGTH);
   });
@@ -315,11 +325,10 @@ describe('description fallback on a pathological line', () => {
     'stays fast on one very long line of code spans "%s"',
     (unit) => {
       const line = unit.repeat(BACKTICK_LINE_REPEATS);
-      const started = Date.now();
 
-      const text = firstBodyLine(line);
+      const { result: text, cpuMs } = cpuTimeMs(() => firstBodyLine(line));
 
-      expect(Date.now() - started).toBeLessThan(TIME_BUDGET_MS);
+      expect(cpuMs).toBeLessThan(CPU_BUDGET_MS);
       expect(text.length).toBeGreaterThan(0);
       expect(text.length).toBeLessThanOrEqual(MAX_DESCRIPTION_LENGTH);
     },
@@ -328,11 +337,10 @@ describe('description fallback on a pathological line', () => {
   it('stays fast when every backtick run has a different length and none closes', () => {
     const runs = Array.from({ length: DISTINCT_RUN_LENGTHS }, (_, i) => `${'`'.repeat(i + 1)}a `);
     const line = runs.join('');
-    const started = Date.now();
 
-    const text = firstBodyLine(line);
+    const { result: text, cpuMs } = cpuTimeMs(() => firstBodyLine(line));
 
-    expect(Date.now() - started).toBeLessThan(TIME_BUDGET_MS);
+    expect(cpuMs).toBeLessThan(CPU_BUDGET_MS);
     expect(text.length).toBeGreaterThan(0);
   });
 
