@@ -10,6 +10,7 @@ import {
   type CliGlobalOptions,
 } from '../helpers.js';
 import { CommandError, usageError } from '../errors.js';
+import { safeText } from '../ui/safe-text.js';
 
 const MAX_THRESHOLD_DAYS = 36_500;
 const MAX_SCORE = 100;
@@ -107,12 +108,12 @@ export function createAuditCommand(): Command {
             const days =
               result.daysSinceModified === Infinity ? '?' : String(result.daysSinceModified);
             console.log(
-              `    ${chalk.yellow('⚠')} ${chalk.white(result.entry.name)} ${chalk.dim(`(${days} days)`)} ${chalk.dim('—')} ${chalk.dim(result.entry.filePath)}`,
+              `    ${chalk.yellow('⚠')} ${chalk.white(safeText(result.entry.name))} ${chalk.dim(`(${days} days)`)} ${chalk.dim('—')} ${chalk.dim(safeText(result.entry.filePath))}`,
             );
           }
           for (const result of missingEntries.slice(0, 10)) {
             console.log(
-              `    ${chalk.red('✗')} ${chalk.red(result.entry.name)} ${chalk.dim('— source file no longer exists')}`,
+              `    ${chalk.red('✗')} ${chalk.red(safeText(result.entry.name))} ${chalk.dim('— source file no longer exists')}`,
             );
           }
         }
@@ -132,7 +133,7 @@ export function createAuditCommand(): Command {
             if (q.breakdown.usage === 0 && q.breakdown.engagement === 0) reasons.push('never used');
             const reasonStr = reasons.length > 0 ? ` — ${reasons.join(', ')}` : '';
             console.log(
-              `    ${chalk.dim('●')} ${chalk.white(q.entry.name)} ${chalk.dim(`(score: ${q.score})`)}${chalk.dim(reasonStr)}`,
+              `    ${chalk.dim('●')} ${chalk.white(safeText(q.entry.name))} ${chalk.dim(`(score: ${q.score})`)}${chalk.dim(reasonStr)}`,
             );
           }
         }

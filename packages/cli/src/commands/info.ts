@@ -6,9 +6,11 @@ import {
   typeEmoji,
   typeColor,
   formatDate,
+  jsonOutput,
   type CliGlobalOptions,
 } from '../helpers.js';
 import { CommandError } from '../errors.js';
+import { safeText, toDisplay } from '../ui/safe-text.js';
 
 function drawBox(title: string, lines: readonly string[]): string {
   const maxLen = Math.max(title.length + 4, ...lines.map((l) => stripAnsi(l).length + 4));
@@ -40,8 +42,8 @@ function formatMetadata(metadata: Readonly<Record<string, unknown>>): readonly s
   }
 
   return entries.map(([key, value]) => {
-    const formatted = typeof value === 'string' ? value : JSON.stringify(value);
-    return `${chalk.cyan(key)}: ${formatted}`;
+    const formatted = typeof value === 'string' ? safeText(value) : safeText(JSON.stringify(value));
+    return `${chalk.cyan(safeText(key))}: ${formatted}`;
   });
 }
 
@@ -60,7 +62,7 @@ export function createInfoCommand(): Command {
 
         if (results.length === 0) {
           if (globalOpts.json) {
-            console.log(JSON.stringify({ entry: null }, null, 2));
+            jsonOutput({ entry: null });
           }
           throw new CommandError(`no entry found matching "${name}"`);
         }
@@ -68,38 +70,38 @@ export function createInfoCommand(): Command {
         const entry: VaultEntry = results[0].entry;
 
         if (globalOpts.json) {
-          console.log(
-            JSON.stringify({ entry, slashCommand: vault.getSlashCommand(entry) }, null, 2),
-          );
+          jsonOutput({ entry, slashCommand: vault.getSlashCommand(entry) });
           vault.recordUsage(entry.id);
           return;
         }
 
-        const colorFn = typeColor(entry.type);
-        const slashCommand = vault.getSlashCommand(entry);
+        // Everything shown comes from the sanitised view, never from the entry itself.
+        const view = toDisplay(entry);
+        const colorFn = typeColor(view.type);
+        const slashCommand = safeText(vault.getSlashCommand(entry));
 
         const lines: string[] = [
           '',
-          `${chalk.dim('Type:')}       ${colorFn(`${typeEmoji(entry.type)} ${entry.type}`)}`,
-          `${chalk.dim('Source:')}     ${entry.source}`,
+          `${chalk.dim('Type:')}       ${colorFn(`${typeEmoji(view.type)} ${view.type}`)}`,
+          `${chalk.dim('Source:')}     ${view.source}`,
           `${chalk.dim('Command:')}    ${chalk.bold(slashCommand)}`,
           '',
           `${chalk.dim('Description:')}`,
-          `  ${entry.description || chalk.dim('(no description)')}`,
+          `  ${view.description || chalk.dim('(no description)')}`,
           '',
-          `${chalk.dim('Tags:')}       ${entry.tags.length > 0 ? entry.tags.map((t) => chalk.cyan(`#${t}`)).join(' ') : chalk.dim('(none)')}`,
-          `${chalk.dim('File:')}       ${chalk.underline(entry.filePath)}`,
+          `${chalk.dim('Tags:')}       ${view.tags.length > 0 ? view.tags.map((t) => chalk.cyan(`#${t}`)).join(' ') : chalk.dim('(none)')}`,
+          `${chalk.dim('File:')}       ${chalk.underline(view.filePath)}`,
           '',
           `${chalk.dim('Metadata:')}`,
-          ...formatMetadata(entry.metadata).map((l) => `  ${l}`),
+          ...formatMetadata(view.metadata).map((l) => `  ${l}`),
           '',
-          `${chalk.dim('Modified:')}   ${formatDate(entry.lastModified)}`,
-          `${chalk.dim('Usage:')}      ${entry.usageCount} time${entry.usageCount === 1 ? '' : 's'}`,
-          `${chalk.dim('Favorite:')}   ${entry.favorite ? chalk.yellow('★ Yes') : chalk.dim('☆ No')}`,
+          `${chalk.dim('Modified:')}   ${formatDate(view.lastModified)}`,
+          `${chalk.dim('Usage:')}      ${view.usageCount} time${view.usageCount === 1 ? '' : 's'}`,
+          `${chalk.dim('Favorite:')}   ${view.favorite ? chalk.yellow('★ Yes') : chalk.dim('☆ No')}`,
           '',
         ];
 
-        const title = `${typeEmoji(entry.type)} ${colorFn(entry.name)}`;
+        const title = `${typeEmoji(view.type)} ${colorFn(view.name)}`;
         console.log(`\n${drawBox(title, lines)}\n`);
 
         vault.recordUsage(entry.id);

@@ -9,6 +9,7 @@ import {
 } from '../helpers.js';
 import { createSpinner } from '../ui/spinner.js';
 import { usageError, CommandError } from '../errors.js';
+import { safeText, toDisplay } from '../ui/safe-text.js';
 
 export function createSyncCommand(): Command {
   const cmd = new Command('sync')
@@ -31,7 +32,7 @@ export function createSyncCommand(): Command {
       const failed = result.errors.some((problem) => getParseSeverity(problem) === 'error');
       if (failed) {
         spinner?.stop();
-        throw new CommandError(headlineProblem(result.errors)?.message ?? 'sync failed');
+        throw new CommandError(safeText(headlineProblem(result.errors)?.message ?? 'sync failed'));
       }
 
       spinner?.succeed(`Fetched ${result.entries.length} entries from remote`);
@@ -43,8 +44,9 @@ export function createSyncCommand(): Command {
       }
 
       console.log(chalk.gray('\nEntries:'));
-      for (const entry of result.entries.slice(0, 10)) {
-        console.log(`  ${chalk.cyan(entry.name)} — ${entry.description.slice(0, 60)}`);
+      // Remote records: every field, the type and source included, is an open string at runtime.
+      for (const view of result.entries.slice(0, 10).map(toDisplay)) {
+        console.log(`  ${chalk.cyan(view.name)} — ${view.description.slice(0, 60)}`);
       }
       if (result.entries.length > 10) {
         console.log(chalk.gray(`  ... and ${result.entries.length - 10} more`));

@@ -4,6 +4,7 @@ import { RegistryManager } from '@commandvault/core';
 import { CommandError, EXIT_RUNTIME_ERROR, invalidChoiceError, usageError } from '../errors.js';
 import type { RegistryConfig } from '@commandvault/core';
 import { readConfigDocument, writeConfigDocument } from '../config.js';
+import { toDisplay } from '../ui/safe-text.js';
 
 /** Every registry type the vault can read, in the order error messages list them. */
 const REGISTRY_TYPES = ['json', 'api'] as const satisfies readonly RegistryConfig['type'][];
@@ -118,11 +119,12 @@ export function createRegistryCommand(): Command {
         return;
       }
       console.log(chalk.bold(`Found ${result.total} result(s) for "${query}":\n`));
-      for (const entry of result.entries) {
-        const tags = entry.tags?.length ? chalk.dim(` [${entry.tags.join(', ')}]`) : '';
-        console.log(`  ${chalk.cyan(entry.name)} ${chalk.dim(`(${entry.type})`)}${tags}`);
-        console.log(`    ${entry.description}`);
-        console.log(`    ${chalk.dim(`from: ${entry.source}`)}`);
+      // Remote records: every field is an open string, so the whole record is shown as a view.
+      for (const view of result.entries.map(toDisplay)) {
+        const tags = view.tags?.length ? chalk.dim(` [${view.tags.join(', ')}]`) : '';
+        console.log(`  ${chalk.cyan(view.name)} ${chalk.dim(`(${view.type})`)}${tags}`);
+        console.log(`    ${view.description}`);
+        console.log(`    ${chalk.dim(`from: ${view.source}`)}`);
         console.log('');
       }
     });

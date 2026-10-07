@@ -15,29 +15,38 @@ import {
 import { createSpinner } from '../ui/spinner.js';
 import { openInEditor } from '../editor.js';
 import { CommandError } from '../errors.js';
+import { safeText, toDisplay } from '../ui/safe-text.js';
 
 type ActionChoice = 'copy' | 'open' | 'again' | 'exit';
 
-function formatEntryChoice(entry: VaultEntry): string {
-  return `${typeEmoji(entry.type)} ${entry.name} — ${truncate(entry.description || '(no description)', 50)}`;
+/** The inquirer choice label; exported for the hostile-field tests. */
+export function formatEntryChoice(entry: VaultEntry): string {
+  const view = toDisplay(entry);
+  return `${typeEmoji(view.type)} ${view.name} — ${truncate(view.description || '(no description)', 50)}`;
 }
 
-function displayEntryDetail(entry: VaultEntry, slashCommand: string): void {
-  const colorFn = typeColor(entry.type);
+/** The detail block under a selection; exported for the hostile-field tests. */
+export function displayEntryDetail(entry: VaultEntry, slashCommand: string): void {
+  const view = toDisplay(entry);
+  const colorFn = typeColor(view.type);
   console.log('');
-  console.log(chalk.bold(`${typeEmoji(entry.type)} ${colorFn(entry.name)}`));
+  console.log(chalk.bold(`${typeEmoji(view.type)} ${colorFn(view.name)}`));
   console.log(chalk.dim('─'.repeat(50)));
-  console.log(`${chalk.dim('Type:')}        ${colorFn(entry.type)}`);
-  console.log(`${chalk.dim('Source:')}      ${entry.source}`);
-  console.log(`${chalk.dim('Command:')}     ${chalk.bold(slashCommand)}`);
-  console.log(`${chalk.dim('Description:')} ${entry.description || chalk.dim('(no description)')}`);
+  console.log(`${chalk.dim('Type:')}        ${colorFn(view.type)}`);
+  console.log(`${chalk.dim('Source:')}      ${view.source}`);
+  console.log(`${chalk.dim('Command:')}     ${chalk.bold(safeText(slashCommand))}`);
+  console.log(`${chalk.dim('Description:')} ${view.description || chalk.dim('(no description)')}`);
   console.log(
-    `${chalk.dim('Tags:')}        ${entry.tags.length > 0 ? entry.tags.map((t) => chalk.cyan(`#${t}`)).join(' ') : chalk.dim('(none)')}`,
+    `${chalk.dim('Tags:')}        ${view.tags.length > 0 ? view.tags.map((t) => chalk.cyan(`#${t}`)).join(' ') : chalk.dim('(none)')}`,
   );
-  console.log(`${chalk.dim('File:')}        ${chalk.underline(entry.filePath)}`);
-  console.log(`${chalk.dim('Modified:')}    ${formatDate(entry.lastModified)}`);
-  console.log(`${chalk.dim('Usage:')}       ${entry.usageCount} time${entry.usageCount === 1 ? '' : 's'}`);
-  console.log(`${chalk.dim('Favorite:')}    ${entry.favorite ? chalk.yellow('* Yes') : chalk.dim('  No')}`);
+  console.log(`${chalk.dim('File:')}        ${chalk.underline(view.filePath)}`);
+  console.log(`${chalk.dim('Modified:')}    ${formatDate(view.lastModified)}`);
+  console.log(
+    `${chalk.dim('Usage:')}       ${view.usageCount} time${view.usageCount === 1 ? '' : 's'}`,
+  );
+  console.log(
+    `${chalk.dim('Favorite:')}    ${view.favorite ? chalk.yellow('* Yes') : chalk.dim('  No')}`,
+  );
   console.log(chalk.dim('─'.repeat(50)));
 }
 
@@ -67,7 +76,7 @@ async function runLegacyMode(globalOpts: CliGlobalOptions): Promise<void> {
         pageSize: 15,
       });
 
-      const slashCommand = vault.getSlashCommand(selectedEntry);
+      const slashCommand = safeText(vault.getSlashCommand(selectedEntry));
       displayEntryDetail(selectedEntry, slashCommand);
       vault.recordUsage(selectedEntry.id);
 
@@ -91,11 +100,12 @@ async function runLegacyMode(globalOpts: CliGlobalOptions): Promise<void> {
             break;
           }
           case 'open': {
+            // safe-text: the path is resolved and opened, not printed
             const resolvedPath = resolve(selectedEntry.filePath);
             try {
               accessSync(resolvedPath, constants.R_OK);
             } catch {
-              console.error(chalk.red(`\nFile not found: ${selectedEntry.filePath}`));
+              console.error(chalk.red(`\nFile not found: ${safeText(selectedEntry.filePath)}`));
               break;
             }
             try {
@@ -106,8 +116,15 @@ async function runLegacyMode(globalOpts: CliGlobalOptions): Promise<void> {
             }
             break;
           }
-          case 'again': { actionLoop = false; break; }
-          case 'exit': { actionLoop = false; keepSearching = false; break; }
+          case 'again': {
+            actionLoop = false;
+            break;
+          }
+          case 'exit': {
+            actionLoop = false;
+            keepSearching = false;
+            break;
+          }
         }
       }
     }

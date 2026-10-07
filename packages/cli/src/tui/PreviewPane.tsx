@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import type { VaultEntry } from '@commandvault/core';
 import { previewContent, previewTextRows } from './previewExcerpt.js';
-import { entryTag } from './text.js';
+import { entryTag, singleLine } from './text.js';
 
 interface Props {
   readonly entry: VaultEntry | null;
@@ -16,9 +16,9 @@ function MetadataFallback({ entry }: { entry: VaultEntry }) {
   const rows: [string, string][] = [
     ['Type', entry.type],
     ['Source', entry.source],
-    ['Tags', entry.tags.join(', ') || '(none)'],
+    ['Tags', singleLine(entry.tags.join(', ')) || '(none)'],
     ['Used', `${entry.usageCount} times`],
-    ['File', entry.filePath],
+    ['File', singleLine(entry.filePath)],
   ];
   return (
     <Box flexDirection="column" paddingX={1}>
@@ -48,7 +48,7 @@ function Header({ entry }: { entry: VaultEntry }) {
       </Box>
       <Box flexShrink={1}>
         <Text dimColor wrap="truncate-start">
-          {entry.filePath}
+          {singleLine(entry.filePath)}
         </Text>
       </Box>
     </Box>
@@ -72,6 +72,7 @@ export function PreviewPane({ entry, query, scrollTop, height, width }: Props) {
     );
   }
 
+  // safe-text: an emptiness test; the content is drawn through previewContent
   if (!entry.content.trim()) {
     return (
       <Box borderStyle="single" borderColor="gray" width={width} height={height}>
