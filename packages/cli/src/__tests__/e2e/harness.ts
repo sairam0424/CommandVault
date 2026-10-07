@@ -66,6 +66,8 @@ export interface Sandbox {
   readonly editorLog: string;
   /** The script that writes `editorLog`; point EDITOR or VISUAL at it, with arguments if wanted. */
   readonly editorStub: string;
+  /** The environment the CLI runs with, for a driver that starts the binary itself (a pty). */
+  readonly env: Readonly<Record<string, string>>;
   /**
    * `env` adds to (and overrides) the sandbox environment for this one run; an `undefined` value
    * removes that key (the sandbox sets CI and NO_COLOR, so a colour test has to take them away).
@@ -156,14 +158,19 @@ function sandboxEnv(
   return env;
 }
 
+/** The variables that are set, as a plain record a child process (or a JSON file) can take. */
+function definedVariables(env: NodeJS.ProcessEnv): Readonly<Record<string, string>> {
+  return Object.fromEntries(
+    Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  );
+}
+
 /** `env` with `overrides` applied: a defined value replaces the key, `undefined` removes it. */
 function withOverrides(
   env: NodeJS.ProcessEnv,
   overrides: Readonly<Record<string, string | undefined>>,
 ): NodeJS.ProcessEnv {
-  return Object.fromEntries(
-    Object.entries({ ...env, ...overrides }).filter(([, value]) => value !== undefined),
-  );
+  return definedVariables({ ...env, ...overrides });
 }
 
 function runToCompletion(
@@ -282,6 +289,7 @@ export function createSandbox(options: SandboxOptions = {}): Sandbox {
     altClaudeDir,
     editorLog,
     editorStub,
+    env: definedVariables(env),
     run: (args, overrides) => runToCompletion(args, workDir, env, overrides),
     runUntil: (args, marker, timeoutMs, signal = 'SIGTERM') =>
       runUntilMarker(args, marker, timeoutMs, signal, workDir, env),

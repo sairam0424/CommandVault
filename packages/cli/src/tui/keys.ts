@@ -61,8 +61,103 @@ function controlEvent(code: number): readonly KeyEvent[] {
   return [];
 }
 
-function isResolvedKey(key: Key): boolean {
+/** True when Ink recognised the read as one key (an arrow, Enter, a Ctrl chord, ...). */
+export function isResolvedKey(key: Key): boolean {
   return Object.values(key).some((flag) => flag === true);
+}
+
+/** Enter, Ctrl+O and Ctrl+F: the keys that act on the selected entry. */
+export function isEntryActionKey(input: string, key: Key): boolean {
+  return key.return || (key.ctrl && (input === 'o' || input === 'f'));
+}
+
+/** Typing never puts more bytes than this into one read; a paste routinely does. */
+export const PASTE_MIN_LENGTH = 64;
+// Two line breaks in one read: CRLF counts once, so a typed "x" + Enter stays a key.
+const PASTE_MIN_LINE_BREAKS = 2;
+const LINE_BREAK = /\r\n|\r|\n/g;
+
+/**
+ * A terminal without bracketed paste delivers a paste as one unresolved run of bytes. A run
+ * with two or more line breaks, or longer than any typed read, is such a paste and must be
+ * inserted as text: decoding its newlines as Enter would act on an entry once per line.
+ */
+export function isPasteLike(input: string, key: Key): boolean {
+  if (isResolvedKey(key)) return false;
+  if (input.length > PASTE_MIN_LENGTH) return true;
+  const lineBreaks = input.match(LINE_BREAK)?.length ?? 0;
+  return lineBreaks >= PASTE_MIN_LINE_BREAKS;
+}
+
+/**
+ * The markers of a bracketed paste as Ink hands them to a key handler when they reach one at
+ * all: ESC removed. Ink's input parser keeps a whole start marker for its paste channel, and holds
+ * back a pending `\e[200`, but flushes a pending `\e`, `\e[`, `\e[2` or `\e[20` after 20 ms as a
+ * key or as literal text (build/input-parser.js `hasPendingEscape`). A marker whose bytes arrive
+ * further apart than that (a slow link, a scripted writer) therefore reaches the handler in two
+ * reads: a piece, then the rest of the marker heading the body, which then arrives as plain keys.
+ */
+export const PASTE_START_TAIL = '[200~';
+export const PASTE_END_TAIL = '[201~';
+// A lone `[` is a key a person presses; from two characters on the piece is never typed text.
+const PASTE_FRAGMENT_MIN_LENGTH = 2;
+
+/**
+ * A flushed piece of a paste start marker that no one types in one read (`[2`, `[20`): it is held
+ * until the next read shows whether the rest of the marker follows it.
+ */
+export function isPasteStartFragment(input: string, key: Key): boolean {
+  if (isResolvedKey(key) || input.length < PASTE_FRAGMENT_MIN_LENGTH) return false;
+  return input.length < PASTE_START_TAIL.length && PASTE_START_TAIL.startsWith(input);
+}
+
+/** An unresolved event that is the end marker of a bracketed paste, ESC removed. */
+export function isPasteEndTail(input: string, key: Key): boolean {
+  return !isResolvedKey(key) && input === PASTE_END_TAIL;
+}
+
+const ESCAPE = '\x1b';
+// Ink cuts a stdin read at every ESC and hands an escape sequence its key parser did not resolve
+// over with the ESC removed. A CSI tail is `[`, parameter bytes, intermediate bytes and one final
+// byte (ECMA-48 5.4); an OSC lead or a string terminator (ESC + one code point to Ink) is a bare
+// `]` or `\`. SS3 (ESC O x) is left alone: Ink resolves every SS3 a terminal sends, and a two-letter
+// word starting with O typed fast is a word.
+const CONTROL_SEQUENCE_TAIL = /^\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]$/;
+const OSC_LEAD_OR_TERMINATOR = /^[\]\\]$/;
+
+/**
+ * An unresolved event holding the tail of a CSI sequence: a key Ink does not know (a focus report,
+ * a mouse event, a colour code pasted raw). Never text a person typed: no read holds it with text.
+ */
+export function isControlSequenceTail(input: string, key: Key): boolean {
+  return !isResolvedKey(key) && CONTROL_SEQUENCE_TAIL.test(input);
+}
+
+// `input` may be an escape sequence less its ESC; a bare `]` or `\` is also a typed key, so what
+// it is depends on the rest of its stdin read.
+function isEscapeTail(input: string): boolean {
+  return CONTROL_SEQUENCE_TAIL.test(input) || OSC_LEAD_OR_TERMINATOR.test(input);
+}
+
+/**
+ * The bytes the terminal sent for an unresolved event, as pasted text: the ESC Ink stripped from
+ * an escape sequence is put back, so the paste cleaner drops the sequence whole, an OSC payload up
+ * to its BEL or terminator included, instead of typing the printable tail.
+ */
+export function rawBytes(input: string): string {
+  return isEscapeTail(input) ? ESCAPE + input : input;
+}
+
+/**
+ * A key as a person types it, as Ink hands it over: one key Ink resolved, or a short run of
+ * printable text (fast typing, or tmux `send-keys` with a word). A run holding a control byte,
+ * longer than any typed read, or shaped like the tail of an escape sequence is not, and what it
+ * means depends on the rest of its stdin read.
+ */
+export function isTypedRun(input: string, key: Key): boolean {
+  if (isResolvedKey(key)) return true;
+  if (CONTROL_BYTE.test(input) || input.length > PASTE_MIN_LENGTH) return false;
+  return !isEscapeTail(input);
 }
 
 /**

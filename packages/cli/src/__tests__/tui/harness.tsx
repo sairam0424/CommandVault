@@ -86,6 +86,10 @@ export async function mountApp(vault: Vault, options: MountOptions = {}) {
     app.stdin.write(chunk);
     await yieldToReact();
   };
+  // The same read without the yield, for asserting what happened synchronously.
+  const writeNow = (chunk: string) => {
+    app.stdin.write(chunk);
+  };
   const waitForFrame = (predicate: (f: string) => boolean) =>
     vi.waitFor(() => expect(predicate(frame()), `last frame:\n${frame()}`).toBe(true), {
       timeout: POLL_TIMEOUT_MS,
@@ -104,7 +108,19 @@ export async function mountApp(vault: Vault, options: MountOptions = {}) {
   }
   // Everything written to the terminal, in order; a redraw request shows up as its own write.
   const writes = (): readonly string[] => app.frames;
-  return { frame, write, waitForFrame, resize, writes };
+  return { frame, write, writeNow, waitForFrame, resize, writes };
 }
 
 export type MountedApp = Awaited<ReturnType<typeof mountApp>>;
+
+/** The markers a terminal with bracketed paste wraps a paste in, as the bytes it sends. */
+export const PASTE_START = '\x1b[200~';
+export const PASTE_END = '\x1b[201~';
+
+// The search box row of a frame: a box border, the prompt, the query, the cursor cell and padding.
+const QUERY_LINE = /│ > (.*?)\s*│/;
+
+/** The text the search box shows in a frame, cursor cell and padding removed. */
+export function queryShown(frame: string): string | undefined {
+  return QUERY_LINE.exec(frame)?.[1];
+}
