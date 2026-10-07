@@ -117,6 +117,15 @@ function isFtsStateRecorded(conn: DatabaseAdapter, state: FtsState, detail: stri
   return meta.get('fts_state') === state && (meta.get('fts_detail') ?? '') === detail;
 }
 
+/**
+ * Whether the last process to record the table's state could not use it. Without fts5 (the
+ * pure-JavaScript backend) index() writes the entries past the table, so however healthy it looks,
+ * its rows are no longer those of `entries`.
+ */
+function isFtsLeftBehind(conn: DatabaseAdapter): boolean {
+  return readEngineMeta(conn).get('fts_state') === 'unavailable';
+}
+
 /** Writes only when the record differs, so that an open which changes nothing writes nothing. */
 function recordFtsState(conn: DatabaseAdapter, state: FtsState, detail: string): void {
   if (isFtsStateRecorded(conn, state, detail)) return;
@@ -165,14 +174,15 @@ function isUnrepairable(conn: DatabaseAdapter, error: unknown): boolean {
  * left over), and migrations are not run again for a version that is recorded.
  *
  * Without the fts5 module, or with a table SQLite cannot repair, the state is recorded as
- * `unavailable` and nothing is thrown: full-text search only serves one search tier.
+ * `unavailable` and nothing is thrown: full-text search only serves one search tier. A healthy
+ * table left behind that way is filled again, once, by the next process that can use it.
  */
 function ensureFts(conn: DatabaseAdapter): void {
   if (!isFts5Available(conn)) {
     recordFtsState(conn, 'unavailable', 'the SQLite build has no fts5 module');
     return;
   }
-  if (isFtsHealthy(conn)) {
+  if (isFtsHealthy(conn) && !isFtsLeftBehind(conn)) {
     recordFtsState(conn, 'ready', '');
     return;
   }
@@ -180,7 +190,7 @@ function ensureFts(conn: DatabaseAdapter): void {
     conn.transaction(
       () => {
         // Another process may have rebuilt it while this one waited for the write lock.
-        if (!isFtsHealthy(conn)) rebuildFts(conn);
+        if (!isFtsHealthy(conn) || isFtsLeftBehind(conn)) rebuildFts(conn);
         writeEngineMeta(conn, ftsStateRecord('ready', ''));
       },
       { mode: 'immediate' },
