@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { createVaultInstance, typeEmoji, type CliGlobalOptions } from '../helpers.js';
+import { safeText } from '../ui/safe-text.js';
 
 export function createDiffCommand(): Command {
   const cmd = new Command('diff')
@@ -42,15 +43,20 @@ export function createDiffCommand(): Command {
         console.log('');
 
         for (const entry of diff.added) {
-          console.log(chalk.green(`  + ${entry.name} (${typeEmoji(entry.type)} ${entry.type})`));
+          console.log(
+            chalk.green(`  + ${safeText(entry.name)} (${typeEmoji(entry.type)} ${entry.type})`),
+          );
         }
 
+        // A removed entry survives only as its name in the snapshot; it is as untrusted as the rest.
         for (const name of diff.removed) {
-          console.log(chalk.red(`  - ${name}`));
+          console.log(chalk.red(`  - ${safeText(name)}`));
         }
 
         for (const entry of diff.modified) {
-          console.log(chalk.yellow(`  ~ ${entry.name} (${typeEmoji(entry.type)} ${entry.type})`));
+          console.log(
+            chalk.yellow(`  ~ ${safeText(entry.name)} (${typeEmoji(entry.type)} ${entry.type})`),
+          );
         }
 
         console.log('');

@@ -12,6 +12,7 @@ import {
 } from '@commandvault/core';
 import { configFilePath, dbFilePath, loadConfig, type CliConfig } from '../config.js';
 import { CommandError } from '../errors.js';
+import { safeText } from '../ui/safe-text.js';
 import {
   claudeDirFor,
   createConfiguredVault,
@@ -215,6 +216,7 @@ function describeProblems(errors: readonly ParseError[], warnings: number): Chec
   if (errors.length === 0 && warnings === 0) {
     return check(name, 'pass', 'none');
   }
+  // safe-text: counted, not printed
   const files = new Set(errors.map((error) => error.filePath)).size;
   const parts = [
     ...(errors.length > 0 ? [`${plural(errors.length, 'error')} in ${plural(files, 'file')}`] : []),
@@ -246,8 +248,9 @@ async function withoutAbsentSources(
   const optional = optionalSources(claudeDir);
   const absent = await Promise.all(
     errors.map(async (error) => {
-      const isOptional = optional.has(resolve(error.filePath));
-      return isOptional && (await kindOf(error.filePath)) === 'missing';
+      const path = error.filePath; // safe-text: resolved and stat-ed, not printed
+      const isOptional = optional.has(resolve(path));
+      return isOptional && (await kindOf(path)) === 'missing';
     }),
   );
   return errors.filter((_error, index) => !absent[index]);
@@ -390,7 +393,7 @@ function renderReport(
     console.log(`  ${STATUS_ICONS[entry.status]}  ${entry.name.padEnd(width)}  ${detail}`);
   }
   for (const error of errors.slice(0, MAX_ERRORS_LISTED)) {
-    console.log(`       ${chalk.red('✗')} ${error.filePath}: ${error.message}`);
+    console.log(`       ${chalk.red('✗')} ${safeText(error.filePath)}: ${safeText(error.message)}`);
   }
   if (errors.length > MAX_ERRORS_LISTED) {
     console.log(chalk.dim(`       ... and ${errors.length - MAX_ERRORS_LISTED} more`));
@@ -446,8 +449,13 @@ export function createDoctorCommand(): Command {
       const counts = tally(diagnosis.checks);
       if (options.json) {
         const { claudeDir, dataDir, checks, errors } = diagnosis;
-        const problems = errors.map(({ filePath, message }) => ({ filePath, message }));
-        jsonOutput({ claudeDir, dataDir, checks, counts, problems });
+        jsonOutput({
+          claudeDir,
+          dataDir,
+          checks,
+          counts,
+          problems: errors.map(({ filePath, message }) => ({ filePath, message })),
+        });
       } else {
         renderReport(diagnosis.checks, counts, diagnosis.errors);
       }

@@ -7,6 +7,8 @@ import {
   typeColor,
   printParseProblems,
   headlineProblem,
+  jsonOutput,
+  COMPACT_JSON,
 } from '../helpers.js';
 import type { EntryType, ParseError } from '@commandvault/core';
 
@@ -130,6 +132,58 @@ describe('printParseProblems', () => {
     expect(lines().filter((line) => line.includes('✗'))).toHaveLength(10);
     expect(lines()).toContain(chalk.dim('  ... and 3 more'));
     expect(lines().at(-1)).toBe(chalk.red('  13 errors, 0 warnings'));
+  });
+});
+
+describe('jsonOutput', () => {
+  let logSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+  });
+
+  const printed = (): string => String(logSpy.mock.calls[0]?.[0]);
+
+  it('escapes C1 controls, the line/paragraph separators and bidi controls JSON.stringify leaves raw', () => {
+    const name = 'n\u009d0;X\u009c\u2028\u2029\u0085\u202e\u2066';
+    jsonOutput({ name });
+
+    const text = printed();
+    expect(JSON.stringify({ name }, null, 2)).toContain('\u009d');
+    for (const ch of ['\u009d', '\u009c', '\u2028', '\u2029', '\u0085', '\u202e', '\u2066']) {
+      expect(text).not.toContain(ch);
+    }
+    expect(text).toContain('\\u009d');
+    expect(text).toContain('\\u2028');
+  });
+
+  it('round-trips: JSON.parse gives the original strings back', () => {
+    const data = {
+      name: 'n\u009d0;X\u009c\u2028',
+      tags: ['t\u0090\u2029'],
+      nested: { k: '\u001b[2J' },
+    };
+    jsonOutput(data);
+
+    expect(JSON.parse(printed())).toEqual(data);
+  });
+
+  it('keeps the two-space indentation by default and prints one line when asked', () => {
+    jsonOutput({ a: 1 });
+    expect(printed()).toBe('{\n  "a": 1\n}');
+
+    logSpy.mockClear();
+    jsonOutput({ a: 1 }, COMPACT_JSON);
+    expect(printed()).toBe('{"a":1}');
+  });
+
+  it('leaves the hook emoji, whose UTF-8 holds byte 0x9D, alone', () => {
+    jsonOutput({ emoji: '\u{1FA9D}' });
+    expect(printed()).toContain('\u{1FA9D}');
   });
 });
 

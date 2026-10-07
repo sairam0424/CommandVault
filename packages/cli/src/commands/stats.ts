@@ -1,7 +1,15 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import type { EntryType, VaultStats } from '@commandvault/core';
-import { withVault, typeEmoji, typeColor, formatDate, type CliGlobalOptions } from '../helpers.js';
+import {
+  withVault,
+  typeEmoji,
+  typeColor,
+  formatDate,
+  jsonOutput,
+  type CliGlobalOptions,
+} from '../helpers.js';
+import { safeText } from '../ui/safe-text.js';
 
 const TYPE_ORDER: readonly EntryType[] = ['skill', 'agent', 'command', 'plugin', 'rule', 'hook'];
 
@@ -28,7 +36,7 @@ export function createStatsCommand(): Command {
         const stats: VaultStats = vault.getStats();
 
         if (globalOpts.json) {
-          console.log(JSON.stringify(stats, null, 2));
+          jsonOutput(stats);
           return;
         }
 
@@ -74,7 +82,7 @@ export function createStatsCommand(): Command {
         for (const [source, count] of sourceEntries) {
           const bar = renderBar(count, maxSourceCount);
           console.log(
-            `  ${chalk.white(source.padEnd(14))} ${chalk.blue(bar)} ${chalk.bold(String(count))}`,
+            `  ${chalk.white(safeText(source).padEnd(14))} ${chalk.blue(bar)} ${chalk.bold(String(count))}`,
           );
         }
 
@@ -100,7 +108,7 @@ export function createStatsCommand(): Command {
             const colorFn = typeColor(entry.type);
             const rank = chalk.dim(`${(index + 1).toString().padStart(2)}.`);
             const uses = chalk.bold(`${entry.usageCount}x`);
-            console.log(`  ${rank} ${colorFn(entry.name.padEnd(30))} ${uses}`);
+            console.log(`  ${rank} ${colorFn(safeText(entry.name).padEnd(30))} ${uses}`);
           }
         }
 

@@ -4,6 +4,7 @@ import type { VaultEntry } from '@commandvault/core';
 import { createConfiguredVault, type CliGlobalOptions } from '../helpers.js';
 import { createSpinner } from '../ui/spinner.js';
 import { onShutdown } from '../errors.js';
+import { safeText } from '../ui/safe-text.js';
 
 function timestamp(): string {
   const now = new Date();
@@ -35,13 +36,15 @@ export function createWatchCommand(): Command {
 
       vault.on('entry:added', (entry: VaultEntry) => {
         console.log(
-          chalk.dim(`[${timestamp()}]`) + chalk.green(` + ${entry.type}: ${entry.name} (added)`),
+          chalk.dim(`[${timestamp()}]`) +
+            chalk.green(` + ${entry.type}: ${safeText(entry.name)} (added)`),
         );
       });
 
       vault.on('entry:updated', (entry: VaultEntry) => {
         console.log(
-          chalk.dim(`[${timestamp()}]`) + chalk.yellow(` ~ ${entry.type}: ${entry.name} (updated)`),
+          chalk.dim(`[${timestamp()}]`) +
+            chalk.yellow(` ~ ${entry.type}: ${safeText(entry.name)} (updated)`),
         );
       });
 

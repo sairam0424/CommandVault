@@ -1,6 +1,12 @@
 import { Command } from 'commander';
-import { createVaultInstance, type CliGlobalOptions } from '../helpers.js';
+import {
+  COMPACT_JSON,
+  createVaultInstance,
+  jsonOutput,
+  type CliGlobalOptions,
+} from '../helpers.js';
 import { CommandError } from '../errors.js';
+import { safeText } from '../ui/safe-text.js';
 
 export function createRunCommand(): Command {
   const cmd = new Command('run')
@@ -19,12 +25,11 @@ export function createRunCommand(): Command {
         }
 
         const entry = results[0].entry;
-        const slashCommand = vault.getSlashCommand(entry);
 
         if (globalOpts.json) {
-          console.log(JSON.stringify({ name: entry.name, command: slashCommand }));
+          jsonOutput({ name: entry.name, command: vault.getSlashCommand(entry) }, COMPACT_JSON);
         } else {
-          console.log(slashCommand);
+          console.log(safeText(vault.getSlashCommand(entry)));
         }
 
         vault.recordUsage(entry.id);

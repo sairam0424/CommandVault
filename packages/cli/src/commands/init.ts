@@ -96,7 +96,7 @@ export function createInitCommand(): Command {
       // Create directory
       await mkdir(dirname(configPath), { recursive: true });
 
-      // Write config
+      // safe-text: config.json is written to disk, not to the terminal
       await writeFile(configPath, JSON.stringify(buildDefaultConfig(), null, 2) + '\n', 'utf-8');
 
       if (isReset && configExists) {

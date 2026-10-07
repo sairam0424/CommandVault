@@ -6,6 +6,8 @@ import {
   writeConfigDocument,
   type ConfigDocument,
 } from '../config.js';
+import { jsonOutput } from '../helpers.js';
+import { safeText } from '../ui/safe-text.js';
 
 function getNestedValue(obj: ConfigDocument, key: string): unknown {
   let current: unknown = obj;
@@ -29,7 +31,7 @@ export function createConfigCommand(): Command {
       const config = await readConfigDocument();
 
       if (!key) {
-        console.log(JSON.stringify(config, null, 2));
+        jsonOutput(config);
         return;
       }
 
@@ -39,7 +41,11 @@ export function createConfigCommand(): Command {
         return;
       }
 
-      console.log(typeof value === 'string' ? value : JSON.stringify(value, null, 2));
+      if (typeof value === 'object' && value !== null) {
+        jsonOutput(value);
+      } else {
+        console.log(String(value));
+      }
     });
 
   cmd
@@ -51,7 +57,7 @@ export function createConfigCommand(): Command {
       const value = parseConfigValue(key, rawValue);
       const config = await readConfigDocument();
       await writeConfigDocument({ ...config, [key]: value });
-      console.log(chalk.green(`Set ${chalk.bold(key)} = ${JSON.stringify(value)}`));
+      console.log(chalk.green(`Set ${chalk.bold(key)} = ${safeText(JSON.stringify(value))}`));
     });
 
   return cmd;

@@ -2,8 +2,16 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import Table from 'cli-table3';
 import type { SearchResult, EntryType, EntrySource } from '@commandvault/core';
-import { withVault, typeEmoji, typeColor, truncate, type CliGlobalOptions } from '../helpers.js';
+import {
+  withVault,
+  typeEmoji,
+  typeColor,
+  truncate,
+  jsonOutput,
+  type CliGlobalOptions,
+} from '../helpers.js';
 import { usageError } from '../errors.js';
+import { safeText } from '../ui/safe-text.js';
 
 function highlightMatch(text: string, query: string): string {
   if (!query || !text) {
@@ -61,7 +69,7 @@ export function createSearchCommand(): Command {
         });
 
         if (globalOpts.json) {
-          console.log(JSON.stringify({ query, results }, null, 2));
+          jsonOutput({ query, results });
           return;
         }
 
@@ -71,7 +79,8 @@ export function createSearchCommand(): Command {
         }
 
         const table = new Table({
-          style: { compact: true, 'padding-left': 1, 'padding-right': 1 },
+          // No head/border colours: @colors/colors ignores isTTY and NO_COLOR (see list.ts).
+          style: { compact: true, 'padding-left': 1, 'padding-right': 1, head: [], border: [] },
           head: [
             chalk.gray('Score'),
             chalk.gray('Type'),
@@ -88,9 +97,9 @@ export function createSearchCommand(): Command {
           table.push([
             formatScore(score),
             colorFn(`${typeEmoji(entry.type)}`),
-            highlightMatch(colorFn(entry.name), query),
-            chalk.dim(entry.source),
-            truncate(highlightMatch(entry.description || '', query), 50),
+            highlightMatch(colorFn(safeText(entry.name)), query),
+            chalk.dim(safeText(entry.source)),
+            truncate(highlightMatch(safeText(entry.description), query), 50),
           ]);
         }
 
