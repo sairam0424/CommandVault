@@ -281,15 +281,14 @@ describe('built CLI: runtime and user errors exit 1', () => {
     }
   });
 
-  it('restore fails when the backup cannot be copied', () => {
+  it('restore refuses a directory that carries a backup name, before the prompt', () => {
     const sandbox = createSandbox();
     try {
-      // Readable, so the existence check passes, but a directory cannot be copied over the database.
-      mkdirSync(join(sandbox.home, '.commandvault', 'backups', 'not-a-file.db'), {
-        recursive: true,
-      });
-      const result = sandbox.run(['restore', 'not-a-file.db']);
-      expectFailure(result, EXIT_RUNTIME, /^error: restore failed: /m);
+      // Present, so the existence check passes; the inspection refuses what is not a regular file.
+      const name = 'vault-2001-01-01T00-00-00.db';
+      mkdirSync(join(sandbox.home, '.commandvault', 'backups', name), { recursive: true });
+      const result = sandbox.run(['restore', name]);
+      expectFailure(result, EXIT_RUNTIME, /^error: refusing to restore .*not a regular file/m);
     } finally {
       sandbox.dispose();
     }

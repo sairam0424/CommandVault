@@ -327,6 +327,7 @@ program
   .command('restore')
   .description('Restore the vault database from a backup')
   .argument('<file>', 'Backup filename (from `vault backup --list`)')
+  .option('--yes', 'Skip the confirmation')
   .action(lazyAction('restore', () => import('./commands/restore.js'), 'createRestoreCommand'));
 
 // --- config ---

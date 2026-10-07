@@ -11,6 +11,25 @@ export {
   SchemaTooNewError,
   MigrationBackupError,
 } from './indexer/db-errors.js';
+export {
+  backupVault,
+  inspectBackup,
+  restoreVault,
+  ensurePrivate,
+  backupFileKind,
+  removeBackupFiles,
+  sweepStaleInspectCopies,
+  BackupRejectedError,
+} from './indexer/backup-restore.js';
+export type {
+  BackupKind,
+  BackupResult,
+  BackupInfo,
+  RestoreResult,
+  RestoreOptions,
+  BackupFileKind,
+  BackupRejectReason,
+} from './indexer/backup-restore.js';
 export { VaultWatcher } from './watcher/index.js';
 export { exportEntries, exportToFile, importFromFile, importFromUrl } from './sync/index.js';
 export type { VaultExportBundle, ExportedEntry } from './sync/index.js';

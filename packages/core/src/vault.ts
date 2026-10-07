@@ -22,6 +22,7 @@ import {
 import { ParserRegistry, getDefaultRegistry, registerBuiltinParsers } from './parsers/index.js';
 import { parseSingleFile, isSingleFileParseable } from './parsers/single-file-parser.js';
 import { SearchEngine } from './indexer/search-engine.js';
+import { ensurePrivate } from './indexer/backup-restore.js';
 import { VaultWatcher, type WatcherCallback } from './watcher/index.js';
 import { routePathToParser, type ParserType } from './watcher/path-router.js';
 import {
@@ -90,6 +91,7 @@ export class Vault {
 
   async initialize(): Promise<VaultStats> {
     await mkdir(dirname(this.config.dbPath), { recursive: true, mode: PRIVATE_DIR_MODE });
+    ensurePrivate(this.config.dbPath);
     this.searchEngine = await SearchEngine.create(
       this.config.dbPath,
       this.config.defaultSearchTier,
