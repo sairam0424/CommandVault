@@ -53,6 +53,16 @@ export class SearchEngine {
     return new SearchEngine(sqliteEngine, defaultTier);
   }
 
+  /**
+   * Whether the sqlite tier answers its next text query with fts5 on this connection; otherwise it
+   * answers with LIKE over the same columns and terms, where a term is a substring rather than a
+   * token prefix, ranked by its own rule (search-sql.ts). The fuse and minisearch tiers are not
+   * affected.
+   */
+  get supportsFullTextSearch(): boolean {
+    return this.sqliteEngine.supportsFullTextSearch;
+  }
+
   index(entries: readonly VaultEntry[]): void {
     this.pendingEntries = entries;
     this.cache.clear();

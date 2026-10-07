@@ -16,11 +16,22 @@ import {
   readEngineMeta,
   writeEngineMeta,
 } from './migrations.js';
+import { queryTerms } from './search-query.js';
 import { TagStore } from './tag-store.js';
 import { SnapshotStore } from './snapshot-store.js';
 import { StatsStore } from './stats-store.js';
 
 const FTS_TABLE = 'entries_fts';
+/**
+ * How SQLite words a full-text query against a table that cannot be used: the table or its module
+ * gone, a plain table wearing its name, or a shadow table dropped from under it (better-sqlite3
+ * refuses that; the sqlite3 shell, which is not defensive, does not). A dropped shadow table is
+ * named by the virtual table (`vtable constructor failed: entries_fts`) or by itself, with its
+ * schema (`no such table: main.entries_fts_content`). A shadow table of rows gone is reported as
+ * corruption instead, which isFtsLost tells apart from a damaged `entries`.
+ */
+const FTS_UNUSABLE =
+  /\b(?:no such (?:table|module|column)|vtable constructor failed): (?:main\.)?(?:entries_fts(?:_[a-z]+)?|fts5)\b/;
 const FTS_DEFINITION = `CREATE VIRTUAL TABLE ${FTS_TABLE} USING fts5(id UNINDEXED, name, description, content, tags)`;
 const FTS_SHADOW_SUFFIXES = ['data', 'idx', 'content', 'docsize', 'config'] as const;
 // `entries_fts_`: the prefix of the shadow tables, and of any that outlived their virtual table.
@@ -126,6 +137,11 @@ function isFtsLeftBehind(conn: DatabaseAdapter): boolean {
   return readEngineMeta(conn).get('fts_state') === 'unavailable';
 }
 
+/** Whether the last process to record the table's state could use it: index() writes to it only then. */
+function isFtsRecordedReady(conn: DatabaseAdapter): boolean {
+  return readEngineMeta(conn).get('fts_state') === 'ready';
+}
+
 /** Writes only when the record differs, so that an open which changes nothing writes nothing. */
 function recordFtsState(conn: DatabaseAdapter, state: FtsState, detail: string): void {
   if (isFtsStateRecorded(conn, state, detail)) return;
@@ -169,22 +185,23 @@ function isUnrepairable(conn: DatabaseAdapter, error: unknown): boolean {
 }
 
 /**
- * Makes sure the full-text table works, on every open. A database can lose it without losing its
- * recorded version (the maintainer's did: schema 1-4, no entries_fts, a plain entries_fts_content
- * left over), and migrations are not run again for a version that is recorded.
+ * Makes sure the full-text table works, on every open, and returns the state it recorded. A
+ * database can lose the table without losing its recorded version (the maintainer's did: schema
+ * 1-4, no entries_fts, a plain entries_fts_content left over), and migrations are not run again
+ * for a version that is recorded.
  *
  * Without the fts5 module, or with a table SQLite cannot repair, the state is recorded as
- * `unavailable` and nothing is thrown: full-text search only serves one search tier. A healthy
- * table left behind that way is filled again, once, by the next process that can use it.
+ * `unavailable` and nothing is thrown: the sqlite tier then searches with LIKE. A healthy table
+ * left behind that way is filled again, once, by the next process that can use it.
  */
-function ensureFts(conn: DatabaseAdapter): void {
+function ensureFts(conn: DatabaseAdapter): FtsState {
   if (!isFts5Available(conn)) {
     recordFtsState(conn, 'unavailable', 'the SQLite build has no fts5 module');
-    return;
+    return 'unavailable';
   }
   if (isFtsHealthy(conn) && !isFtsLeftBehind(conn)) {
     recordFtsState(conn, 'ready', '');
-    return;
+    return 'ready';
   }
   try {
     conn.transaction(
@@ -195,10 +212,22 @@ function ensureFts(conn: DatabaseAdapter): void {
       },
       { mode: 'immediate' },
     );
+    return 'ready';
   } catch (error) {
     if (!isUnrepairable(conn, error)) throw error;
     recordFtsState(conn, 'unavailable', `cannot repair ${FTS_TABLE}: ${errorMessage(error)}`);
+    return 'unavailable';
   }
+}
+
+/**
+ * Whether a full-text query failed because the table cannot be used (FTS_UNUSABLE, or damaged while
+ * `entries` reads fine), as opposed to a lock or an I/O failure, which would have hit any query, or
+ * any other failure, which says nothing about the table: those must reach the caller.
+ */
+function isFtsLost(conn: DatabaseAdapter, error: unknown): boolean {
+  if (FTS_UNUSABLE.test(errorMessage(error))) return true;
+  return classifyOpenError(error) === 'corrupt' && canReadEntries(conn);
 }
 
 export class SqliteEngine {
@@ -207,13 +236,29 @@ export class SqliteEngine {
   private readonly tagStore: TagStore;
   private readonly snapshotStore: SnapshotStore;
   private readonly statsStore: StatsStore;
+  private ftsUsable: boolean;
 
-  private constructor(conn: DatabaseAdapter) {
+  private constructor(conn: DatabaseAdapter, ftsState: FtsState) {
     this.conn = conn;
+    this.ftsUsable = ftsState === 'ready';
     this.entryStore = new EntryStore(conn);
     this.tagStore = new TagStore(conn);
     this.snapshotStore = new SnapshotStore(conn);
     this.statsStore = new StatsStore(conn);
+  }
+
+  /**
+   * Whether this connection answers text queries with fts5: the table was ready when it opened, no
+   * query has found it unusable since, and no other process has recorded it unavailable meanwhile
+   * (one without fts5 does so on every open, and index() then writes past the table, so its rows
+   * fall behind `entries`). The record is read here as index() reads it, per call. Otherwise text
+   * queries are answered with LIKE over the same columns and the same terms (search-sql.ts); the
+   * queries on which the two paths agree, and the few on which they differ, are pinned in
+   * search-parity.test.ts.
+   */
+  get supportsFullTextSearch(): boolean {
+    if (this.ftsUsable && !isFtsRecordedReady(this.conn)) this.ftsUsable = false;
+    return this.ftsUsable;
   }
 
   static async create(dbPath: string): Promise<SqliteEngine> {
@@ -222,6 +267,7 @@ export class SqliteEngine {
     const conn = await createDatabaseAdapter(dbPath, { walMode: false });
     // What a failure may say about the file depends on how far the open got; see FileState.
     let fileState: FileState = 'unmodified';
+    let ftsState: FtsState;
 
     try {
       migrateDatabase(conn, {
@@ -231,7 +277,7 @@ export class SqliteEngine {
         },
       });
       fileState = 'entries-untouched';
-      ensureFts(conn);
+      ftsState = ensureFts(conn);
     } catch (error) {
       // Release the file handle: on Windows an open handle blocks deleting or renaming vault.db.
       try {
@@ -244,15 +290,43 @@ export class SqliteEngine {
       throw toOpenError(error, dbPath, fileState);
     }
 
-    return new SqliteEngine(conn);
+    return new SqliteEngine(conn, ftsState);
   }
 
   index(entries: readonly VaultEntry[], changedIds?: ReadonlySet<string>): void {
     this.entryStore.index(entries, changedIds);
   }
 
+  /**
+   * A query with no term lists the filtered entries. One with terms is answered by fts5 while the
+   * table can be used, else by LIKE over the same columns with the same terms. A full-text query
+   * that fails because the table cannot be used (isFtsLost) is answered by LIKE as well, and the
+   * table is recorded unavailable, so that index() stops writing to it until an open rebuilds it.
+   * Any other failure, and a lock met while recording, is the caller's to see.
+   */
   search(options: SearchOptions): SearchResult[] {
-    return this.entryStore.search(options);
+    const terms = queryTerms(options.query);
+    if (terms.length === 0) return this.entryStore.list(options);
+    if (this.supportsFullTextSearch) {
+      try {
+        return this.entryStore.searchFullText(options, terms);
+      } catch (error) {
+        if (!isFtsLost(this.conn, error)) throw error;
+        this.loseFts(error);
+      }
+    }
+    return this.entryStore.searchLike(options, terms);
+  }
+
+  /**
+   * Records the table unavailable, then stops reading it, in that order: the record needs the write
+   * lock, and a lock that outlasts the wait reaches the caller with both unchanged, so what this
+   * connection reads and what index() reads (the record) never disagree; the next query meets the
+   * lost table again and records it.
+   */
+  private loseFts(error: unknown): void {
+    recordFtsState(this.conn, 'unavailable', `cannot query ${FTS_TABLE}: ${errorMessage(error)}`);
+    this.ftsUsable = false;
   }
 
   toggleFavorite(id: string): boolean {
