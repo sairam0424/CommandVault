@@ -17,10 +17,27 @@ export interface RegistrySearchResult {
   readonly pageSize: number;
 }
 
+/** One registry whose adapter threw during a search; `message` is the adapter's own error text. */
+export interface RegistryFailure {
+  readonly registry: string;
+  readonly message: string;
+}
+
+/** A search across every registry: the merged results plus every registry that failed. */
+export type RegistrySearchOutcome = RegistrySearchResult & {
+  readonly failures: readonly RegistryFailure[];
+};
+
 export interface RegistryConfig {
   readonly name: string;
   readonly url: string;
   readonly type: 'json' | 'api';
+}
+
+/** Settings shared by every adapter a manager creates. */
+export interface RegistryOptions {
+  /** Hosts whose private addresses the user accepts (config.json `allowPrivateHosts`). */
+  readonly allowPrivateHosts?: readonly string[];
 }
 
 export interface RegistryAdapter {

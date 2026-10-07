@@ -244,7 +244,13 @@ describe('hostile entry fields never reach the terminal', () => {
     };
     core.RegistryManager.mockImplementation(() => ({
       addRegistry: vi.fn(),
-      search: vi.fn(async () => ({ entries: [remote], total: 1, page: 1, pageSize: 10 })),
+      search: vi.fn(async () => ({
+        entries: [remote],
+        total: 1,
+        page: 1,
+        pageSize: 10,
+        failures: [],
+      })),
     }));
     await createRegistryCommand()
       .exitOverride()

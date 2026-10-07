@@ -1,9 +1,9 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { RegistryManager } from '@commandvault/core';
+import { assertRemoteUrl, RegistryManager, SafeFetchError } from '@commandvault/core';
 import { CommandError, EXIT_RUNTIME_ERROR, invalidChoiceError, usageError } from '../errors.js';
 import type { RegistryConfig } from '@commandvault/core';
-import { readConfigDocument, writeConfigDocument } from '../config.js';
+import { readConfigDocument, writeConfigDocument, type ConfigDocument } from '../config.js';
 import { toDisplay } from '../ui/safe-text.js';
 
 /** Every registry type the vault can read, in the order error messages list them. */
@@ -14,13 +14,32 @@ export type AssertAllRegistryTypesListed<
   Missing extends never = Exclude<RegistryConfig['type'], (typeof REGISTRY_TYPES)[number]>,
 > = Missing;
 
+/** A registry name is a file-safe label: it is printed, stored and used as a lookup key. */
+const REGISTRY_NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
 function isRegistryType(value: string): value is RegistryConfig['type'] {
   return (REGISTRY_TYPES as readonly string[]).includes(value);
 }
 
-async function loadRegistries(): Promise<readonly RegistryConfig[]> {
-  const { registries } = await readConfigDocument();
+function registriesOf(document: ConfigDocument): readonly RegistryConfig[] {
+  const { registries } = document;
   return Array.isArray(registries) ? (registries as RegistryConfig[]) : [];
+}
+
+/**
+ * The `allowPrivateHosts` key of config.json: hosts whose private or loopback addresses the user
+ * accepts for `sync`, `import <url>` and the registries. Anything that is not a string is
+ * ignored; the key's shape is not yet validated on write (config.ts owns `DOCUMENT_SHAPES`).
+ */
+export function allowPrivateHostsOf(document: ConfigDocument): readonly string[] {
+  const { allowPrivateHosts } = document;
+  return Array.isArray(allowPrivateHosts)
+    ? allowPrivateHosts.filter((host): host is string => typeof host === 'string')
+    : [];
+}
+
+async function loadRegistries(): Promise<readonly RegistryConfig[]> {
+  return registriesOf(await readConfigDocument());
 }
 
 /** Rewrites only the `registries` key; refuses (and leaves the file alone) if config.json is unreadable. */
@@ -29,32 +48,50 @@ async function saveRegistries(registries: readonly RegistryConfig[]): Promise<vo
   await writeConfigDocument({ ...existing, registries });
 }
 
-function buildManager(configs: readonly RegistryConfig[]): RegistryManager {
-  const manager = new RegistryManager();
+function buildManager(
+  configs: readonly RegistryConfig[],
+  allowPrivateHosts: readonly string[],
+): RegistryManager {
+  const manager = new RegistryManager({ allowPrivateHosts });
   for (const config of configs) {
     manager.addRegistry(config);
   }
   return manager;
 }
 
-export function createRegistryCommand(): Command {
-  const cmd = new Command('registry').description('Manage remote skill registries');
+/** Usage error unless `url` is an HTTPS URL the fetcher would accept; nothing is written first. */
+function assertRegistryUrl(url: string, allowPrivateHosts: readonly string[]): void {
+  try {
+    new URL(url);
+  } catch {
+    throw usageError(`invalid URL "${url}"`);
+  }
+  try {
+    assertRemoteUrl(url, { allowPrivateHosts });
+  } catch (err) {
+    if (err instanceof SafeFetchError) {
+      throw usageError(err.message);
+    }
+    throw err;
+  }
+}
 
+function addRegistryCommand(cmd: Command): void {
   cmd
     .command('add <name> <url>')
     .option('--type <type>', 'Registry type (json|api)', 'json')
     .description('Add a remote registry')
     .action(async (name: string, url: string, opts: { type: string }) => {
+      if (!REGISTRY_NAME.test(name)) {
+        throw usageError(`invalid registry name "${name}" (expected ${REGISTRY_NAME.source})`);
+      }
       if (!isRegistryType(opts.type)) {
         throw invalidChoiceError('--type', opts.type, REGISTRY_TYPES);
       }
       const type = opts.type;
-      try {
-        new URL(url);
-      } catch {
-        throw usageError(`invalid URL "${url}"`);
-      }
-      const registries = [...(await loadRegistries())];
+      const document = await readConfigDocument();
+      assertRegistryUrl(url, allowPrivateHostsOf(document));
+      const registries = [...registriesOf(document)];
       if (registries.some((r) => r.name === name)) {
         throw new CommandError(
           `registry "${name}" already exists`,
@@ -67,6 +104,62 @@ export function createRegistryCommand(): Command {
       await saveRegistries(registries);
       console.log(chalk.green(`Added registry "${name}" (${type}) → ${url}`));
     });
+}
+
+function searchRegistriesCommand(cmd: Command): void {
+  cmd
+    .command('search <query>')
+    .description('Search across all registries')
+    .option('--limit <n>', 'Max results', '10')
+    .action(async (query: string, opts: { limit: string }) => {
+      const document = await readConfigDocument();
+      const registries = registriesOf(document);
+      if (registries.length === 0) {
+        console.log(
+          chalk.dim('No registries configured. Use `vault registry add <name> <url>` to add one.'),
+        );
+        return;
+      }
+      const manager = buildManager(registries, allowPrivateHostsOf(document));
+      const limit = parseInt(opts.limit, 10) || 10;
+      const result = await manager.search(query, { limit });
+
+      // A registry that failed is reported, never folded into "no results". The name comes from
+      // config.json and the message may carry a Node error code: both are printed as safe text.
+      const failures = result.failures.map(toDisplay);
+      for (const failure of failures) {
+        console.error(chalk.yellow(`  ⚠ registry "${failure.registry}": ${failure.message}`));
+      }
+      const configured = new Set(registries.map((r) => r.name)).size;
+      if (failures.length >= configured) {
+        const [only] = failures;
+        throw new CommandError(
+          failures.length === 1 && only
+            ? `registry "${only.registry}": ${only.message}`
+            : `all ${failures.length} registries failed`,
+        );
+      }
+
+      if (result.entries.length === 0) {
+        console.log(chalk.dim(`No results for "${query}"`));
+        return;
+      }
+      console.log(chalk.bold(`Found ${result.total} result(s) for "${query}":\n`));
+      // Remote records: every field is an open string, so the whole record is shown as a view.
+      for (const view of result.entries.map(toDisplay)) {
+        const tags = view.tags?.length ? chalk.dim(` [${view.tags.join(', ')}]`) : '';
+        console.log(`  ${chalk.cyan(view.name)} ${chalk.dim(`(${view.type})`)}${tags}`);
+        console.log(`    ${view.description}`);
+        console.log(`    ${chalk.dim(`from: ${view.source}`)}`);
+        console.log('');
+      }
+    });
+}
+
+export function createRegistryCommand(): Command {
+  const cmd = new Command('registry').description('Manage remote skill registries');
+
+  addRegistryCommand(cmd);
 
   cmd
     .command('remove <name>')
@@ -98,36 +191,7 @@ export function createRegistryCommand(): Command {
       }
     });
 
-  cmd
-    .command('search <query>')
-    .description('Search across all registries')
-    .option('--limit <n>', 'Max results', '10')
-    .action(async (query: string, opts: { limit: string }) => {
-      const registries = await loadRegistries();
-      if (registries.length === 0) {
-        console.log(
-          chalk.dim('No registries configured. Use `vault registry add <name> <url>` to add one.'),
-        );
-        return;
-      }
-      const manager = buildManager(registries);
-      const limit = parseInt(opts.limit, 10) || 10;
-      const result = await manager.search(query, { limit });
-
-      if (result.entries.length === 0) {
-        console.log(chalk.dim(`No results for "${query}"`));
-        return;
-      }
-      console.log(chalk.bold(`Found ${result.total} result(s) for "${query}":\n`));
-      // Remote records: every field is an open string, so the whole record is shown as a view.
-      for (const view of result.entries.map(toDisplay)) {
-        const tags = view.tags?.length ? chalk.dim(` [${view.tags.join(', ')}]`) : '';
-        console.log(`  ${chalk.cyan(view.name)} ${chalk.dim(`(${view.type})`)}${tags}`);
-        console.log(`    ${view.description}`);
-        console.log(`    ${chalk.dim(`from: ${view.source}`)}`);
-        console.log('');
-      }
-    });
+  searchRegistriesCommand(cmd);
 
   return cmd;
 }

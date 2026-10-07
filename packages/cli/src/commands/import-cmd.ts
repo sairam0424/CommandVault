@@ -13,6 +13,8 @@ import {
 import { createSpinner } from '../ui/spinner.js';
 import { CommandError } from '../errors.js';
 import { safeText, toDisplay } from '../ui/safe-text.js';
+import { readConfigDocument } from '../config.js';
+import { allowPrivateHostsOf } from './registry.js';
 
 export function createImportCommand(): Command {
   const cmd = new Command('import')
@@ -22,10 +24,15 @@ export function createImportCommand(): Command {
     .action(async (source: string, opts: { dryRun?: boolean }, command) => {
       const globalOpts = command.optsWithGlobals() as CliGlobalOptions;
 
+      const isUrl = source.startsWith('http://') || source.startsWith('https://');
+      // The allow-list `vault sync` and the registries use; the refusal message names this key.
+      // A file import never reads config.json, so a damaged one does not stop it.
+      const allowPrivateHosts = isUrl ? allowPrivateHostsOf(await readConfigDocument()) : [];
       const spinner = globalOpts.json ? null : createSpinner('Importing entries...').start();
 
-      const isUrl = source.startsWith('http://') || source.startsWith('https://');
-      const result = isUrl ? await importFromUrl(source) : await importFromFile(source);
+      const result = isUrl
+        ? await importFromUrl(source, { allowPrivateHosts })
+        : await importFromFile(source);
 
       if (result.entries.length === 0) {
         spinner?.stop();
