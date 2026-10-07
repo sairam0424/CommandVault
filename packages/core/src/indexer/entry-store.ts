@@ -1,6 +1,7 @@
 import type { VaultEntry, SearchResult, SearchOptions } from '../types/index.js';
 import type { DatabaseAdapter } from './database-adapter.js';
 import { readEngineMeta } from './migrations.js';
+import { ftsSearchSql, likeSearchSql, listSql, type SqlStatement } from './search-sql.js';
 
 interface EntryRow {
   id: string;
@@ -17,7 +18,8 @@ interface EntryRow {
   usage_count: number;
 }
 
-const sanitizeFtsToken = (w: string): string => w.replace(/["*+\-()^{}[\]:]/g, '').trim();
+/** What a result of a text query reports as matched; neither path says which column it was. */
+const TEXT_FIELDS: readonly string[] = ['name', 'description', 'content'];
 
 /** The columns a scan owns. `favorite` and `usage_count` are the user's: never written back. */
 const SCANNED_COLUMNS = [
@@ -281,160 +283,35 @@ export class EntryStore {
     }
   }
 
-  search(options: SearchOptions): SearchResult[] {
-    const queryText = options.query.trim();
-    const hasTextQuery = queryText.length > 0;
-
-    // Attempt FTS5 search when a text query is present
-    if (hasTextQuery) {
-      try {
-        return this.searchFts(options, queryText);
-      } catch {
-        // FTS5 MATCH failed (malformed query or table missing) — fall back to LIKE
-      }
-    }
-
-    return this.searchLike(options);
+  /** Every entry the filters keep, most used first; for a query with no term to search for. */
+  list(options: SearchOptions): SearchResult[] {
+    return this.selectResults(listSql(options), []);
   }
 
-  /** FTS5-based search using MATCH for full-text relevance ranking. */
-  private searchFts(options: SearchOptions, queryText: string): SearchResult[] {
-    const conditions: string[] = [];
-    const params: Record<string, unknown> = {};
-
-    // Build FTS5 match expression: sanitize each word and join with AND
-    const sanitized = queryText.split(/\s+/).map(sanitizeFtsToken).filter(Boolean);
-    if (sanitized.length === 0) {
-      return this.searchLike(options);
-    }
-    // Use prefix matching with * for better partial-word matches
-    const ftsQuery = sanitized.map((w) => `"${w}"*`).join(' AND ');
-    params.$ftsQuery = ftsQuery;
-
-    // Apply non-text filters on the entries table
-    if (options.type) {
-      conditions.push('e.type = $type');
-      params.$type = options.type;
-    }
-    if (options.source) {
-      conditions.push('e.source = $source');
-      params.$source = options.source;
-    }
-    if (options.favoritesOnly) {
-      conditions.push('e.favorite = 1');
-    }
-    if (options.tags && options.tags.length > 0) {
-      for (let i = 0; i < options.tags.length; i++) {
-        const paramName = `$tag${i}`;
-        conditions.push(
-          `(EXISTS (SELECT 1 FROM entry_tags WHERE entry_id = e.id AND tag = ${paramName}) OR EXISTS (SELECT 1 FROM user_tags WHERE entry_id = e.id AND tag = ${paramName}))`,
-        );
-        params[paramName] = options.tags[i];
-      }
-    }
-    if (options.modifiedAfter) {
-      conditions.push('e.last_modified >= $modifiedAfter');
-      params.$modifiedAfter = options.modifiedAfter.toISOString();
-    }
-    if (options.modifiedBefore) {
-      conditions.push('e.last_modified <= $modifiedBefore');
-      params.$modifiedBefore = options.modifiedBefore.toISOString();
-    }
-
-    const filterClause = conditions.length > 0 ? `AND ${conditions.join(' AND ')}` : '';
-    const limit = options.limit ?? 50;
-    params.$limit = limit;
-
-    const offsetClause = options.offset ? 'OFFSET $offset' : '';
-    if (options.offset) {
-      params.$offset = options.offset;
-    }
-
-    const sql = `
-      SELECT e.* FROM entries e
-      JOIN entries_fts f ON e.id = f.id
-      WHERE entries_fts MATCH $ftsQuery ${filterClause}
-      ORDER BY f.rank, e.usage_count DESC, e.name ASC
-      LIMIT $limit ${offsetClause}
-    `;
-
-    const rows = this.conn.queryAll<EntryRow>(sql, params);
-    const { entryTagMap, userTagMap } = this.getTagMaps();
-
-    return rows.map((row, idx) => ({
-      entry: rowToEntry(row, entryTagMap, userTagMap),
-      score: 1 - idx / Math.max(rows.length, 1),
-      matchedFields: ['name', 'description', 'content'],
-    }));
+  /**
+   * The full-text search, ranked by fts5. Throws when the table or the module is not there; the
+   * engine decides when to run it and what to do then. `terms` must not be empty.
+   */
+  searchFullText(options: SearchOptions, terms: readonly string[]): SearchResult[] {
+    return this.selectResults(ftsSearchSql(options, terms), TEXT_FIELDS);
   }
 
-  /** Fallback LIKE-based search for when FTS5 is unavailable or query is malformed. */
-  private searchLike(options: SearchOptions): SearchResult[] {
-    const conditions: string[] = [];
-    const params: Record<string, unknown> = {};
+  /**
+   * The LIKE search over the same columns, for a build without fts5 or a table that is gone;
+   * see likeSearchSql for how it ranks. `terms` must not be empty.
+   */
+  searchLike(options: SearchOptions, terms: readonly string[]): SearchResult[] {
+    return this.selectResults(likeSearchSql(options, terms), TEXT_FIELDS);
+  }
 
-    const hasTextQuery = (() => {
-      if (!options.query.trim()) return false;
-      const sanitized = options.query.split(/\s+/).map(sanitizeFtsToken).filter(Boolean);
-      if (sanitized.length === 0) return false;
-      for (let i = 0; i < sanitized.length; i++) {
-        const param = `$q${i}`;
-        params[param] = `%${sanitized[i]}%`;
-        conditions.push(
-          `(name LIKE ${param} OR description LIKE ${param} OR content LIKE ${param} OR tags LIKE ${param})`,
-        );
-      }
-      return true;
-    })();
-
-    if (options.type) {
-      conditions.push('type = $type');
-      params.$type = options.type;
-    }
-    if (options.source) {
-      conditions.push('source = $source');
-      params.$source = options.source;
-    }
-    if (options.favoritesOnly) {
-      conditions.push('favorite = 1');
-    }
-    if (options.tags && options.tags.length > 0) {
-      for (let i = 0; i < options.tags.length; i++) {
-        const paramName = `$tag${i}`;
-        conditions.push(
-          `(EXISTS (SELECT 1 FROM entry_tags WHERE entry_id = entries.id AND tag = ${paramName}) OR EXISTS (SELECT 1 FROM user_tags WHERE entry_id = entries.id AND tag = ${paramName}))`,
-        );
-        params[paramName] = options.tags[i];
-      }
-    }
-    if (options.modifiedAfter) {
-      conditions.push(`last_modified >= $modifiedAfter`);
-      params.$modifiedAfter = options.modifiedAfter.toISOString();
-    }
-    if (options.modifiedBefore) {
-      conditions.push(`last_modified <= $modifiedBefore`);
-      params.$modifiedBefore = options.modifiedBefore.toISOString();
-    }
-
-    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    const limit = options.limit ?? 50;
-    params.$limit = limit;
-
-    const orderBy = 'ORDER BY usage_count DESC, name ASC';
-    const offsetClause = options.offset ? `OFFSET $offset` : '';
-    if (options.offset) {
-      params.$offset = options.offset;
-    }
-
-    const sql = `SELECT * FROM entries ${where} ${orderBy} LIMIT $limit ${offsetClause}`;
-    const rows = this.conn.queryAll<EntryRow>(sql, params);
-
+  /** The rows `statement` selects, in its order, each scored by its place in the list. */
+  private selectResults(statement: SqlStatement, matchedFields: readonly string[]): SearchResult[] {
+    const rows = this.conn.queryAll<EntryRow>(statement.sql, statement.params);
     const { entryTagMap, userTagMap } = this.getTagMaps();
-
-    return rows.map((row, idx) => ({
+    return rows.map((row, index) => ({
       entry: rowToEntry(row, entryTagMap, userTagMap),
-      score: 1 - idx / Math.max(rows.length, 1),
-      matchedFields: hasTextQuery ? ['name', 'description', 'content'] : [],
+      score: 1 - index / Math.max(rows.length, 1),
+      matchedFields,
     }));
   }
 
