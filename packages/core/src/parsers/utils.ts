@@ -3,13 +3,19 @@ import { stat, realpath } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { EntrySource, ParsedFrontmatter } from '../types/index.js';
 import {
-  parseStrict,
-  recoverFrontmatter,
+  parseGuarded,
   type FrontmatterRecovery,
   type ParsedFrontmatterResult,
 } from './frontmatter-recovery.js';
+import { sanitizeFrontmatter } from './sanitize-frontmatter.js';
 
 export type { FrontmatterRecovery, ParsedFrontmatterResult };
+
+/** A parse result plus how many frontmatter values the bounded copy had to leave out. */
+export interface ParsedFrontmatterOutcome extends ParsedFrontmatterResult {
+  /** Present, and above zero, only when the frontmatter was cut down; see sanitizeFrontmatter. */
+  readonly dropped?: number;
+}
 
 export function generateId(identifier: string): string {
   return createHash('sha256').update(identifier).digest('hex').slice(0, 12);
@@ -20,14 +26,15 @@ export function generateStableId(type: string, name: string, disambiguator = '')
   return generateId(key);
 }
 
-export function parseFrontmatter(raw: string): ParsedFrontmatterResult {
-  try {
-    return parseStrict(raw);
-  } catch (strictError) {
-    const recovered = recoverFrontmatter(raw);
-    if (!recovered) throw strictError;
-    return { ...recovered, recoveryCause: strictError };
-  }
+/**
+ * Frontmatter and body of a markdown file. A block the guard refuses (oversize, a second alias)
+ * never reaches the data stage, on the strict path or the recovery path, and is read line by line
+ * instead. Whatever path parsed it, the data every consumer sees is a bounded plain copy.
+ */
+export function parseFrontmatter(raw: string): ParsedFrontmatterOutcome {
+  const parsed = parseGuarded(raw);
+  const { data, dropped } = sanitizeFrontmatter(parsed.data, raw.length);
+  return dropped > 0 ? { ...parsed, data, dropped } : { ...parsed, data };
 }
 
 export async function getLastModified(filePath: string): Promise<Date> {

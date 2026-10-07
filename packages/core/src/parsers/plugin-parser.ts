@@ -1,7 +1,7 @@
 import { join, resolve, normalize } from 'node:path';
 import type { VaultEntry, ParserResult, ParseError } from '../types/index.js';
-import { generateStableId, inferSource, extractTags } from './utils.js';
-import { FileTooLargeError, readBoundedText, skippedTooLarge } from './bounded-read.js';
+import { generateStableId, inferSource, extractTags, isInsideRoot } from './utils.js';
+import { SkippedFileError, readBoundedText, skippedFile } from './bounded-read.js';
 import {
   findCachedInstallDirs,
   isMissingDirectory,
@@ -52,7 +52,7 @@ async function tryReadJson<T>(filePath: string, warnings: ParseError[]): Promise
     const raw = await readBoundedText(filePath);
     return JSON.parse(raw) as T;
   } catch (err) {
-    if (err instanceof FileTooLargeError) warnings.push(skippedTooLarge(err, 'plugin manifest'));
+    if (err instanceof SkippedFileError) warnings.push(skippedFile(err, 'plugin manifest'));
     return null;
   }
 }
@@ -232,8 +232,8 @@ export async function parsePlugins(pluginsDir: string): Promise<ParserResult> {
   try {
     registry = JSON.parse(await readBoundedText(registryPath));
   } catch (err) {
-    if (err instanceof FileTooLargeError) {
-      return { entries: [], errors: [skippedTooLarge(err, 'plugin registry')] };
+    if (err instanceof SkippedFileError) {
+      return { entries: [], errors: [skippedFile(err, 'plugin registry')] };
     }
     return {
       entries: [],
@@ -262,10 +262,11 @@ export async function parsePlugins(pluginsDir: string): Promise<ParserResult> {
       const install = firstInstallation(key, installations);
       installPath = install.installPath;
 
-      // Path containment: block installPaths that escape the plugins directory
+      // Path containment: block installPaths that escape the plugins directory. Judged by the
+      // relative path, so a sibling such as `plugins-evil` does not pass as a prefix match.
       const normalizedInstall = normalize(resolve(install.installPath));
       const normalizedPlugins = normalize(resolve(pluginsDir));
-      if (!normalizedInstall.startsWith(normalizedPlugins)) {
+      if (!isInsideRoot(normalizedPlugins, normalizedInstall)) {
         errors.push({
           filePath: install.installPath,
           message: `Blocked: installPath "${install.installPath}" is outside plugins directory`,

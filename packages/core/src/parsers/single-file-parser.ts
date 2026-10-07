@@ -9,6 +9,7 @@ import {
 } from './utils.js';
 import { withRetry } from './retry.js';
 import { readBoundedText } from './bounded-read.js';
+import { followFileLinks, withLinkFields } from './link-policy.js';
 import { deriveDescription, descriptionMetadata } from './body-description.js';
 import { deriveRuleDescription } from './rule-parser.js';
 
@@ -18,6 +19,11 @@ export function isSingleFileParseable(parserType: EntryType): boolean {
   return MARKDOWN_PARSEABLE_TYPES.has(parserType);
 }
 
+/**
+ * The watcher's re-parse of one changed file. Null means the file yields no entry (unparseable,
+ * skipped as oversized or not a regular file, or a link that cannot be followed): this path has no
+ * warning channel, so the reason is not reported here.
+ */
 export async function parseSingleFile(
   filePath: string,
   parserType: EntryType,
@@ -27,24 +33,35 @@ export async function parseSingleFile(
   }
 
   try {
-    const raw = await withRetry(() => readBoundedText(filePath));
-    const lastModified = await getLastModified(filePath);
+    const link = await followFileLinks(filePath);
+    const raw = await withRetry(() => readBoundedText(link.readPath));
+    const lastModified = await getLastModified(link.readPath);
     const { data, content } = parseFrontmatter(raw);
-
-    switch (parserType) {
-      case 'skill':
-        return parseSkillFile(filePath, data, content, lastModified);
-      case 'agent':
-        return parseAgentFile(filePath, data, content, lastModified);
-      case 'rule':
-        return parseRuleFile(filePath, data, content, lastModified);
-      case 'command':
-        return parseCommandFile(filePath, data, content, lastModified);
-      default:
-        return null;
-    }
+    const entry = buildEntry(parserType, filePath, data, content, lastModified);
+    return entry === null ? null : withLinkFields(entry, link);
   } catch {
     return null;
+  }
+}
+
+function buildEntry(
+  parserType: EntryType,
+  filePath: string,
+  data: Record<string, unknown>,
+  content: string,
+  lastModified: Date,
+): VaultEntry | null {
+  switch (parserType) {
+    case 'skill':
+      return parseSkillFile(filePath, data, content, lastModified);
+    case 'agent':
+      return parseAgentFile(filePath, data, content, lastModified);
+    case 'rule':
+      return parseRuleFile(filePath, data, content, lastModified);
+    case 'command':
+      return parseCommandFile(filePath, data, content, lastModified);
+    default:
+      return null;
   }
 }
 
