@@ -22,6 +22,7 @@ import {
   previewTextRows,
 } from './previewExcerpt.js';
 import { CLEAR_SCREEN } from './terminal.js';
+import { singleLine } from './text.js';
 
 const MIN_PREVIEW_WIDTH = 80;
 const MIN_USABLE_WIDTH = 60;
@@ -79,7 +80,7 @@ export function App({ vault }: Props) {
   } = useStoredEntries(vault, results, scrollTop, visibleCount);
   const selectedEntry: VaultEntry | null = shown[selectedIndex]?.entry ?? null;
   const selectedInitialTop = selectedEntry
-    ? previewInitialTop(previewMatchLine(selectedEntry.content, query), previewRows)
+    ? previewInitialTop(previewMatchLine(selectedEntry.content, query), previewRows) // safe-text: a line index
     : 0;
 
   const {
@@ -102,10 +103,11 @@ export function App({ vault }: Props) {
   const previewTarget = () => {
     const entry = entryAtSelection();
     if (!entry) return { id: null, lineCount: 0 };
+    // safe-text: a line index and a count; the content is drawn through previewContent
     const matchLine = previewMatchLine(entry.content, editor.getValue());
     return {
       id: entry.id,
-      lineCount: previewLineCount(entry.content),
+      lineCount: previewLineCount(entry.content), // safe-text: a count
       initialTop: previewInitialTop(matchLine, previewRows),
     };
   };
@@ -155,7 +157,7 @@ export function App({ vault }: Props) {
 
     // Enter: copy slash command to clipboard
     if (key.return) {
-      const slashCmd = vault.getSlashCommand(entry);
+      const slashCmd = vault.getSlashCommand(entry); // safe-text: clipboard payload; the status line is drawn through ActionBar singleLine
       import('clipboardy')
         .then((mod) => {
           const clipboard = mod.default ?? mod;
@@ -175,7 +177,7 @@ export function App({ vault }: Props) {
     // Ctrl+O: open the file in the user's editor, which takes over the terminal until it closes
     if (key.ctrl && input === 'o') {
       try {
-        openInEditor(entry.filePath);
+        openInEditor(entry.filePath); // safe-text: handed to the editor, not printed
       } catch (err) {
         setErrorMessage(err instanceof Error ? err.message : String(err));
       } finally {
@@ -189,8 +191,9 @@ export function App({ vault }: Props) {
     if (key.ctrl && input === 'f') {
       const isFav = vault.toggleFavorite(entry.id);
       refreshStored();
+      const name = singleLine(entry.name);
       setErrorMessage(
-        isFav ? `★ Added to favorites: ${entry.name}` : `☆ Removed from favorites: ${entry.name}`,
+        isFav ? `★ Added to favorites: ${name}` : `☆ Removed from favorites: ${name}`,
       );
       return true;
     }

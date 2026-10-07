@@ -1,3 +1,5 @@
+// First: switches chalk off under NO_COLOR before any module prints.
+import './ui/color.js';
 import { resolve } from 'node:path';
 import chalk from 'chalk';
 import {
@@ -12,6 +14,7 @@ import {
 } from '@commandvault/core';
 import { loadConfig, type CliConfig } from './config.js';
 import { createSpinner } from './ui/spinner.js';
+import { safeText } from './ui/safe-text.js';
 
 export interface CliGlobalOptions {
   readonly claudePath?: string;
@@ -64,8 +67,22 @@ export async function withVault<T>(
   }
 }
 
-export function jsonOutput(data: unknown): void {
-  console.log(JSON.stringify(data, null, 2));
+const JSON_INDENT = 2;
+/** `indent` for `--json` output that was always printed on one line. */
+export const COMPACT_JSON = 0;
+// JSON.stringify escapes C0 controls but writes C1 (U+0080-U+009F), U+2028/U+2029 and the bidi
+// controls (U+202A-U+202E, U+2066-U+2069) verbatim; a terminal acts on a C1 introducer and reorders
+// text on a bidi override. Escaping them is lossless: JSON.parse gives the same strings back.
+const JSON_UNSAFE = /[\u0080-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
+
+function escapeJsonUnsafe(text: string): string {
+  return text.replace(JSON_UNSAFE, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`);
+}
+
+/** The one JSON printer: every `--json` path goes through it, so no control code is printed. */
+export function jsonOutput(data: object, indent: number = JSON_INDENT): void {
+  // safe-text: the JSON printer itself; the text is escaped on the way out
+  console.log(escapeJsonUnsafe(JSON.stringify(data, null, indent)));
 }
 
 export async function createVaultInstance(
@@ -103,8 +120,8 @@ export function printParseProblems(problems: readonly ParseError[]): void {
   const errors = problems.filter((problem) => getParseSeverity(problem) === 'error');
   const warnings = problems.filter((problem) => getParseSeverity(problem) === 'warning');
   const lines = [
-    ...errors.map((problem) => chalk.red(`  ✗ ${problem.message}`)),
-    ...warnings.map((problem) => chalk.yellow(`  ⚠ ${problem.message}`)),
+    ...errors.map((problem) => chalk.red(`  ✗ ${safeText(problem.message)}`)),
+    ...warnings.map((problem) => chalk.yellow(`  ⚠ ${safeText(problem.message)}`)),
   ];
   for (const line of lines.slice(0, MAX_PROBLEMS_LISTED)) {
     console.error(line);

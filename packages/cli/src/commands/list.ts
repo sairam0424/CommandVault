@@ -2,8 +2,16 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import Table from 'cli-table3';
 import type { VaultEntry, EntryType } from '@commandvault/core';
-import { withVault, typeEmoji, typeColor, truncate, type CliGlobalOptions } from '../helpers.js';
+import {
+  withVault,
+  typeEmoji,
+  typeColor,
+  truncate,
+  jsonOutput,
+  type CliGlobalOptions,
+} from '../helpers.js';
 import { invalidChoiceError } from '../errors.js';
+import { safeText } from '../ui/safe-text.js';
 
 const VALID_TYPES = ['skill', 'agent', 'command', 'plugin', 'rule', 'hook'] as const;
 const TYPE_ORDER: readonly EntryType[] = VALID_TYPES;
@@ -19,7 +27,9 @@ const TYPE_LABELS: Readonly<Record<EntryType, string>> = {
 
 function buildTable(): InstanceType<typeof Table> {
   return new Table({
-    style: { compact: true, 'padding-left': 1, 'padding-right': 1 },
+    // No head/border colours: cli-table3 paints its defaults through @colors/colors, which looks
+    // at neither isTTY nor NO_COLOR. The head cells carry their own chalk grey, which does.
+    style: { compact: true, 'padding-left': 1, 'padding-right': 1, head: [], border: [] },
     head: [chalk.gray('Type'), chalk.gray('Name'), chalk.gray('Source'), chalk.gray('Description')],
   });
 }
@@ -33,9 +43,9 @@ function entryToRow(entry: VaultEntry): string[] {
   const colorFn = typeColor(entry.type);
   return [
     formatTypeCell(entry.type),
-    colorFn(entry.name),
-    chalk.dim(entry.source),
-    truncate(entry.description || chalk.dim('(no description)'), 50),
+    colorFn(safeText(entry.name)),
+    chalk.dim(safeText(entry.source)),
+    truncate(safeText(entry.description) || chalk.dim('(no description)'), 50),
   ];
 }
 
@@ -67,6 +77,7 @@ export function createListCommand(): Command {
 
         if (opts.tag) {
           const tag = opts.tag.toLowerCase();
+          // safe-text: a membership test, nothing here is printed
           entries = entries.filter((e) => e.tags.some((t) => t.toLowerCase() === tag));
         }
 
@@ -75,7 +86,7 @@ export function createListCommand(): Command {
         }
 
         if (globalOpts.json) {
-          console.log(JSON.stringify({ entries }, null, 2));
+          jsonOutput({ entries });
           return;
         }
 

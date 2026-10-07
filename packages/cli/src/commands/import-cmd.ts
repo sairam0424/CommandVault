@@ -12,6 +12,7 @@ import {
 } from '../helpers.js';
 import { createSpinner } from '../ui/spinner.js';
 import { CommandError } from '../errors.js';
+import { safeText, toDisplay } from '../ui/safe-text.js';
 
 export function createImportCommand(): Command {
   const cmd = new Command('import')
@@ -29,7 +30,7 @@ export function createImportCommand(): Command {
       if (result.entries.length === 0) {
         spinner?.stop();
         const headline = headlineProblem(result.errors);
-        const reason = headline ? ` (${headline.message})` : '';
+        const reason = headline ? ` (${safeText(headline.message)})` : '';
         throw new CommandError(`no valid entries found in source${reason}`);
       }
 
@@ -37,6 +38,8 @@ export function createImportCommand(): Command {
       printParseProblems(result.errors);
 
       const table = new Table({
+        // No head/border colours: @colors/colors ignores isTTY and NO_COLOR (see list.ts).
+        style: { head: [], border: [] },
         head: [
           chalk.gray('Type'),
           chalk.gray('Name'),
@@ -47,13 +50,14 @@ export function createImportCommand(): Command {
         wordWrap: true,
       });
 
-      for (const entry of result.entries) {
-        const colorFn = typeColor(entry.type);
+      // Bundle records: every field, the type and source included, is an open string at runtime.
+      for (const view of result.entries.map(toDisplay)) {
+        const colorFn = typeColor(view.type);
         table.push([
-          typeEmoji(entry.type),
-          colorFn(entry.name),
-          entry.source,
-          entry.description.slice(0, 47) + (entry.description.length > 47 ? '...' : ''),
+          typeEmoji(view.type),
+          colorFn(view.name),
+          view.source,
+          view.description.slice(0, 47) + (view.description.length > 47 ? '...' : ''),
         ]);
       }
 

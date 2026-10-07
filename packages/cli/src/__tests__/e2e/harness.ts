@@ -66,8 +66,11 @@ export interface Sandbox {
   readonly editorLog: string;
   /** The script that writes `editorLog`; point EDITOR or VISUAL at it, with arguments if wanted. */
   readonly editorStub: string;
-  /** `env` adds to (and overrides) the sandbox environment for this one run. */
-  run(args: readonly string[], env?: Readonly<Record<string, string>>): RunResult;
+  /**
+   * `env` adds to (and overrides) the sandbox environment for this one run; an `undefined` value
+   * removes that key (the sandbox sets CI and NO_COLOR, so a colour test has to take them away).
+   */
+  run(args: readonly string[], env?: Readonly<Record<string, string | undefined>>): RunResult;
   /**
    * Starts a long-running command and sends `signal` (SIGTERM by default) as soon as `marker`
    * shows up on stdout.
@@ -153,18 +156,28 @@ function sandboxEnv(
   return env;
 }
 
+/** `env` with `overrides` applied: a defined value replaces the key, `undefined` removes it. */
+function withOverrides(
+  env: NodeJS.ProcessEnv,
+  overrides: Readonly<Record<string, string | undefined>>,
+): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries({ ...env, ...overrides }).filter(([, value]) => value !== undefined),
+  );
+}
+
 function runToCompletion(
   args: readonly string[],
   cwd: string,
   env: NodeJS.ProcessEnv,
-  extraEnv: NodeJS.ProcessEnv = {},
+  extraEnv: Readonly<Record<string, string | undefined>> = {},
 ): RunResult {
   const result = spawnSync(process.execPath, [CLI, ...args], {
     cwd,
     input: '',
     encoding: 'utf8',
     timeout: 30_000,
-    env: { ...env, ...extraEnv },
+    env: withOverrides(env, extraEnv),
   });
   return {
     args,
