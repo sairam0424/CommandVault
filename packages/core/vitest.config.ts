@@ -11,6 +11,11 @@ export default defineConfig({
     // still catches a hang while a slow but correct open passes. Speed assertions keep their own
     // explicit budgets; this is only the hang detector.
     testTimeout: 30_000,
+    // Hooks do database work too: legacy-db-upgrade's beforeEach builds a 0.1.0-shaped fixture with
+    // better-sqlite3 directly, other suites open or migrate one. vitest budgets hooks separately,
+    // and the 10 s default expired on the Windows runner (develop push runs 37584602434, 37585716433,
+    // 37585910995) right after the test budget was raised, while the same trees passed as PRs.
+    hookTimeout: 30_000,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json-summary', 'json'],
