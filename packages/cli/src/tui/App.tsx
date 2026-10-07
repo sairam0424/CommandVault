@@ -15,6 +15,7 @@ import { usePreviewScroll } from './hooks/usePreviewScroll.js';
 import { useKeyEvents, STOP_KEYS } from './hooks/useKeyEvents.js';
 import { useQueryEditor } from './hooks/useQueryEditor.js';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
+import { NO_KEY, isEntryActionKey } from './keys.js';
 import {
   previewInitialTop,
   previewLineCount,
@@ -147,30 +148,64 @@ export function App({ vault }: Props) {
     return false;
   };
 
+  const reasonOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+  // After a successful copy: the status line, whether or not the vault could record the use.
+  const noteUsage = (entry: VaultEntry, slashCmd: string): string => {
+    try {
+      vault.recordUsage(entry.id);
+      refreshStored();
+      return `Copied: ${slashCmd}`;
+    } catch (err) {
+      return `Copied: ${slashCmd} (usage not saved: ${reasonOf(err)})`;
+    }
+  };
+
+  // Enter: copy the slash command to the clipboard. Each step names its own failure; a vault
+  // that cannot record the use must not be reported as a clipboard problem.
+  const copyCommand = (entry: VaultEntry): void => {
+    let slashCmd: string;
+    try {
+      slashCmd = vault.getSlashCommand(entry); // safe-text: clipboard payload; the status line is drawn through ActionBar singleLine
+    } catch (err) {
+      setErrorMessage(`Could not copy the command: ${reasonOf(err)}`);
+      return;
+    }
+    import('clipboardy')
+      .then((mod) => {
+        const clipboard = mod.default ?? mod;
+        return (clipboard as { write: (s: string) => Promise<void> }).write(slashCmd);
+      })
+      .then(
+        () => setErrorMessage(noteUsage(entry, slashCmd)),
+        (err: unknown) => setErrorMessage(`Clipboard error: ${reasonOf(err)}`),
+      );
+  };
+
+  // Ctrl+F: toggle favorite. A locked database throws here; an uncaught throw in a key handler
+  // ends the whole session, so the failure becomes a status line and the TUI keeps taking keys.
+  const toggleFavorite = (entry: VaultEntry): void => {
+    try {
+      const isFav = vault.toggleFavorite(entry.id);
+      refreshStored();
+      const name = singleLine(entry.name);
+      setErrorMessage(
+        isFav ? `★ Added to favorites: ${name}` : `☆ Removed from favorites: ${name}`,
+      );
+    } catch (err) {
+      setErrorMessage(`Could not save the favorite: ${reasonOf(err)}`);
+    }
+  };
+
   // Enter, Ctrl+O and Ctrl+F act on the selected entry: returns true when one of them did.
   const handleEntryKey = (input: string, key: Key): boolean => {
     // Any other key is text for the box; resolving an entry would search before the debounce.
-    const isEntryKey = key.return || (key.ctrl && (input === 'o' || input === 'f'));
-    if (!isEntryKey) return false;
+    if (!isEntryActionKey(input, key)) return false;
     const entry = entryAtSelection();
     if (!entry) return false;
 
-    // Enter: copy slash command to clipboard
     if (key.return) {
-      const slashCmd = vault.getSlashCommand(entry); // safe-text: clipboard payload; the status line is drawn through ActionBar singleLine
-      import('clipboardy')
-        .then((mod) => {
-          const clipboard = mod.default ?? mod;
-          return (clipboard as { write: (s: string) => Promise<void> }).write(slashCmd);
-        })
-        .then(() => {
-          vault.recordUsage(entry.id);
-          refreshStored();
-          setErrorMessage(`Copied: ${slashCmd}`);
-        })
-        .catch((err: unknown) => {
-          setErrorMessage(`Clipboard error: ${err instanceof Error ? err.message : String(err)}`);
-        });
+      copyCommand(entry);
       return true;
     }
 
@@ -187,20 +222,20 @@ export function App({ vault }: Props) {
       return true;
     }
 
-    // Ctrl+F: toggle favorite
     if (key.ctrl && input === 'f') {
-      const isFav = vault.toggleFavorite(entry.id);
-      refreshStored();
-      const name = singleLine(entry.name);
-      setErrorMessage(
-        isFav ? `★ Added to favorites: ${name}` : `☆ Removed from favorites: ${name}`,
-      );
+      toggleFavorite(entry);
       return true;
     }
     return false;
   };
 
-  useKeyEvents((input, key) => {
+  // A paste is text for the box, however many lines it held: nothing in it acts on an entry.
+  const handlePaste = (text: string) => {
+    if (isTooNarrow) return;
+    if (editor.apply(text, NO_KEY)) restartList();
+  };
+
+  const handleKey = (input: string, key: Key) => {
     // Printable keys type into the search box, so actions use Ctrl chords and
     // non-printable keys only. Ctrl+C always quits and is never typed.
     if (key.ctrl && input === 'c') {
@@ -232,7 +267,9 @@ export function App({ vault }: Props) {
     if (handleNavigationKey(key) || handleEntryKey(input, key)) return;
 
     if (editor.apply(input, key)) restartList();
-  });
+  };
+
+  useKeyEvents(handleKey, handlePaste);
 
   if (isTooNarrow) {
     return (

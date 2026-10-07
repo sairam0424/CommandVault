@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Key } from 'ink';
-import { editQuery } from '../../tui/editQuery.js';
+import { MAX_QUERY_LENGTH, editQuery } from '../../tui/editQuery.js';
 
 const NO_KEY: Key = {
   upArrow: false,
@@ -98,5 +98,42 @@ describe('editQuery', () => {
     const state = Object.freeze({ value: 'ab', cursor: 1 });
     expect(() => editQuery(state, 'x', NO_KEY)).not.toThrow();
     expect(state).toEqual({ value: 'ab', cursor: 1 });
+  });
+});
+
+// A search query longer than this finds nothing a shorter one does not; a paste must not make
+// every later key re-search kilobytes of text.
+describe('editQuery length cap', () => {
+  it('caps the query at MAX_QUERY_LENGTH characters, cursor at the end of what was kept', () => {
+    expect(MAX_QUERY_LENGTH).toBe(200);
+    const result = editQuery({ value: '', cursor: 0 }, 'x'.repeat(MAX_QUERY_LENGTH + 1), NO_KEY);
+    expect(result.value.length).toBe(MAX_QUERY_LENGTH);
+    expect(result.cursor).toBe(MAX_QUERY_LENGTH);
+  });
+
+  it('keeps exactly MAX_QUERY_LENGTH characters when the insert lands on the limit', () => {
+    const result = editQuery({ value: '', cursor: 0 }, 'y'.repeat(MAX_QUERY_LENGTH), NO_KEY);
+    expect(result).toEqual({ value: 'y'.repeat(MAX_QUERY_LENGTH), cursor: MAX_QUERY_LENGTH });
+  });
+
+  it('obeys the cap for an insert in the middle and keeps the text after the cursor', () => {
+    const state = { value: 'ab', cursor: 1 };
+    const result = editQuery(state, 'x'.repeat(MAX_QUERY_LENGTH), NO_KEY);
+    expect(result.value.length).toBe(MAX_QUERY_LENGTH);
+    expect(result.value.startsWith('a')).toBe(true);
+    expect(result.value.endsWith('xb')).toBe(true);
+    expect(result.cursor).toBe(MAX_QUERY_LENGTH - 1);
+  });
+
+  it('leaves a full query untouched when one more character is typed', () => {
+    const full = { value: 'z'.repeat(MAX_QUERY_LENGTH), cursor: MAX_QUERY_LENGTH };
+    expect(editQuery(full, 'q', NO_KEY)).toBe(full);
+  });
+
+  it('never cuts a surrogate pair in half at the cap', () => {
+    const almostFull = { value: 'z'.repeat(MAX_QUERY_LENGTH - 1), cursor: MAX_QUERY_LENGTH - 1 };
+    const result = editQuery(almostFull, '🚀', NO_KEY);
+    expect(result.value.length).toBe(MAX_QUERY_LENGTH - 1);
+    expect(result.cursor).toBe(MAX_QUERY_LENGTH - 1);
   });
 });

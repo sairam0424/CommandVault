@@ -109,11 +109,11 @@ const EXPECTED_ALLOWLIST: readonly string[] = [
   'commands/list.ts:81',
   'commands/open.ts:28',
   'helpers.ts:85',
-  'tui/App.tsx:107',
-  'tui/App.tsx:110',
-  'tui/App.tsx:160',
-  'tui/App.tsx:180',
-  'tui/App.tsx:83',
+  'tui/App.tsx:108',
+  'tui/App.tsx:111',
+  'tui/App.tsx:169',
+  'tui/App.tsx:215',
+  'tui/App.tsx:84',
   'tui/PreviewPane.tsx:76',
 ];
 
