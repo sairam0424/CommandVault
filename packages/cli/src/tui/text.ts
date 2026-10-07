@@ -1,6 +1,8 @@
 import type { VaultEntry } from '@commandvault/core';
 
-const CONTROL_RUN = /[\u0000-\u001f\u007f]+/g;
+// C0 controls and DEL, C1 controls U+0080-U+009F (8-bit escape introducers among them), the
+// line and paragraph separators, and the bidi embedding, override and isolate controls.
+const CONTROL_RUN = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]+/g;
 const TAB = /\t/g;
 const TAB_AS_SPACES = '    ';
 

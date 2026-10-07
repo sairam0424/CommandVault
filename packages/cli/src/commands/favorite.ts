@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import type { EntryType } from '@commandvault/core';
 import { createVaultInstance, typeEmoji, typeColor, type CliGlobalOptions } from '../helpers.js';
 import { CommandError, invalidChoiceError, usageError } from '../errors.js';
+import { safeText } from '../ui/safe-text.js';
 
 const VALID_TYPES = ['skill', 'agent', 'command', 'plugin', 'rule', 'hook'] as const;
 
@@ -66,15 +67,16 @@ export function createFavoriteCommand(): Command {
         const colorFn = typeColor(entry.type);
 
         const isFavorite = vault.toggleFavorite(entry.id);
+        const label = colorFn(chalk.bold(safeText(entry.name)));
 
         console.log('');
         if (isFavorite) {
           console.log(
-            `  ${chalk.yellow('★')} Favorited ${colorFn(chalk.bold(entry.name))} ${chalk.dim(`(${typeEmoji(entry.type)} ${entry.type})`)}`,
+            `  ${chalk.yellow('★')} Favorited ${label} ${chalk.dim(`(${typeEmoji(entry.type)} ${entry.type})`)}`,
           );
         } else {
           console.log(
-            `  ${chalk.dim('☆')} Unfavorited ${colorFn(chalk.bold(entry.name))} ${chalk.dim(`(${typeEmoji(entry.type)} ${entry.type})`)}`,
+            `  ${chalk.dim('☆')} Unfavorited ${label} ${chalk.dim(`(${typeEmoji(entry.type)} ${entry.type})`)}`,
           );
         }
         console.log('');

@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import type { EntryType } from '@commandvault/core';
 import { createVaultInstance, typeEmoji, typeColor, type CliGlobalOptions } from '../helpers.js';
 import { CommandError, invalidChoiceError, usageError } from '../errors.js';
+import { safeText, toDisplay } from '../ui/safe-text.js';
 
 const VALID_TYPES = ['skill', 'agent', 'command', 'plugin', 'rule', 'hook'] as const;
 
@@ -91,7 +92,7 @@ export function createTagCommand(): Command {
               vault.addTag(entry.id, tag);
               console.log('');
               console.log(
-                `  ${chalk.green('+')} Added tag ${chalk.bold(tag)} to ${colorFn(chalk.bold(entry.name))} ${chalk.dim(`(${typeEmoji(entry.type)} ${entry.type})`)}`,
+                `  ${chalk.green('+')} Added tag ${chalk.bold(tag)} to ${colorFn(chalk.bold(safeText(entry.name)))} ${chalk.dim(`(${typeEmoji(entry.type)} ${entry.type})`)}`,
               );
               console.log('');
               break;
@@ -104,7 +105,7 @@ export function createTagCommand(): Command {
               vault.removeTag(entry.id, tag);
               console.log('');
               console.log(
-                `  ${chalk.red('-')} Removed tag ${chalk.bold(tag)} from ${colorFn(chalk.bold(entry.name))} ${chalk.dim(`(${typeEmoji(entry.type)} ${entry.type})`)}`,
+                `  ${chalk.red('-')} Removed tag ${chalk.bold(tag)} from ${colorFn(chalk.bold(safeText(entry.name)))} ${chalk.dim(`(${typeEmoji(entry.type)} ${entry.type})`)}`,
               );
               console.log('');
               break;
@@ -112,20 +113,20 @@ export function createTagCommand(): Command {
 
             case 'list': {
               const updatedEntry = vault.getEntry(entry.id);
-              const tags = updatedEntry?.tags ?? entry.tags;
-              const userTags = vault.getTagsForEntry(entry.id);
-              const userTagSet = new Set(userTags);
+              const view = toDisplay(updatedEntry ?? entry);
+              // The user tags are cleaned the same way, so each shown tag finds its own label.
+              const userTagSet = new Set(toDisplay(vault.getTagsForEntry(entry.id)));
 
               console.log('');
               console.log(
-                `  Tags for ${colorFn(chalk.bold(entry.name))} ${chalk.dim(`(${typeEmoji(entry.type)} ${entry.type})`)}:`,
+                `  Tags for ${colorFn(chalk.bold(view.name))} ${chalk.dim(`(${typeEmoji(view.type)} ${view.type})`)}:`,
               );
               console.log('');
 
-              if (tags.length === 0) {
+              if (view.tags.length === 0) {
                 console.log(chalk.dim('    No tags'));
               } else {
-                for (const t of tags) {
+                for (const t of view.tags) {
                   const label = userTagSet.has(t) ? chalk.cyan('[user]') : chalk.dim('[parsed]');
                   console.log(`    ${label} ${t}`);
                 }
