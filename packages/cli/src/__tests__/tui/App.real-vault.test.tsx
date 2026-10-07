@@ -55,7 +55,10 @@ describe('App on a real vault and the real fuzzy tier', { timeout: TEST_TIMEOUT_
     cleanup();
   });
 
-  afterAll(() => {
+  afterAll(async () => {
+    // Windows refuses to delete a file another handle still has open, so the vault's database
+    // connection has to go before its directory does (EBUSY on the runner otherwise).
+    await vault.dispose();
     rmSync(root, { recursive: true, force: true });
   });
 

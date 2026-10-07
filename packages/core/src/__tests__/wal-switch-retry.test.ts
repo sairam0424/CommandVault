@@ -118,7 +118,9 @@ describe('the switch to write-ahead logging', () => {
       }
 
       expect(Date.now() - startedAt).toBeGreaterThanOrEqual(SHORT_BUSY_TIMEOUT_MS);
-      expect(switches.asked).toBeGreaterThan(2);
+      // How many tries fit in the window depends on the speed of the machine (a slow runner managed
+      // two); what matters is that it tried again at all before giving up.
+      expect(switches.asked).toBeGreaterThanOrEqual(2);
       expect(journalModeOf(dbPath)).toBe('delete');
     });
 

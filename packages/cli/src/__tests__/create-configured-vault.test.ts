@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 const createVault = vi.fn((config: unknown) => ({ config }));
 
@@ -103,9 +103,13 @@ describe('claudeDirFor', () => {
     const { claudeDirFor } = await import('../helpers.js');
     vi.stubEnv('CLAUDE_CONFIG_DIR', '/from/env');
     try {
-      expect(claudeDirFor({ claudePath: '/flag' }, { claudeConfigPath: '/config' })).toBe('/flag');
-      expect(claudeDirFor({}, { claudeConfigPath: '/config' })).toBe('/config');
-      expect(claudeDirFor({}, {})).toBe('/from/env');
+      // claudeDirFor resolves whatever it picks, and on Windows resolve() puts the current drive
+      // in front of a root-relative path ('/flag' becomes 'D:\flag'), so compare resolved forms.
+      expect(claudeDirFor({ claudePath: '/flag' }, { claudeConfigPath: '/config' })).toBe(
+        resolve('/flag'),
+      );
+      expect(claudeDirFor({}, { claudeConfigPath: '/config' })).toBe(resolve('/config'));
+      expect(claudeDirFor({}, {})).toBe(resolve('/from/env'));
     } finally {
       vi.unstubAllEnvs();
     }
