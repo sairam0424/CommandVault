@@ -331,9 +331,78 @@ describe('built CLI: commands that report user errors cleanly instead of crashin
   });
 });
 
-describe('built CLI: known product gaps the dispatch fix does not cover', () => {
-  // `favorite` persists, but Vault.getAllEntries() never merges favorites, so `list` cannot see them.
-  it.todo('list --favorites shows entries marked with favorite (CV-G1-004)');
+describe('built CLI: what favorite, info and tag record is visible to the next command (CV-G1-004)', () => {
+  // Every `run` is a fresh process: a mark one command writes has to be read back from the
+  // database by the next. `favorite` toggles, and earlier tests may have toggled demo-skill
+  // already, so each case first brings the entry to the state it needs.
+  interface MarkedEntry extends JsonEntry {
+    readonly favorite: boolean;
+    readonly usageCount: number;
+    readonly tags: readonly string[];
+  }
+  const markedEntries = (args: readonly string[]): MarkedEntry[] => {
+    const result = run(args);
+    expectSuccess(result);
+    return parseJson<{ entries: MarkedEntry[] }>(result).entries;
+  };
+  const toggleFavorite = (): string => {
+    const result = run(['favorite', 'demo-skill']);
+    expectSuccess(result);
+    return result.stdout;
+  };
+  const setFavorite = (wanted: boolean): void => {
+    const verb = wanted ? 'Favorited' : 'Unfavorited';
+    const output = toggleFavorite();
+    expect(output.includes(verb) ? output : toggleFavorite()).toMatch(
+      new RegExp(`${verb} demo-skill`),
+    );
+  };
+
+  it('list --favorites shows the entry favorite marked, with favorite: true', () => {
+    setFavorite(true);
+
+    const favorites = markedEntries(['list', '--favorites', '--json']);
+    expect(favorites.map((entry) => entry.name)).toEqual(['demo-skill']);
+    expect(favorites[0]?.favorite).toBe(true);
+  });
+
+  it('list --tag shows the entry tag add tagged', () => {
+    expectSuccess(run(['tag', 'add', 'demo-skill', 'e2e-tag']));
+
+    const tagged = markedEntries(['list', '--tag', 'e2e-tag', '--json']);
+    expect(tagged.map((entry) => entry.name)).toEqual(['demo-skill']);
+    expect(tagged[0]?.tags).toContain('e2e-tag');
+  });
+
+  it('info shows the favorite, the user tag and a use count that grows with every call', () => {
+    setFavorite(true);
+    expectSuccess(run(['tag', 'add', 'demo-skill', 'e2e-tag']));
+
+    const first = parseJson<{ entry: MarkedEntry }>(run(['info', 'demo-skill', '--json'])).entry;
+    const second = parseJson<{ entry: MarkedEntry }>(run(['info', 'demo-skill', '--json'])).entry;
+
+    expect(first.name).toBe('demo-skill');
+    expect(second).toMatchObject({ name: 'demo-skill', favorite: true });
+    expect(second.tags).toContain('e2e-tag');
+    expect(second.usageCount).toBe(first.usageCount + 1);
+  });
+
+  it('stats lists the used entry under Top 10 Most Used', () => {
+    const before = parseJson<{ entry: MarkedEntry }>(run(['info', 'demo-skill', '--json'])).entry;
+    const uses = before.usageCount + 1;
+
+    const result = run(['stats']);
+    expectSuccess(result);
+    expect(result.stdout).toMatch(new RegExp(`Top 10 Most Used[\\s\\S]*demo-skill\\s+${uses}x`));
+  });
+
+  it('favorite again prints Unfavorited and list --favorites is empty', () => {
+    setFavorite(true);
+
+    expect(toggleFavorite()).toMatch(/Unfavorited demo-skill/);
+
+    expect(markedEntries(['list', '--favorites', '--json'])).toEqual([]);
+  });
 });
 
 describe('built CLI: long-running and interactive entry points really start', () => {

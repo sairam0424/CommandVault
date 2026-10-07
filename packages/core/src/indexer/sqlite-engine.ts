@@ -20,6 +20,7 @@ import { queryTerms } from './search-query.js';
 import { TagStore } from './tag-store.js';
 import { SnapshotStore } from './snapshot-store.js';
 import { StatsStore } from './stats-store.js';
+import { readUserState, type UserState } from './user-state.js';
 
 const FTS_TABLE = 'entries_fts';
 /**
@@ -339,6 +340,11 @@ export class SqliteEngine {
 
   getEntry(id: string): VaultEntry | undefined {
     return this.entryStore.getEntry(id);
+  }
+
+  /** The favorites, use counts and user tags the rows hold now, for `ids` or for every row. */
+  readUserState(ids?: readonly string[]): UserState {
+    return readUserState(this.conn, ids);
   }
 
   getStats(): VaultStats {
