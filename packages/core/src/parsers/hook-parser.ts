@@ -128,11 +128,12 @@ function scriptRoots(settingsPath: string, options: HookParseOptions): readonly 
 }
 
 /**
- * The roots as the file system spells them. `safePath` compares a script's real path with the
- * root, so a root reached through a symlink (macOS /tmp and /var, a linked workspace or home
- * directory, an editor folder that is not canonical) would contain no script at all and every hook
- * would quietly fall back to its command string. A root that cannot be resolved stays as given: it
- * cannot contain a script either way, which is `safePath`'s own answer for a path it cannot resolve.
+ * The roots as the file system spells them (macOS /tmp and /var, a linked workspace or home
+ * directory, an editor folder that is not canonical). A relative script is joined onto each root
+ * before `safePath` sees it, so its `..` segments must climb from the real directory, as they do
+ * when the hook runs there, and not from a link to it. (`safePath` resolves the roots itself when
+ * it judges containment.) A root that cannot be resolved stays as given: it cannot contain a
+ * script either way, which is `safePath`'s own answer for a path it cannot resolve.
  */
 async function canonicalRoots(roots: readonly string[]): Promise<readonly string[]> {
   return Promise.all(roots.map((root) => realpath(root).catch(() => root)));
