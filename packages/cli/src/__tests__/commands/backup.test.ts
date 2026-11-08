@@ -219,17 +219,21 @@ describe('backup command', () => {
     it('removes what a restore killed while it inspected left behind, on backup and on --list', async () => {
       writeFileSync(dbPath, 'db');
       mkdirSync(backupDir, { recursive: true });
-      const stale = join(backupDir, `${OLD_MANUAL}.inspect.${deadProcessId()}.tmp`);
+      const staleOnList = join(backupDir, `${OLD_MANUAL}.inspect.${deadProcessId()}.tmp`);
+      const staleOnBackup = join(
+        backupDir,
+        `vault-2001-01-02T00-00-00.db.inspect.${deadProcessId()}.tmp`,
+      );
       const live = join(backupDir, `${OLD_MANUAL}.inspect.${process.ppid}.tmp`);
       writeFileSync(live, 'in use by another process');
 
-      writeFileSync(stale, 'x'.repeat(2048));
+      writeFileSync(staleOnList, 'x'.repeat(2048));
       await run('--list');
-      expect(existsSync(stale)).toBe(false);
+      expect(existsSync(staleOnList)).toBe(false);
 
-      writeFileSync(stale, 'x'.repeat(2048));
+      writeFileSync(staleOnBackup, 'x'.repeat(2048));
       await run();
-      expect(existsSync(stale)).toBe(false);
+      expect(existsSync(staleOnBackup)).toBe(false);
       expect(existsSync(live)).toBe(true);
     });
 

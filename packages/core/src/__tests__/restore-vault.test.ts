@@ -252,17 +252,38 @@ describe('restoreVault', () => {
       expect(usageOf(dbPath, entryId)).toBe(BACKUP_USAGE + HOT_COMMITS);
     });
 
-    it('cannot see an idle connection and proceeds (the residual risk the module names)', async () => {
-      const idle = new Database(dbPath);
-      idle.prepare('SELECT count(*) AS n FROM entries').get();
-      try {
-        const result = await restoreVault(dbPath, backup, { waitMs: SHORT_WAIT_MS });
-        expect(existsSync(result.preRestore)).toBe(true);
-      } finally {
-        idle.close();
-      }
-      expect(await usageSeenByTheEngine()).toBe(BACKUP_USAGE);
-    });
+    // POSIX can replace a file another process holds open; Windows cannot unlink it (EBUSY).
+    const onWindows = process.platform === 'win32';
+
+    it.skipIf(onWindows)(
+      'cannot see an idle connection and proceeds (the residual risk the module names)',
+      async () => {
+        const idle = new Database(dbPath);
+        idle.prepare('SELECT count(*) AS n FROM entries').get();
+        try {
+          const result = await restoreVault(dbPath, backup, { waitMs: SHORT_WAIT_MS });
+          expect(existsSync(result.preRestore)).toBe(true);
+        } finally {
+          idle.close();
+        }
+        expect(await usageSeenByTheEngine()).toBe(BACKUP_USAGE);
+      },
+    );
+
+    it.runIf(onWindows)(
+      'refuses with a locked-database error while another connection holds the files open',
+      async () => {
+        const idle = new Database(dbPath);
+        idle.prepare('SELECT count(*) AS n FROM entries').get();
+        try {
+          await expect(
+            restoreVault(dbPath, backup, { waitMs: SHORT_WAIT_MS }),
+          ).rejects.toBeInstanceOf(DatabaseLockedError);
+        } finally {
+          idle.close();
+        }
+      },
+    );
   });
 
   describe('the repair lock', () => {
