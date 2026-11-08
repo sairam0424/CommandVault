@@ -79,7 +79,8 @@ describe('built CLI: COMMANDVAULT_HOME relocates every state file', () => {
     const backups = readdirSync(join(box.dataDir, 'backups'));
     expect(backups).toHaveLength(1);
 
-    const restored = box.run(['restore', backups[0] as string]);
+    // Outside a terminal `restore` asks nothing and needs --yes.
+    const restored = box.run(['restore', '--yes', backups[0] as string]);
     expectSuccess(restored);
     expect(restored.stdout, context(restored)).toContain('Database restored from');
     expect(restored.stdout, context(restored)).toContain(join(box.dataDir, 'backups'));
