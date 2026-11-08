@@ -90,7 +90,7 @@ describe('safeFetchText with a body sent one byte per chunk', () => {
       expect((value as SafeFetchError).message).toBe('Response exceeds 1 MiB');
       expect(Date.now() - started).toBeLessThan(MAX_ELAPSED_MS);
       // The server stopped writing because the client hung up, not because it ran out of body.
-      await vi.waitFor(() => expect(fixture.closes['/tiny-chunks']).toBe(1));
+      await vi.waitFor(() => expect(fixture.closes.get('/tiny-chunks')).toBe(1));
       expect(fixture.tinyBytesWritten).toBeLessThan(TINY_TOTAL_BYTES);
       expect(growthBytes).toBeLessThan(PEAK_GROWTH_LIMIT_BYTES);
     },

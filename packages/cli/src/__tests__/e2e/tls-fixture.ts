@@ -100,7 +100,7 @@ export interface FixtureServer {
   readonly servernames: string[];
   readonly requests: SeenRequest[];
   /** Sockets of requests that have closed, per route. */
-  readonly closes: Record<string, number>;
+  readonly closes: Map<string, number>;
   /** Bytes the `/big` route managed to write before the client went away. */
   bigBytesWritten: number;
   /** Body bytes (one per chunk) `/tiny-chunks` managed to write before the client went away. */
@@ -316,7 +316,7 @@ export function startFixtureServer(tls: TlsFixture): Promise<FixtureServer> {
       connections: 0,
       servernames: [],
       requests: [],
-      closes: {},
+      closes: new Map<string, number>(),
       bigBytesWritten: 0,
       tinyBytesWritten: 0,
       trickleWrites: [],
@@ -336,7 +336,7 @@ export function startFixtureServer(tls: TlsFixture): Promise<FixtureServer> {
       const path = req.url ?? '/';
       fixture.requests.push({ path, host: req.headers.host });
       req.socket.once('close', () => {
-        fixture.closes[path] = (fixture.closes[path] ?? 0) + 1;
+        fixture.closes.set(path, (fixture.closes.get(path) ?? 0) + 1);
       });
       route(req, res, fixture);
     });

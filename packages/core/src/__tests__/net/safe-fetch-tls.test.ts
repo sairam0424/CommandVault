@@ -100,7 +100,7 @@ describe('safeFetchText over TLS on loopback', () => {
       expect(err.code).toBe('headers_timeout');
       expect(err.message).toBe('no response headers within 0.3 s');
       expect(Date.now() - started).toBeLessThan(2_000);
-      await vi.waitFor(() => expect(fixture.closes['/never']).toBe(1));
+      await vi.waitFor(() => expect(fixture.closes.get('/never')).toBe(1));
     });
 
     it('(b) /stall: idle deadline after the headers', async () => {
@@ -112,14 +112,14 @@ describe('safeFetchText over TLS on loopback', () => {
       });
       expect(err.code).toBe('idle_timeout');
       expect(err.message).toBe('no data for 0.3 s');
-      await vi.waitFor(() => expect(fixture.closes['/stall']).toBe(1));
+      await vi.waitFor(() => expect(fixture.closes.get('/stall')).toBe(1));
     });
 
     it('(b) /slow: total deadline even while bytes trickle in', async () => {
       const err = await failure(url('/slow'), { lookup, totalTimeoutMs: 800 });
       expect(err.code).toBe('total_timeout');
       expect(err.message).toBe('response not complete within 0.8 s');
-      await vi.waitFor(() => expect(fixture.closes['/slow']).toBe(1));
+      await vi.waitFor(() => expect(fixture.closes.get('/slow')).toBe(1));
     });
 
     it('(c) /big: the default cap stops a 200 MiB chunked body while it streams', async () => {
@@ -132,7 +132,7 @@ describe('safeFetchText over TLS on loopback', () => {
       expect(err.message).toBe(`Response exceeds ${DEFAULT_MAX_BYTES / MIB} MiB`);
       expect(Date.now() - started).toBeLessThan(10_000);
       expect(process.memoryUsage().rss - rssBefore).toBeLessThan(100 * MIB);
-      await vi.waitFor(() => expect(fixture.closes['/big']).toBe(1));
+      await vi.waitFor(() => expect(fixture.closes.get('/big')).toBe(1));
       expect(fixture.bigBytesWritten).toBeLessThan(64 * MIB);
     });
 
@@ -173,7 +173,7 @@ describe('safeFetchText over TLS on loopback', () => {
         expect(err.code).toBe('network');
         expect(err.message).toBe(`Connection to "${FIXTURE_SERVERNAME}" closed without a response`);
         expect(Date.now() - started).toBeLessThan(2_000);
-        await vi.waitFor(() => expect(fixture.closes['/upgrade']).toBe(1));
+        await vi.waitFor(() => expect(fixture.closes.get('/upgrade')).toBe(1));
       },
       UPGRADE_CASE_TIMEOUT_MS,
     );
