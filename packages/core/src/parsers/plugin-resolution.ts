@@ -1,7 +1,7 @@
 import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ParseError } from '../types/index.js';
-import { FileTooLargeError, readBoundedText, skippedTooLarge } from './bounded-read.js';
+import { SkippedFileError, readBoundedText, skippedFile } from './bounded-read.js';
 
 /** The fields of a marketplace listing that describe a plugin. */
 export interface MarketplaceEntry {
@@ -135,7 +135,7 @@ function toMarketplaceEntry(record: Record<string, unknown>, name: string): Mark
 
 /** A marketplace file that is simply absent is normal; one that cannot be used is worth a warning. */
 function describeMarketplaceFailure(err: unknown, filePath: string): ParseError | null {
-  if (err instanceof FileTooLargeError) return skippedTooLarge(err, 'marketplace file');
+  if (err instanceof SkippedFileError) return skippedFile(err, 'marketplace file');
   if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
   const reason = err instanceof Error ? err.message : String(err);
   return {

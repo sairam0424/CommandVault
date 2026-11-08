@@ -11,6 +11,9 @@ import {
 } from './utils.js';
 import { withRetry } from './retry.js';
 import { describeFileFailure, readBoundedText } from './bounded-read.js';
+import { followFileLinks, linkMetadata, linkTags, type ResolvedRead } from './link-policy.js';
+import { FrontmatterSkippedError } from './frontmatter-recovery.js';
+import { truncatedFrontmatterWarning } from './sanitize-frontmatter.js';
 import {
   deriveDescription,
   descriptionMetadata,
@@ -57,7 +60,7 @@ interface ParsedFile {
 // Surfaced as a tag so a lossy frontmatter recovery is visible in search and the UI.
 export const FRONTMATTER_WARNING_TAG = 'frontmatter-warning';
 
-function describeRecoveryWarning(
+export function describeRecoveryWarning(
   type: string,
   filePath: string,
   recovery: FrontmatterRecovery,
@@ -70,6 +73,20 @@ function describeRecoveryWarning(
     severity: 'warning',
     cause,
   };
+}
+
+/**
+ * The warning for a file whose frontmatter the guard skipped (too big, or too many aliases). The
+ * agent-config parsers use it, since they keep ordinary recoveries silent; an empty list for any
+ * other cause.
+ */
+export function skippedFrontmatterWarnings(
+  label: string,
+  filePath: string,
+  cause: unknown,
+): readonly ParseError[] {
+  if (!(cause instanceof FrontmatterSkippedError)) return [];
+  return [describeRecoveryWarning(label, filePath, 'line-based', cause)];
 }
 
 function readSource(filePath: string, config: ParseConfig): Promise<string> {
@@ -94,10 +111,27 @@ function resolveTags(
   data: ParsedFrontmatter,
   recovery: FrontmatterRecovery | undefined,
   config: ParseConfig,
+  link: ResolvedRead,
 ): string[] {
   const extracted = extractTags(name, description, data);
   const tags = config.postProcessTags ? config.postProcessTags(extracted, data) : extracted;
-  return recovery ? [...tags, FRONTMATTER_WARNING_TAG] : tags;
+  const recovered = recovery ? [...tags, FRONTMATTER_WARNING_TAG] : tags;
+  return [...recovered, ...linkTags(link)];
+}
+
+function fileWarnings(
+  filePath: string,
+  config: ParseConfig,
+  recovery: FrontmatterRecovery | undefined,
+  recoveryCause: unknown,
+  dropped: number | undefined,
+): readonly ParseError[] {
+  return [
+    ...(recovery === 'line-based'
+      ? [describeRecoveryWarning(config.type, filePath, recovery, recoveryCause)]
+      : []),
+    ...(dropped ? [truncatedFrontmatterWarning(config.type, filePath, dropped)] : []),
+  ];
 }
 
 async function parseFileEntry(
@@ -106,8 +140,9 @@ async function parseFileEntry(
   fileName: string,
   config: ParseConfig,
 ): Promise<ParsedFile> {
-  const raw = await readSource(filePath, config);
-  const { data, content, recovery, recoveryCause } = parseFrontmatter(raw);
+  const link = await followFileLinks(filePath);
+  const raw = await readSource(link.readPath, config);
+  const { data, content, recovery, recoveryCause, dropped } = parseFrontmatter(raw);
   const context: ParseContext = { folderName, fileName, filePath };
   const name = config.nameFromPath
     ? config.nameFromPath(folderName, data, context)
@@ -122,12 +157,10 @@ async function parseFileEntry(
   const metadata = {
     ...parsedMetadata,
     ...(recovery ? { frontmatterRecovery: recovery } : {}),
+    ...linkMetadata(link),
     ...descriptionMetadata(derived),
   };
-  const warnings =
-    recovery === 'line-based'
-      ? [describeRecoveryWarning(config.type, filePath, recovery, recoveryCause)]
-      : [];
+  const warnings = fileWarnings(filePath, config, recovery, recoveryCause, dropped);
 
   const entry: VaultEntry = {
     id: generateStableId(config.type, name, disambiguator),
@@ -136,10 +169,10 @@ async function parseFileEntry(
     source,
     description,
     filePath,
-    tags: resolveTags(name, description, data, recovery, config),
+    tags: resolveTags(name, description, data, recovery, config, link),
     metadata,
     content,
-    lastModified: await getLastModified(filePath),
+    lastModified: await getLastModified(link.readPath),
     favorite: false,
     usageCount: 0,
   };
@@ -159,19 +192,36 @@ function directoryNotFound(dir: string, config: ParseConfig): ParseError {
   return { filePath: dir, message: config.dirNotFoundMessage, severity: 'error' };
 }
 
+function unreadableDirectory(dir: string, cause: unknown): ParseError {
+  const reason = cause instanceof Error ? cause.message : String(cause);
+  return {
+    filePath: dir,
+    message: `Skipped unreadable directory ${dir}: ${reason}`,
+    severity: 'warning',
+    cause,
+  };
+}
+
 function collectParsed(parsed: ParsedFile, entries: VaultEntry[], errors: ParseError[]): void {
   entries.push(parsed.entry);
   errors.push(...parsed.warnings);
 }
 
-async function walkDir(dir: string, pattern: RegExp): Promise<string[]> {
+/**
+ * Every file under `dir` matching `pattern`. Only the top directory failing to list propagates: a
+ * subdirectory that cannot be read costs its own files and one warning, never its siblings.
+ */
+async function walkDir(dir: string, pattern: RegExp, warnings: ParseError[]): Promise<string[]> {
   const results: string[] = [];
   const items = await readdir(dir, { withFileTypes: true });
   for (const item of items) {
     const fullPath = join(dir, item.name);
     if (item.isDirectory()) {
-      const nested = await walkDir(fullPath, pattern);
-      results.push(...nested);
+      try {
+        results.push(...(await walkDir(fullPath, pattern, warnings)));
+      } catch (err) {
+        warnings.push(unreadableDirectory(fullPath, err));
+      }
     } else if (pattern.test(item.name)) {
       results.push(fullPath);
     }
@@ -186,7 +236,7 @@ export async function parseMarkdownDir(dir: string, config: ParseConfig): Promis
   if (config.scanMode === 'walk') {
     let files: string[];
     try {
-      files = await walkDir(dir, config.filePattern);
+      files = await walkDir(dir, config.filePattern, errors);
     } catch {
       return {
         entries: [],

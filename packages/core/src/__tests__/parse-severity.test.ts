@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ParseError, VaultEntry } from '../types/index.js';
@@ -187,18 +187,38 @@ describe('ParseError severity per source', () => {
     expect(plugins.errors.map((e) => e.severity)).toEqual(['error']);
   });
 
-  it('marks an unreadable project agent config as an error', async () => {
+  it("marks a directory in a project agent config file's place as a skip warning", async () => {
     const projectRoot = join(tempDir, 'project');
-    // A directory where a file is expected: it exists, so detection tries to read it and fails.
+    // Not a regular file: it is left out on purpose, like a FIFO or a device, and the user is told.
     await mkdir(join(projectRoot, '.cursorrules'), { recursive: true });
 
     const result = await detectAgentConfigs(projectRoot);
 
     const failures = result.errors.filter((e) => e.filePath.endsWith('.cursorrules'));
     expect(failures).toHaveLength(1);
-    expect(failures[0].message).toMatch(/^Failed to parse Cursor Rules/);
-    expect(failures[0].severity).toBe('error');
+    expect(failures[0].message).toMatch(
+      /^Skipped Cursor Rules .*is a directory, not a regular file/,
+    );
+    expect(failures[0].severity).toBe('warning');
   });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'marks an unreadable project agent config as an error',
+    async () => {
+      const projectRoot = join(tempDir, 'unreadable-project');
+      const filePath = join(projectRoot, '.cursorrules');
+      await mkdir(projectRoot, { recursive: true });
+      await writeFile(filePath, '# rules\n');
+      await chmod(filePath, 0o000);
+
+      const result = await detectAgentConfigs(projectRoot);
+
+      const failures = result.errors.filter((e) => e.filePath === filePath);
+      expect(failures).toHaveLength(1);
+      expect(failures[0].message).toMatch(/^Failed to parse Cursor Rules/);
+      expect(failures[0].severity).toBe('error');
+    },
+  );
 });
 
 describe('ParseError severity in the scan pipeline', () => {

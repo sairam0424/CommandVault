@@ -1,10 +1,20 @@
 import { constants } from 'node:fs';
-import { readdir, access, stat } from 'node:fs/promises';
+import { readdir, access, lstat, stat } from 'node:fs/promises';
 import { join, basename, resolve } from 'node:path';
 import { homedir, userInfo } from 'node:os';
 import type { VaultEntry, ParserResult, ParseError, EntrySource } from '../types/index.js';
 import { generateStableId, parseFrontmatter, getLastModified, extractTags } from './utils.js';
-import { describeFileFailure, readBoundedText } from './bounded-read.js';
+import { skippedFrontmatterWarnings } from './base-parser.js';
+import { describeFileFailure } from './bounded-read.js';
+import {
+  containedIn,
+  followFileLinks,
+  linkMetadata,
+  linkTags,
+  readLinkedText,
+  type LinkPolicy,
+} from './link-policy.js';
+import { truncatedFrontmatterWarning } from './sanitize-frontmatter.js';
 import { deriveRuleDescription } from './rule-parser.js';
 import { runParserSafely } from '../scan-pipeline.js';
 
@@ -37,9 +47,10 @@ const CLAUDE_PROJECT_SPEC: AgentConfigSpec = {
   tag: 'claude',
 };
 
+/** True when something is at the path, a dangling link included: what it points at is the policy's call. */
 async function pathExists(filePath: string): Promise<boolean> {
   try {
-    await access(filePath);
+    await lstat(filePath);
     return true;
   } catch {
     return false;
@@ -49,6 +60,7 @@ async function pathExists(filePath: string): Promise<boolean> {
 async function readMarkdownDir(
   dirPath: string,
   spec: AgentConfigSpec,
+  policy: LinkPolicy,
   entries: VaultEntry[],
   errors: ParseError[],
 ): Promise<void> {
@@ -62,8 +74,9 @@ async function readMarkdownDir(
   const parsePromises = files.map(async (file) => {
     const filePath = join(dirPath, file);
     try {
-      const raw = await readBoundedText(filePath);
-      const { data, content } = parseFrontmatter(raw);
+      const link = await policy(filePath);
+      const raw = await readLinkedText(link);
+      const { data, content, dropped, recoveryCause } = parseFrontmatter(raw);
       const name =
         data.name ??
         `${spec.label} - ${basename(file, '.md')
@@ -71,8 +84,8 @@ async function readMarkdownDir(
           .replace(/[-_]/g, ' ')}`;
       const description = deriveRuleDescription(data, content, file, `${spec.label} from ${file}`);
       const tags = extractTags(name, description, data);
-      tags.push(spec.tag, 'ai-agent-config');
-      const lastModified = await getLastModified(filePath);
+      tags.push(spec.tag, 'ai-agent-config', ...linkTags(link));
+      const lastModified = await getLastModified(link.readPath);
 
       const entry: VaultEntry = {
         id: generateStableId('rule', name, spec.source),
@@ -82,13 +95,15 @@ async function readMarkdownDir(
         description,
         filePath,
         tags,
-        metadata: { fileName: file, agentTool: spec.tag },
+        metadata: { fileName: file, agentTool: spec.tag, ...linkMetadata(link) },
         content,
         lastModified,
         favorite: false,
         usageCount: 0,
       };
       entries.push(entry);
+      errors.push(...skippedFrontmatterWarnings(spec.label, filePath, recoveryCause));
+      if (dropped) errors.push(truncatedFrontmatterWarning(spec.label, filePath, dropped));
     } catch (err) {
       errors.push(
         describeFileFailure(err, filePath, `Failed to parse ${spec.label} file`, spec.label),
@@ -99,10 +114,56 @@ async function readMarkdownDir(
   await Promise.all(parsePromises);
 }
 
+interface FileDigest {
+  readonly content: string;
+  readonly description: string;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  readonly dropped: number;
+  /** Why the guard skipped the frontmatter, when it did. */
+  readonly skipCause?: unknown;
+}
+
+function digestJson(raw: string, name: string): FileDigest {
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const description =
+      typeof parsed.description === 'string' ? parsed.description : `${name} configuration`;
+    return { content: raw, description, metadata: { parsedKeys: Object.keys(parsed) }, dropped: 0 };
+  } catch {
+    return { content: raw, description: `${name} configuration`, metadata: {}, dropped: 0 };
+  }
+}
+
+function digestYaml(raw: string, name: string): FileDigest {
+  const firstComment = raw.split('\n').find((l) => l.startsWith('#'));
+  const description = firstComment ? firstComment.replace(/^#\s*/, '') : `${name} configuration`;
+  return { content: raw, description, metadata: {}, dropped: 0 };
+}
+
+function digestMarkdown(raw: string, filePath: string, name: string): FileDigest {
+  const { data, content, dropped, recoveryCause } = parseFrontmatter(raw);
+  const description = deriveRuleDescription(data, content, basename(filePath), name);
+  const extractedTags = extractTags(name, description, data);
+  return {
+    content,
+    description,
+    metadata: { frontmatter: data, extractedTags },
+    dropped: dropped ?? 0,
+    skipCause: recoveryCause,
+  };
+}
+
+function digestSingleFile(raw: string, filePath: string, name: string): FileDigest {
+  if (filePath.endsWith('.json')) return digestJson(raw, name);
+  if (filePath.endsWith('.yml') || filePath.endsWith('.yaml')) return digestYaml(raw, name);
+  return digestMarkdown(raw, filePath, name);
+}
+
 async function readSingleFile(
   filePath: string,
   name: string,
   spec: AgentConfigSpec,
+  policy: LinkPolicy,
   entries: VaultEntry[],
   errors: ParseError[],
 ): Promise<void> {
@@ -111,54 +172,34 @@ async function readSingleFile(
   }
 
   try {
-    const raw = await readBoundedText(filePath);
-    const isJson = filePath.endsWith('.json');
-    const isYaml = filePath.endsWith('.yml') || filePath.endsWith('.yaml');
-
-    let content: string;
-    let description: string;
-    let metadata: Record<string, unknown> = { fileName: basename(filePath), agentTool: spec.tag };
-
-    if (isJson) {
-      content = raw;
-      try {
-        const parsed = JSON.parse(raw) as Record<string, unknown>;
-        description =
-          typeof parsed.description === 'string' ? parsed.description : `${name} configuration`;
-        metadata = { ...metadata, parsedKeys: Object.keys(parsed) };
-      } catch {
-        description = `${name} configuration`;
-      }
-    } else if (isYaml) {
-      content = raw;
-      const firstComment = raw.split('\n').find((l) => l.startsWith('#'));
-      description = firstComment ? firstComment.replace(/^#\s*/, '') : `${name} configuration`;
-    } else {
-      const { data, content: mdContent } = parseFrontmatter(raw);
-      content = mdContent;
-      description = deriveRuleDescription(data, mdContent, basename(filePath), name);
-      const fmTags = extractTags(name, description, data);
-      metadata = { ...metadata, frontmatter: data, extractedTags: fmTags };
-    }
-
-    const tags = [spec.tag, 'ai-agent-config'];
-    const lastModified = await getLastModified(filePath);
+    const link = await policy(filePath);
+    const raw = await readLinkedText(link);
+    const digest = digestSingleFile(raw, filePath, name);
+    const lastModified = await getLastModified(link.readPath);
 
     const entry: VaultEntry = {
       id: generateStableId('rule', name),
       name,
       type: 'rule',
       source: spec.source,
-      description,
+      description: digest.description,
       filePath,
-      tags,
-      metadata,
-      content,
+      tags: [spec.tag, 'ai-agent-config', ...linkTags(link)],
+      metadata: {
+        fileName: basename(filePath),
+        agentTool: spec.tag,
+        ...digest.metadata,
+        ...linkMetadata(link),
+      },
+      content: digest.content,
       lastModified,
       favorite: false,
       usageCount: 0,
     };
     entries.push(entry);
+    errors.push(...skippedFrontmatterWarnings(name, filePath, digest.skipCause));
+    if (digest.dropped > 0)
+      errors.push(truncatedFrontmatterWarning(name, filePath, digest.dropped));
   } catch (err) {
     errors.push(describeFileFailure(err, filePath, `Failed to parse ${name}`, name));
   }
@@ -166,54 +207,56 @@ async function readSingleFile(
 
 async function detectCursorConfigs(
   projectRoot: string,
+  policy: LinkPolicy,
   entries: VaultEntry[],
   errors: ParseError[],
 ): Promise<void> {
   const cursorRulesDir = join(projectRoot, '.cursor', 'rules');
   const cursorRulesFile = join(projectRoot, '.cursorrules');
+  const name = 'Cursor Rules (project root)';
 
   await Promise.all([
-    readMarkdownDir(cursorRulesDir, CURSOR_SPEC, entries, errors),
-    readSingleFile(cursorRulesFile, 'Cursor Rules (project root)', CURSOR_SPEC, entries, errors),
+    readMarkdownDir(cursorRulesDir, CURSOR_SPEC, policy, entries, errors),
+    readSingleFile(cursorRulesFile, name, CURSOR_SPEC, policy, entries, errors),
   ]);
 }
 
 async function detectCopilotConfigs(
   projectRoot: string,
+  policy: LinkPolicy,
   entries: VaultEntry[],
   errors: ParseError[],
 ): Promise<void> {
   const copilotInstructions = join(projectRoot, '.github', 'copilot-instructions.md');
-  await readSingleFile(copilotInstructions, 'Copilot Instructions', COPILOT_SPEC, entries, errors);
+  const name = 'Copilot Instructions';
+  await readSingleFile(copilotInstructions, name, COPILOT_SPEC, policy, entries, errors);
 }
 
 async function detectWindsurfConfigs(
   projectRoot: string,
+  policy: LinkPolicy,
   entries: VaultEntry[],
   errors: ParseError[],
 ): Promise<void> {
   const windsurfRulesFile = join(projectRoot, '.windsurfrules');
   const windsurfRulesDir = join(projectRoot, '.windsurf', 'rules');
+  const name = 'Windsurf Rules (project root)';
 
   await Promise.all([
-    readSingleFile(
-      windsurfRulesFile,
-      'Windsurf Rules (project root)',
-      WINDSURF_SPEC,
-      entries,
-      errors,
-    ),
-    readMarkdownDir(windsurfRulesDir, WINDSURF_SPEC, entries, errors),
+    readSingleFile(windsurfRulesFile, name, WINDSURF_SPEC, policy, entries, errors),
+    readMarkdownDir(windsurfRulesDir, WINDSURF_SPEC, policy, entries, errors),
   ]);
 }
 
 async function detectProjectAiderConfig(
   projectRoot: string,
+  policy: LinkPolicy,
   entries: VaultEntry[],
   errors: ParseError[],
 ): Promise<void> {
   const projectConfig = join(projectRoot, '.aider.conf.yml');
-  await readSingleFile(projectConfig, 'Aider Config (project)', AIDER_SPEC, entries, errors);
+  const name = 'Aider Config (project)';
+  await readSingleFile(projectConfig, name, AIDER_SPEC, policy, entries, errors);
 }
 
 async function detectHomeAiderConfig(
@@ -222,7 +265,8 @@ async function detectHomeAiderConfig(
   errors: ParseError[],
 ): Promise<void> {
   const homeConfig = join(home, '.aider.conf.yml');
-  await readSingleFile(homeConfig, 'Aider Config (global)', AIDER_SPEC, entries, errors);
+  const name = 'Aider Config (global)';
+  await readSingleFile(homeConfig, name, AIDER_SPEC, followFileLinks, entries, errors);
 }
 
 async function detectContinueConfigs(
@@ -231,33 +275,38 @@ async function detectContinueConfigs(
   errors: ParseError[],
 ): Promise<void> {
   const continueConfig = join(home, '.continue', 'config.json');
-  await readSingleFile(continueConfig, 'Continue.dev Config', CONTINUE_SPEC, entries, errors);
+  const name = 'Continue.dev Config';
+  await readSingleFile(continueConfig, name, CONTINUE_SPEC, followFileLinks, entries, errors);
 }
 
 async function detectProjectClaudeConfigs(
   projectRoot: string,
+  policy: LinkPolicy,
   entries: VaultEntry[],
   errors: ParseError[],
 ): Promise<void> {
   const rootClaudeMd = join(projectRoot, 'CLAUDE.md');
   const claudeDir = join(projectRoot, '.claude');
+  const name = 'Project CLAUDE.md';
 
   await Promise.all([
-    readSingleFile(rootClaudeMd, 'Project CLAUDE.md', CLAUDE_PROJECT_SPEC, entries, errors),
-    readMarkdownDir(claudeDir, CLAUDE_PROJECT_SPEC, entries, errors),
+    readSingleFile(rootClaudeMd, name, CLAUDE_PROJECT_SPEC, policy, entries, errors),
+    readMarkdownDir(claudeDir, CLAUDE_PROJECT_SPEC, policy, entries, errors),
   ]);
 }
 
+/** The project directory is untrusted: every file read must resolve inside it. */
 async function detectProjectConfigs(projectRoot: string): Promise<ParserResult> {
   const entries: VaultEntry[] = [];
   const errors: ParseError[] = [];
+  const policy = containedIn(projectRoot);
 
   await Promise.all([
-    detectCursorConfigs(projectRoot, entries, errors),
-    detectCopilotConfigs(projectRoot, entries, errors),
-    detectWindsurfConfigs(projectRoot, entries, errors),
-    detectProjectAiderConfig(projectRoot, entries, errors),
-    detectProjectClaudeConfigs(projectRoot, entries, errors),
+    detectCursorConfigs(projectRoot, policy, entries, errors),
+    detectCopilotConfigs(projectRoot, policy, entries, errors),
+    detectWindsurfConfigs(projectRoot, policy, entries, errors),
+    detectProjectAiderConfig(projectRoot, policy, entries, errors),
+    detectProjectClaudeConfigs(projectRoot, policy, entries, errors),
   ]);
 
   return { entries, errors };

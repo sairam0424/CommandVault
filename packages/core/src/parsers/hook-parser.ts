@@ -2,7 +2,8 @@ import { realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import type { VaultEntry, ParserResult, ParseError } from '../types/index.js';
 import { generateStableId, getLastModified, safePath } from './utils.js';
-import { FileTooLargeError, readBoundedText, skippedTooLarge } from './bounded-read.js';
+import { SkippedFileError, readBoundedText, skippedFile } from './bounded-read.js';
+import { readContainedText } from './link-policy.js';
 
 interface HookDefinition {
   readonly type?: string;
@@ -84,10 +85,10 @@ async function buildHookEntry(
   const validatedPath = await findContainedScript(scriptPath, roots);
   if (validatedPath) {
     try {
-      content = await readBoundedText(validatedPath);
+      content = await readContainedText(validatedPath, roots);
       lastModified = await getLastModified(validatedPath);
     } catch (err) {
-      if (err instanceof FileTooLargeError) warnings.push(skippedTooLarge(err, 'hook script'));
+      if (err instanceof SkippedFileError) warnings.push(skippedFile(err, 'hook script'));
       content = `// Script at: ${scriptPath}`;
     }
   } else {
@@ -150,8 +151,8 @@ export async function parseHooks(
   try {
     settings = JSON.parse(await readBoundedText(settingsPath));
   } catch (err) {
-    if (err instanceof FileTooLargeError) {
-      return { entries: [], errors: [skippedTooLarge(err, 'settings file')] };
+    if (err instanceof SkippedFileError) {
+      return { entries: [], errors: [skippedFile(err, 'settings file')] };
     }
     const message =
       err instanceof SyntaxError

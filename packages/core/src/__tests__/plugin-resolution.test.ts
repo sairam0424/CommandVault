@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { parsePlugins } from '../parsers/plugin-parser.js';
-import { skippedTooLarge, FileTooLargeError } from '../parsers/bounded-read.js';
+import { skippedFile, FileTooLargeError } from '../parsers/bounded-read.js';
 import { MAX_PARSE_FILE_BYTES } from '../constants.js';
 
 const MARKETPLACE = 'acme-market';
@@ -178,7 +178,7 @@ describe('plugin without a manifest', () => {
 
     const { entries, errors } = await parsePlugins(pluginsDir);
 
-    const expected = skippedTooLarge(
+    const expected = skippedFile(
       new FileTooLargeError(marketplaceFile, MAX_PARSE_FILE_BYTES + 1, MAX_PARSE_FILE_BYTES),
       'marketplace file',
     );
