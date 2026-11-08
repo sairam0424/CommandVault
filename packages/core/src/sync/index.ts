@@ -7,6 +7,7 @@ import type {
   EntrySource,
 } from '../types/index.js';
 import { generateId } from '../parsers/utils.js';
+import { assertRemoteUrl, SafeFetchError, safeFetchText } from '../net/safe-fetch.js';
 
 const VALID_TYPES: ReadonlySet<string> = new Set<EntryType>([
   'skill',
@@ -32,41 +33,31 @@ const VALID_SOURCES: ReadonlySet<string> = new Set<EntrySource>([
   'continue',
 ]);
 
+/** Throws {@link SafeFetchError} unless `url` may be fetched; the policy lives in `net/`. */
 export function validateUrl(url: string): void {
-  const parsed = new URL(url);
-  if (parsed.protocol !== 'https:') {
-    throw new Error('Only HTTPS URLs are supported');
-  }
-  const hostname = parsed.hostname;
-
-  const blockedPatterns = [
-    /^localhost$/i,
-    /^127\./,
-    /^10\./,
-    /^172\.(1[6-9]|2\d|3[01])\./,
-    /^192\.168\./,
-    /^169\.254\./,
-    /^0\./,
-    /^\[::1\]$/,
-    /^\[fe80:/i,
-  ];
-
-  if (blockedPatterns.some((p) => p.test(hostname))) {
-    throw new Error(`Blocked: private/internal URL ${hostname}`);
-  }
-
-  const ipv4FromMapped = extractIPv4FromMappedIPv6(hostname);
-  if (ipv4FromMapped && blockedPatterns.some((p) => p.test(ipv4FromMapped))) {
-    throw new Error(`Blocked: private/internal URL ${hostname}`);
-  }
+  assertRemoteUrl(url);
 }
 
-function extractIPv4FromMappedIPv6(hostname: string): string | null {
-  const match = hostname.match(/^\[::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})\]$/i);
-  if (!match) return null;
-  const hi = parseInt(match[1], 16);
-  const lo = parseInt(match[2], 16);
-  return `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+export interface ImportFromUrlOptions {
+  /** Hosts whose private addresses the user accepts (config.json `allowPrivateHosts`). */
+  readonly allowPrivateHosts?: readonly string[];
+}
+
+/** The one line a failed fetch becomes; nothing the remote end sent is in it. */
+function describeFetchFailure(err: unknown): string {
+  if (!(err instanceof SafeFetchError)) {
+    return `Fetch failed: ${(err as Error).message}`;
+  }
+  switch (err.code) {
+    case 'invalid_url':
+      return `URL validation failed: ${err.message}`;
+    case 'headers_timeout':
+    case 'idle_timeout':
+    case 'total_timeout':
+      return `Request timed out (${err.message})`;
+    default:
+      return err.message;
+  }
 }
 
 export interface VaultExportBundle {
@@ -205,99 +196,72 @@ export async function importFromFile(filePath: string): Promise<ParserResult> {
   return { entries, errors };
 }
 
-export async function importFromUrl(url: string): Promise<ParserResult> {
+/** JSON.parse yields any value; only a non-null object has fields to read. */
+function isObject<T>(value: T): value is T & object {
+  return typeof value === 'object' && value !== null;
+}
+
+export async function importFromUrl(
+  url: string,
+  options: ImportFromUrlOptions = {},
+): Promise<ParserResult> {
+  let text: string;
   try {
-    validateUrl(url);
+    ({ text } = await safeFetchText(url, { allowPrivateHosts: options.allowPrivateHosts }));
   } catch (err) {
     return {
       entries: [],
-      errors: [{ filePath: url, message: `URL validation failed: ${(err as Error).message}` }],
+      errors: [{ filePath: url, message: describeFetchFailure(err) }],
     };
   }
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15_000);
-
+  let bundle: VaultExportBundle;
   try {
-    const response = await fetch(url, { signal: controller.signal, redirect: 'error' });
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      return {
-        entries: [],
-        errors: [{ filePath: url, message: `HTTP ${response.status}: ${response.statusText}` }],
-      };
-    }
-
-    const MAX_RESPONSE_SIZE = 10 * 1024 * 1024;
-    const contentLength = response.headers.get('content-length');
-    if (contentLength && parseInt(contentLength, 10) > MAX_RESPONSE_SIZE) {
-      return {
-        entries: [],
-        errors: [{ filePath: url, message: 'Response too large (max 10MB)' }],
-      };
-    }
-
-    const text = await response.text();
-    if (text.length > MAX_RESPONSE_SIZE) {
-      return {
-        entries: [],
-        errors: [{ filePath: url, message: 'Response exceeds 10MB limit' }],
-      };
-    }
-
-    const tempPath = `remote:${url}`;
-
-    let bundle: VaultExportBundle;
-    try {
-      bundle = JSON.parse(text);
-    } catch {
-      return {
-        entries: [],
-        errors: [{ filePath: url, message: 'Remote response is not valid JSON' }],
-      };
-    }
-
-    if (!bundle.version || !Array.isArray(bundle.entries)) {
-      return {
-        entries: [],
-        errors: [{ filePath: url, message: 'Remote response is not a valid CommandVault bundle' }],
-      };
-    }
-
-    const validEntries = bundle.entries.filter((e) => e.name && e.type && VALID_TYPES.has(e.type));
-
-    const entries: VaultEntry[] = validEntries.map((exported) => ({
-      id: generateId(`sync:${url}:${exported.name}`),
-      name: exported.name,
-      type: exported.type as EntryType,
-      source: (VALID_SOURCES.has(exported.source) ? exported.source : 'community') as EntrySource,
-      description: exported.description ?? '',
-      filePath: `synced:${url}`,
-      tags: [...(exported.tags ?? []), 'synced', `from:${new URL(url).hostname}`],
-      metadata: {
-        ...(exported.metadata ?? {}),
-        syncedFrom: url,
-        syncedAt: new Date().toISOString(),
-      },
-      content: exported.content ?? '',
-      lastModified: new Date(),
-      favorite: false,
-      usageCount: 0,
-    }));
-
-    return { entries, errors: [] };
-  } catch (err) {
-    clearTimeout(timeoutId);
-    if (err instanceof Error && err.name === 'AbortError') {
-      return {
-        entries: [],
-        errors: [{ filePath: url, message: 'Request timed out (15s)' }],
-      };
-    }
+    bundle = JSON.parse(text);
+  } catch {
     return {
       entries: [],
-      errors: [{ filePath: url, message: `Fetch failed: ${(err as Error).message}` }],
+      errors: [{ filePath: url, message: 'Remote response is not valid JSON' }],
     };
   }
+
+  // Any JSON value parses: `null` and non-objects have no fields to read, and a `null` entry
+  // has no name. Both stay a ParserResult error or a skipped entry, never a thrown TypeError.
+  if (!isObject(bundle) || !bundle.version || !Array.isArray(bundle.entries)) {
+    return {
+      entries: [],
+      errors: [{ filePath: url, message: 'Remote response is not a valid CommandVault bundle' }],
+    };
+  }
+
+  const validEntries = bundle.entries.filter(
+    (e) => isObject(e) && e.name && e.type && VALID_TYPES.has(e.type),
+  );
+
+  const entries: VaultEntry[] = validEntries.map((exported) => ({
+    id: generateId(`sync:${url}:${exported.name}`),
+    name: exported.name,
+    type: exported.type as EntryType,
+    source: (VALID_SOURCES.has(exported.source) ? exported.source : 'community') as EntrySource,
+    description: exported.description ?? '',
+    filePath: `synced:${url}`,
+    // Only an array may be spread: an object, number or boolean would throw a TypeError out of
+    // this function (breaking the ParserResult contract) and a string would become its characters.
+    tags: [
+      ...(Array.isArray(exported.tags) ? exported.tags : []),
+      'synced',
+      `from:${new URL(url).hostname}`,
+    ],
+    metadata: {
+      ...(exported.metadata ?? {}),
+      syncedFrom: url,
+      syncedAt: new Date().toISOString(),
+    },
+    content: exported.content ?? '',
+    lastModified: new Date(),
+    favorite: false,
+    usageCount: 0,
+  }));
+
+  return { entries, errors: [] };
 }

@@ -74,6 +74,11 @@ export interface Sandbox {
    */
   run(args: readonly string[], env?: Readonly<Record<string, string | undefined>>): RunResult;
   /**
+   * `run` without blocking the test's own event loop. Required when the test process serves the
+   * CLI (an in-process TLS fixture): under `spawnSync` that server could never accept or answer.
+   */
+  runAsync(args: readonly string[], env?: Readonly<Record<string, string>>): Promise<RunResult>;
+  /**
    * Starts a long-running command and sends `signal` (SIGTERM by default) as soon as `marker`
    * shows up on stdout.
    */
@@ -195,6 +200,39 @@ function runToCompletion(
   };
 }
 
+const RUN_TIMEOUT_MS = 30_000;
+
+function runAsynchronously(
+  args: readonly string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  extraEnv: NodeJS.ProcessEnv = {},
+): Promise<RunResult> {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [CLI, ...args], { cwd, env: { ...env, ...extraEnv } });
+    child.stdin.end();
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => child.kill('SIGKILL'), RUN_TIMEOUT_MS);
+    child.stdout.on('data', (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      resolve({ args, status: null, stdout, stderr, error: error.message });
+    });
+    child.on('close', (status) => {
+      clearTimeout(timer);
+      resolve({ args, status, stdout, stderr });
+    });
+  });
+}
+
 function runUntilMarker(
   args: readonly string[],
   marker: RegExp,
@@ -291,6 +329,7 @@ export function createSandbox(options: SandboxOptions = {}): Sandbox {
     editorStub,
     env: definedVariables(env),
     run: (args, overrides) => runToCompletion(args, workDir, env, overrides),
+    runAsync: (args, overrides) => runAsynchronously(args, workDir, env, overrides),
     runUntil: (args, marker, timeoutMs, signal = 'SIGTERM') =>
       runUntilMarker(args, marker, timeoutMs, signal, workDir, env),
     runWithClosedStdout: (args) => runClosedStdout(args, workDir, env),

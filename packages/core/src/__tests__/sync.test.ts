@@ -10,7 +10,34 @@ import {
   type VaultExportBundle,
   type ExportedEntry,
 } from '../sync/index.js';
+import { safeFetchText, SafeFetchError, type SafeFetchCode } from '../net/safe-fetch.js';
 import type { VaultEntry } from '../types/index.js';
+
+// The network is the fetcher's business (net/safe-fetch-*.test.ts); here it is a mock that either
+// returns a body or throws one of its own errors, so the mapping into ParseError is what is tested.
+// Unscripted, it still applies the real URL policy (the check that used to be `validateUrl`).
+vi.mock('../net/safe-fetch.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../net/safe-fetch.js')>();
+  return {
+    ...actual,
+    safeFetchText: vi.fn(
+      async (url: string, options?: { allowPrivateHosts?: readonly string[] }) => {
+        actual.assertRemoteUrl(url, options);
+        throw new Error('unscripted fetch in test');
+      },
+    ),
+  };
+});
+
+const fetcher = vi.mocked(safeFetchText);
+
+function serve(text: string, status = 200): void {
+  fetcher.mockResolvedValue({ status, text });
+}
+
+function refuse(code: SafeFetchCode, message: string, status?: number): void {
+  fetcher.mockRejectedValue(new SafeFetchError(code, message, { status }));
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -374,70 +401,103 @@ describe('Sync Module', () => {
   // =========================================================================
 
   describe('importFromUrl()', () => {
-    it('successfully fetches and parses a valid remote bundle', async () => {
-      const bundle = makeValidBundle();
-      const mockResponse = new Response(JSON.stringify(bundle), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-      vi.spyOn(global, 'fetch').mockResolvedValue(mockResponse);
+    afterEach(() => {
+      fetcher.mockReset();
+    });
+
+    it('successfully fetches and parses a valid remote bundle through the fetcher', async () => {
+      serve(JSON.stringify(makeValidBundle()));
 
       const result = await importFromUrl('https://example.com/vault-bundle.json');
 
+      expect(fetcher).toHaveBeenCalledWith('https://example.com/vault-bundle.json', {
+        allowPrivateHosts: undefined,
+      });
       expect(result.errors).toHaveLength(0);
       expect(result.entries).toHaveLength(1);
       expect(result.entries[0].name).toBe('deploy-tool');
-      expect(result.entries[0].tags).toContain('synced');
-      expect(result.entries[0].tags).toContain('from:example.com');
+      expect(result.entries[0].tags).toEqual(['deploy', 'ci', 'synced', 'from:example.com']);
     });
 
-    it('returns error for non-200 HTTP responses', async () => {
-      const mockResponse = new Response('Not Found', {
-        status: 404,
-        statusText: 'Not Found',
+    it('hands the allow-list to the fetcher', async () => {
+      serve(JSON.stringify(makeValidBundle()));
+
+      await importFromUrl('https://localhost/bundle.json', { allowPrivateHosts: ['localhost'] });
+
+      expect(fetcher).toHaveBeenCalledWith('https://localhost/bundle.json', {
+        allowPrivateHosts: ['localhost'],
       });
-      vi.spyOn(global, 'fetch').mockResolvedValue(mockResponse);
+    });
+
+    it('reports a non-2xx status by number only', async () => {
+      refuse('http_status', 'HTTP 404', 404);
 
       const result = await importFromUrl('https://example.com/missing.json');
 
       expect(result.entries).toHaveLength(0);
-      expect(result.errors).toHaveLength(1);
-      expect(result.errors[0].message).toContain('HTTP 404');
+      expect(result.errors).toEqual([
+        { filePath: 'https://example.com/missing.json', message: 'HTTP 404' },
+      ]);
     });
 
-    it('rejects responses over size limit (content-length header)', async () => {
-      const mockResponse = new Response('', {
-        status: 200,
-        headers: { 'content-length': String(11 * 1024 * 1024) }, // 11MB
-      });
-      vi.spyOn(global, 'fetch').mockResolvedValue(mockResponse);
+    it('reports an oversized response with the cap', async () => {
+      refuse('too_large', 'Response exceeds 10 MiB');
 
       const result = await importFromUrl('https://example.com/huge.json');
 
       expect(result.entries).toHaveLength(0);
-      expect(result.errors[0].message).toContain('too large');
+      expect(result.errors[0].message).toBe('Response exceeds 10 MiB');
     });
 
-    it('rejects responses over size limit (body exceeds 10MB)', async () => {
-      const hugeText = 'x'.repeat(11 * 1024 * 1024);
-      const mockResponse = new Response(hugeText, {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-      vi.spyOn(global, 'fetch').mockResolvedValue(mockResponse);
+    it.each([
+      ['headers_timeout', 'no response headers within 15 s'],
+      ['idle_timeout', 'no data for 15 s'],
+      ['total_timeout', 'response not complete within 60 s'],
+    ] as const)('maps %s to a timed-out error', async (code, reason) => {
+      refuse(code, reason);
 
-      const result = await importFromUrl('https://example.com/huge-body.json');
+      const result = await importFromUrl('https://example.com/slow.json');
 
       expect(result.entries).toHaveLength(0);
-      expect(result.errors[0].message).toContain('10MB');
+      expect(result.errors[0].message).toBe(`Request timed out (${reason})`);
+    });
+
+    it('keeps a blocked host as the fetcher words it', async () => {
+      refuse(
+        'blocked_host',
+        'Blocked: private/internal URL "evil.test" resolves to 127.0.0.1; to allow it add the host to the allowPrivateHosts config key',
+      );
+
+      const result = await importFromUrl('https://evil.test/bundle.json');
+
+      expect(result.errors[0].message).toMatch(/^Blocked: private\/internal URL "evil.test"/);
+    });
+
+    it.each([
+      ['redirect', 'redirect refused (HTTP 302)'],
+      ['tls', 'TLS handshake with "example.com" failed (CERT_HAS_EXPIRED)'],
+      ['network', 'Connection to "example.com" failed (ECONNREFUSED)'],
+      ['dns', 'Cannot resolve "example.com" (ENOTFOUND)'],
+      ['unsupported_encoding', 'unsupported content-encoding (compressed responses are refused)'],
+    ] as const)('passes a %s failure through unchanged', async (code, message) => {
+      refuse(code, message);
+
+      const result = await importFromUrl('https://example.com/down.json');
+
+      expect(result.entries).toHaveLength(0);
+      expect(result.errors).toEqual([{ filePath: 'https://example.com/down.json', message }]);
+    });
+
+    it('labels an unexpected (non-fetcher) error as a fetch failure', async () => {
+      fetcher.mockRejectedValue(new Error('socket hang up'));
+
+      const result = await importFromUrl('https://example.com/down.json');
+
+      expect(result.errors[0].message).toBe('Fetch failed: socket hang up');
     });
 
     it('returns error for invalid JSON response', async () => {
-      const mockResponse = new Response('not json at all', {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-      vi.spyOn(global, 'fetch').mockResolvedValue(mockResponse);
+      serve('not json at all');
 
       const result = await importFromUrl('https://example.com/bad.json');
 
@@ -446,11 +506,7 @@ describe('Sync Module', () => {
     });
 
     it('returns error for JSON that is not a valid bundle', async () => {
-      const mockResponse = new Response(JSON.stringify({ foo: 'bar' }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-      vi.spyOn(global, 'fetch').mockResolvedValue(mockResponse);
+      serve(JSON.stringify({ foo: 'bar' }));
 
       const result = await importFromUrl('https://example.com/not-bundle.json');
 
@@ -458,26 +514,66 @@ describe('Sync Module', () => {
       expect(result.errors[0].message).toContain('not a valid CommandVault bundle');
     });
 
-    it('handles network errors gracefully', async () => {
-      vi.spyOn(global, 'fetch').mockRejectedValue(new Error('Network unreachable'));
+    it.each([
+      ['null', 'null'],
+      ['a string', JSON.stringify('just a string')],
+      ['an array', JSON.stringify([{ version: '1.0', entries: [] }])],
+    ])(
+      'returns error for a JSON body that is %s rather than a bundle object',
+      async (_shape, body) => {
+        serve(body);
 
-      const result = await importFromUrl('https://example.com/down.json');
+        const result = await importFromUrl('https://example.com/odd.json');
 
-      expect(result.entries).toHaveLength(0);
-      expect(result.errors[0].message).toContain('Fetch failed');
-      expect(result.errors[0].message).toContain('Network unreachable');
+        expect(result.entries).toHaveLength(0);
+        expect(result.errors).toEqual([
+          {
+            filePath: 'https://example.com/odd.json',
+            message: 'Remote response is not a valid CommandVault bundle',
+          },
+        ]);
+      },
+    );
+
+    it('skips a null entry in a remote bundle instead of throwing', async () => {
+      serve(
+        JSON.stringify({
+          version: '1.0',
+          entries: [null, 'text', { name: 'kept', type: 'skill', source: 'community' }],
+        }),
+      );
+
+      const result = await importFromUrl('https://example.com/null-entry.json');
+
+      expect(result.errors).toHaveLength(0);
+      expect(result.entries.map((entry) => entry.name)).toEqual(['kept']);
     });
 
-    it('handles abort/timeout errors', async () => {
-      const abortError = new Error('The operation was aborted');
-      abortError.name = 'AbortError';
-      vi.spyOn(global, 'fetch').mockRejectedValue(abortError);
+    // `tags` is spread into the entry's tag list; only an array may be spread. An object, number or
+    // boolean used to throw a TypeError out of importFromUrl (breaking the ParserResult contract),
+    // and a string would have been split into its characters.
+    it.each([
+      ['an object', {}],
+      ['a number', 7],
+      ['a boolean', true],
+      ['a string', 'abc'],
+    ])(
+      'keeps an entry whose tags field is %s, without its tags and without throwing',
+      async (_shape, tags) => {
+        serve(
+          JSON.stringify({
+            version: '1.0',
+            entries: [{ name: 'odd-tags', type: 'skill', source: 'community', tags }],
+          }),
+        );
 
-      const result = await importFromUrl('https://example.com/slow.json');
+        const result = await importFromUrl('https://example.com/odd-tags.json');
 
-      expect(result.entries).toHaveLength(0);
-      expect(result.errors[0].message).toContain('timed out');
-    });
+        expect(result.errors).toHaveLength(0);
+        expect(result.entries).toHaveLength(1);
+        expect(result.entries[0].tags).toEqual(['synced', 'from:example.com']);
+      },
+    );
 
     it('filters out entries with invalid types from remote bundle', async () => {
       const bundle = makeValidBundle({
@@ -502,11 +598,7 @@ describe('Sync Module', () => {
           },
         ],
       });
-      const mockResponse = new Response(JSON.stringify(bundle), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-      vi.spyOn(global, 'fetch').mockResolvedValue(mockResponse);
+      serve(JSON.stringify(bundle));
 
       const result = await importFromUrl('https://example.com/mixed.json');
 
@@ -528,11 +620,7 @@ describe('Sync Module', () => {
           },
         ],
       });
-      const mockResponse = new Response(JSON.stringify(bundle), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-      vi.spyOn(global, 'fetch').mockResolvedValue(mockResponse);
+      serve(JSON.stringify(bundle));
 
       const result = await importFromUrl('https://example.com/ext.json');
 

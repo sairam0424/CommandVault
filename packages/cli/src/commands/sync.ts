@@ -10,6 +10,8 @@ import {
 import { createSpinner } from '../ui/spinner.js';
 import { usageError, CommandError } from '../errors.js';
 import { safeText, toDisplay } from '../ui/safe-text.js';
+import { readConfigDocument } from '../config.js';
+import { allowPrivateHostsOf } from './registry.js';
 
 export function createSyncCommand(): Command {
   const cmd = new Command('sync')
@@ -19,15 +21,16 @@ export function createSyncCommand(): Command {
     .action(async (url: string, opts: { dryRun?: boolean }, command) => {
       const globalOpts = command.optsWithGlobals() as CliGlobalOptions;
 
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      if (!url.startsWith('https://')) {
         throw usageError(
-          'URL must start with http:// or https://',
+          'URL must start with https://',
           'for local files, use: vault import <file>',
         );
       }
 
+      const allowPrivateHosts = allowPrivateHostsOf(await readConfigDocument());
       const spinner = globalOpts.json ? null : createSpinner(`Fetching from ${url}...`).start();
-      const result = await importFromUrl(url);
+      const result = await importFromUrl(url, { allowPrivateHosts });
 
       const failed = result.errors.some((problem) => getParseSeverity(problem) === 'error');
       if (failed) {

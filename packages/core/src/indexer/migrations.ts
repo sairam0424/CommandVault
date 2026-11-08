@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readdirSync, renameSync, rmdirSync, unlinkSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
+import { corePackageVersion } from '../package-version.js';
 import type { DatabaseAdapter } from './database-adapter.js';
 import { MigrationBackupError, SchemaTooNewError, errorCode, errorMessage } from './db-errors.js';
 import { orWhenMissing } from './quarantine-fs.js';
@@ -81,22 +81,6 @@ const UNFINISHED_BACKUP_FILE = /^pre-migrate-v\d+-\d{8}T\d{9}Z(?:-\d+)?\.db\.par
 
 function stableId(type: string, name: string, source: string): string {
   return createHash('sha256').update(`${type}:${name}:${source}`).digest('hex').slice(0, 12);
-}
-
-/**
- * The package version, recorded as the writer of the file. Informational: a bundler that emits
- * CommonJS (the VS Code extension) has no `import.meta.url`, and then no writer is recorded.
- */
-function corePackageVersion(): string | undefined {
-  const moduleUrl: unknown = import.meta.url;
-  if (typeof moduleUrl !== 'string') return undefined;
-  try {
-    const manifest = createRequire(moduleUrl)('../../package.json') as { version?: unknown };
-    return typeof manifest.version === 'string' ? manifest.version : undefined;
-  } catch {
-    // Not running from a package layout; the writer is only recorded for people reading the file.
-    return undefined;
-  }
 }
 
 function addEntryTags(conn: DatabaseAdapter): void {

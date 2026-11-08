@@ -149,6 +149,37 @@ describe('Security', () => {
 
     it('allows legitimate public HTTPS URLs', () => {
       expect(() => validateUrl('https://registry.commandvault.dev/entries.json')).not.toThrow();
+      expect(() => validateUrl('https://93.184.216.34/entries.json')).not.toThrow();
+    });
+
+    // Literals the old hostname regex let through: judged after WHATWG normalisation, so every
+    // spelling of a loopback address is the same address.
+    it.each([
+      'https://[::]/',
+      'https://[::ffff:7f00:1]/',
+      'https://0x7f.1/',
+      'https://2130706433/',
+      'https://127.1/',
+      'https://0/',
+      'https://100.100.100.200/',
+      'https://192.0.0.1/',
+      'https://198.18.0.1/',
+      'https://224.0.0.1/',
+      'https://255.255.255.255/',
+      'https://[fd00:ec2::254]/',
+      'https://[fe80::1]/',
+      'https://[ff02::1]/',
+      'https://[64:ff9b::7f00:1]/',
+      'https://[2002:7f00:1::]/',
+      'https://localhost./',
+      'https://LOCALHOST/',
+      'https://foo.localhost/',
+    ])('blocks %s', (url) => {
+      expect(() => validateUrl(url)).toThrow(/^Blocked: private\/internal URL/);
+    });
+
+    it('rejects credentials in the URL', () => {
+      expect(() => validateUrl('https://user:pw@example.com/')).toThrow(/username or password/);
     });
 
     it('rejects non-HTTPS URLs', () => {

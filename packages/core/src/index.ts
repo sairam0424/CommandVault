@@ -32,7 +32,19 @@ export type {
 } from './indexer/backup-restore.js';
 export { VaultWatcher } from './watcher/index.js';
 export { exportEntries, exportToFile, importFromFile, importFromUrl } from './sync/index.js';
-export type { VaultExportBundle, ExportedEntry } from './sync/index.js';
+export type { VaultExportBundle, ExportedEntry, ImportFromUrlOptions } from './sync/index.js';
+export {
+  safeFetchText,
+  assertRemoteUrl,
+  isBlockedAddress,
+  SafeFetchError,
+} from './net/safe-fetch.js';
+export type {
+  SafeFetchCode,
+  SafeFetchOptions,
+  SafeFetchResult,
+  RemoteUrlOptions,
+} from './net/safe-fetch.js';
 export {
   parseSkills,
   parseAgents,
@@ -84,6 +96,9 @@ export type {
   RegistryAdapter,
   RegistryConfig,
   RegistryEntry,
+  RegistryFailure,
+  RegistryOptions,
+  RegistrySearchOutcome,
   RegistrySearchResult,
 } from './registry/types.js';
 export { detectStaleness, type StalenessResult } from './indexer/staleness-detector.js';

@@ -7,7 +7,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
  * Entry fields reach the terminal from third-party files, bundles and registries, and a terminal
  * obeys any escape sequence it is handed. This guard type-checks the CLI and fails on every read
  * of a text-bearing field of a tainted record (VaultEntry, SearchResult, RegistryEntry,
- * ExportedEntry, ParseError), and on every getSlashCommand/getTagsForEntry result, that does not
+ * RegistryFailure, ExportedEntry, ParseError), and on every getSlashCommand/getTagsForEntry result, that does not
  * sit inside an argument of one of the sanitising calls. It is a whole-file rule, not a
  * console.log-argument rule: info.ts prints a prebuilt array, interactive.tsx hands labels to
  * inquirer and tag.ts prints a loop variable, none of which a sink rule would see.
@@ -66,6 +66,7 @@ const TAINTED_TYPES: ReadonlySet<string> = new Set([
   'VaultEntry',
   'SearchResult',
   'RegistryEntry',
+  'RegistryFailure',
   'ExportedEntry',
   'ParseError',
 ]);

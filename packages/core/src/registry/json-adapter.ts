@@ -1,8 +1,10 @@
 import { z } from 'zod';
+import { safeFetchText } from '../net/safe-fetch.js';
 import type {
   RegistryAdapter,
   RegistryConfig,
   RegistryEntry,
+  RegistryOptions,
   RegistrySearchResult,
 } from './types.js';
 
@@ -24,12 +26,14 @@ const RegistryResponseSchema = z.union([
 
 export class JsonRegistryAdapter implements RegistryAdapter {
   readonly config: RegistryConfig;
+  private readonly options: RegistryOptions;
   private cache: readonly RegistryEntry[] | null = null;
   private cacheExpiry = 0;
   private static readonly CACHE_TTL = 5 * 60 * 1000;
 
-  constructor(config: RegistryConfig) {
+  constructor(config: RegistryConfig, options: RegistryOptions = {}) {
     this.config = config;
+    this.options = options;
   }
 
   async search(
@@ -62,19 +66,22 @@ export class JsonRegistryAdapter implements RegistryAdapter {
       return this.cache;
     }
 
-    const response = await fetch(this.config.url, {
-      signal: AbortSignal.timeout(10_000),
-      redirect: 'error',
+    const { text } = await safeFetchText(this.config.url, {
+      allowPrivateHosts: this.options.allowPrivateHosts,
     });
 
-    if (!response.ok) {
-      throw new Error(`Registry fetch failed: ${response.status} ${response.statusText}`);
+    let data: unknown;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error('Invalid registry response: not valid JSON');
     }
-
-    const data = await response.json();
     const parsed = RegistryResponseSchema.safeParse(data);
     if (!parsed.success) {
-      throw new Error(`Invalid registry response: ${parsed.error.message}`);
+      // Issue paths name our schema's keys and array indices, never the remote values.
+      const issue = parsed.error.issues[0];
+      const where = issue && issue.path.length > 0 ? ` at ${issue.path.join('.')}` : '';
+      throw new Error(`Invalid registry response: ${issue?.message ?? 'schema mismatch'}${where}`);
     }
 
     const raw = Array.isArray(parsed.data) ? parsed.data : parsed.data.entries;

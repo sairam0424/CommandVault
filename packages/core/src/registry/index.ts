@@ -3,11 +3,19 @@ import type {
   RegistryAdapter,
   RegistryConfig,
   RegistryEntry,
+  RegistryFailure,
+  RegistryOptions,
+  RegistrySearchOutcome,
   RegistrySearchResult,
 } from './types.js';
 
 export class RegistryManager {
   private readonly adapters: Map<string, RegistryAdapter> = new Map();
+  private readonly options: RegistryOptions;
+
+  constructor(options: RegistryOptions = {}) {
+    this.options = options;
+  }
 
   addRegistry(config: RegistryConfig): void {
     const adapter = this.createAdapter(config);
@@ -22,22 +30,28 @@ export class RegistryManager {
     return [...this.adapters.values()].map((a) => a.config);
   }
 
+  /**
+   * Searches every registry. A registry that fails (unreachable, refused, malformed) is reported
+   * in `failures` and never silently counted as "no results": the caller decides what an empty
+   * answer means once it knows which registries actually answered.
+   */
   async search(
     query: string,
     options?: { page?: number; limit?: number },
-  ): Promise<RegistrySearchResult> {
+  ): Promise<RegistrySearchOutcome> {
     const limit = options?.limit ?? 20;
     const page = options?.page ?? 1;
+    const adapters = [...this.adapters.values()];
 
-    const results = await Promise.all(
-      [...this.adapters.values()].map((a) =>
-        a.search(query, options).catch((): RegistrySearchResult => ({
-          entries: [],
-          total: 0,
-          page: 1,
-          pageSize: limit,
-        })),
-      ),
+    const settled = await Promise.allSettled(adapters.map((a) => a.search(query, options)));
+
+    const results = settled.flatMap((outcome) =>
+      outcome.status === 'fulfilled' ? [outcome.value] : [],
+    );
+    const failures: readonly RegistryFailure[] = settled.flatMap((outcome, index) =>
+      outcome.status === 'rejected'
+        ? [{ registry: adapters[index]?.config.name ?? '', message: describe(outcome.reason) }]
+        : [],
     );
 
     const allEntries = results.flatMap((r) => r.entries);
@@ -48,6 +62,7 @@ export class RegistryManager {
       total,
       page,
       pageSize: limit,
+      failures,
     };
   }
 
@@ -61,11 +76,15 @@ export class RegistryManager {
     switch (config.type) {
       case 'json':
       case 'api':
-        return new JsonRegistryAdapter(config);
+        return new JsonRegistryAdapter(config, this.options);
       default:
-        return new JsonRegistryAdapter(config);
+        return new JsonRegistryAdapter(config, this.options);
     }
   }
+}
+
+function describe(reason: unknown): string {
+  return reason instanceof Error ? reason.message : String(reason);
 }
 
 export { JsonRegistryAdapter } from './json-adapter.js';
@@ -73,5 +92,8 @@ export type {
   RegistryAdapter,
   RegistryConfig,
   RegistryEntry,
+  RegistryFailure,
+  RegistryOptions,
+  RegistrySearchOutcome,
   RegistrySearchResult,
 } from './types.js';
