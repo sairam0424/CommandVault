@@ -30,7 +30,7 @@ const MESSAGE_RULES: ReadonlyArray<readonly [RegExp, OpenErrorKind]> = [
 // better-sqlite3 gives that detail form the code SQLITE_CORRUPT, so the rules above never see it.
 const UNPROVEN_SCHEMA_ERROR = /^malformed database schema \([^)]*\) - /;
 
-const ABI_PATTERN = /NODE_MODULE_VERSION\s+(\d+)[\s\S]*?NODE_MODULE_VERSION\s+(\d+)/;
+const ABI_VERSION_PATTERN = /NODE_MODULE_VERSION\s+(\d+)/g;
 
 export function errorCode(error: unknown): string | undefined {
   const code = (error as { code?: unknown } | null | undefined)?.code;
@@ -219,9 +219,16 @@ export function describeCause(cause: unknown): string {
   return code === undefined ? message : `${code}: ${message}`;
 }
 
+/**
+ * The loader names the ABI it was built for and then the one it runs on. Both are read as the
+ * first two mentions, with one linear pass: a single pattern spanning both can backtrack in
+ * quadratic time on a long message that has no second mention.
+ */
 function parseAbiVersions(cause: unknown): { built: string; running: string } | undefined {
-  const match = ABI_PATTERN.exec(errorMessage(cause));
-  return match === null ? undefined : { built: match[1]!, running: match[2]! };
+  const [built, running] = errorMessage(cause).matchAll(ABI_VERSION_PATTERN);
+  return built === undefined || running === undefined
+    ? undefined
+    : { built: built[1]!, running: running[1]! };
 }
 
 /** The loader's own words, first line only: a wrong CPU type or a missing library has no ABI. */
