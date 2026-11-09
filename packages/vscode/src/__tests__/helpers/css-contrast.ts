@@ -135,6 +135,11 @@ export function contrastRatio(foreground: Rgba, background: Rgba): number {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
+/** The contrast ratio of two opaque hex colours (#rgb or #rrggbb), measured here and nowhere else. */
+export function hexContrast(foreground: string, background: string): number {
+  return contrastRatio(parseHex(foreground), parseHex(background));
+}
+
 function hexOf({ r, g, b }: Rgba): string {
   return `#${[r, g, b].map((c) => Math.round(c).toString(16).padStart(2, '0')).join('')}`;
 }
